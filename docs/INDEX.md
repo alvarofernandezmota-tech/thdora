@@ -19,7 +19,8 @@
 
 | Documento | Descripción | Ubicación |
 |-----------|-------------|----------|
-| Arquitectura general | Diagrama de capas, principios | [`docs/architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md) |
+| Arquitectura general | Diagrama de capas, principios de diseño | [`docs/architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md) |
+| **Mapa del repositorio** | **Dónde está cada cosa y para qué sirve** | [`docs/architecture/repo-map.md`](architecture/repo-map.md) |
 | ADR-001 Monorepo | Por qué un solo repo | [`docs/architecture/decisions/ADR-001-monorepo.md`](architecture/decisions/ADR-001-monorepo.md) |
 | ADR-002 ABC Interfaces | Por qué interfaces abstractas | [`docs/architecture/decisions/ADR-002-abc-interfaces.md`](architecture/decisions/ADR-002-abc-interfaces.md) |
 | ADR-003 JSON Persistence | Por qué JSON como primera persistencia | [`docs/architecture/decisions/ADR-003-json-persistence.md`](architecture/decisions/ADR-003-json-persistence.md) |
@@ -31,7 +32,7 @@
 
 | Documento | Descripción | Ubicación |
 |-----------|-------------|----------|
-| core | Interfaces ABC, implementaciones | [`docs/modules/core.md`](modules/core.md) |
+| core | Interfaces ABC, MemoryLifeManager, JsonLifeManager | [`docs/modules/core.md`](modules/core.md) |
 | api | Endpoints FastAPI | [`docs/modules/api.md`](modules/api.md) |
 
 ---
@@ -40,7 +41,7 @@
 
 | Documento | Descripción | Ubicación |
 |-----------|-------------|----------|
-| Entorno local | WSL2 + OpenClaw + Ollama + Telegram + CUDA | [`docs/setup/entorno-local.md`](setup/entorno-local.md) |
+| Entorno local | WSL2 + OpenClaw + Ollama + Telegram + CUDA + PostgreSQL (Fase 11) | [`docs/setup/entorno-local.md`](setup/entorno-local.md) |
 
 ---
 
@@ -48,16 +49,16 @@
 
 | Documento | Descripción | Ubicación |
 |-----------|-------------|----------|
-| Auditoría thea-ia | Inventario completo y plan de reutilización | [`docs/auditoria/thea-ia.md`](auditoria/thea-ia.md) |
+| Auditoría thea-ia | Inventario completo de módulos y plan de reutilización por fases | [`docs/auditoria/thea-ia.md`](auditoria/thea-ia.md) |
 
 ---
 
 ## 📅 Diarios técnicos
 
-| Fecha | Resumen | Enlace |
-|-------|---------|--------|
-| 2026-03-23 | Setup OpenClaw + Ollama + primera conversación Telegram | [`docs/diarios/2026-03-23.md`](diarios/2026-03-23.md) |
-| 2026-03-24 | Nacimiento repo thdora, arquitectura, interfaces ABC, auditoría thea-ia, ADRs 1-4 | [`docs/diarios/2026-03-24.md`](diarios/2026-03-24.md) |
+| Fecha | Horas | Resumen | Enlace |
+|-------|-------|---------|--------|
+| 2026-03-23 | ~2h | Setup OpenClaw + Ollama + primera conversación Telegram | [`docs/diarios/2026-03-23.md`](diarios/2026-03-23.md) |
+| 2026-03-24 | ~4h | Nacimiento repo thdora, arquitectura, 4 ADRs, auditoría thea-ia, repo-map, navegación completa | [`docs/diarios/2026-03-24.md`](diarios/2026-03-24.md) |
 
 ---
 
@@ -73,7 +74,10 @@
 Cada vez que se toma una decisión arquitectónica relevante que afecta al diseño del sistema. Ejemplos: elección de tecnología, patrón de diseño, estructura de datos, relación entre proyectos.
 
 ### Cuándo actualizar el diario
-Al final de cada día de trabajo en thdora. Documenta **qué** se hizo y **por qué**.
+Al final de cada día de trabajo en thdora. Documenta **qué** se hizo, **cuánto tiempo** y **por qué**.
+
+### Cuándo actualizar el repo-map
+Cada vez que se crea una carpeta nueva o cambia la responsabilidad de un módulo.
 
 ### Ecosistema completo
 
@@ -86,4 +90,4 @@ alvarofernandezmota-tech/
 
 ---
 
-_Última actualización: 24 marzo 2026_
+_Última actualización: 24 marzo 2026 — 21:51 CET_
