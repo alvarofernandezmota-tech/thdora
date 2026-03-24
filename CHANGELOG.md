@@ -7,6 +7,64 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 
 ---
 
+## [0.5.0] — 2026-03-24 (noche)
+
+### Añadido
+- `src/core/abstract_lifemanager.py` — clase base abstracta del LifeManager (subida desde ZIP Claude)
+- `src/core/memory_lifemanager.py` — implementación en memoria completa
+- `src/core/json_lifemanager.py` — implementación con persistencia JSON
+- `src/core/appointment.py` — modelo de dominio Appointment
+- `src/core/habit.py` — modelo de dominio Habit
+- `src/core/__init__impl.py` — registro de implementaciones disponibles
+- `src/api/appointments_router.py` — router FastAPI para citas
+- `src/api/habits_router.py` — router FastAPI para hábitos
+- `src/api/main.py` — entry point FastAPI actualizado con los nuevos routers
+- `tests/test_api.py` — tests de integración de la API
+- `tests/test_memory_lifemanager.py` — tests unitarios MemoryLifeManager
+- `tests/test_json_lifemanager.py` — tests unitarios JsonLifeManager
+- `docs/GIT_GUIDE.md` — guía de flujo Git para el proyecto
+
+### Infraestructura WSL2 (resuelto esta sesión)
+- WSL2 clonado correctamente en `~/projects/thdora`
+- Git identity configurada: `alvarofernandezmota-tech` / `alvarofernandezmota@gmail.com`
+- `unzip` instalado (`sudo apt install unzip`)
+- Credenciales GitHub guardadas con `credential.helper store` (PAT configurado)
+- Usuario Windows en WSL: `/mnt/c/Users/alvar/`
+
+### Contexto del día
+- Archivos generados por Claude (tareas 1-4) entregados como ZIP (`files.zip`)
+- Extraídos y organizados manualmente en las rutas correctas del repo
+- Push exitoso tras resolver conflicto con `git pull --rebase`
+- 13 archivos, 1709 líneas de código nuevas en un solo commit
+
+---
+
+## 🗓️ PRÓXIMA SESIÓN — Checklist
+
+### Antes de escribir código
+- [ ] `cd ~/projects/thdora && git pull origin main`
+- [ ] `pip install -e .` — instalar dependencias
+- [ ] `pytest tests/ -v` — verificar que los tests pasan
+
+### Limpieza y organización
+- [ ] Revisar `src/core/__init__impl.py` — nombre raro, posiblemente renombrar a `factory.py`
+- [ ] Verificar herencia: `AbstractLifeManager` → `MemoryLifeManager` → `JsonLifeManager`
+- [ ] Comprobar imports en `appointments_router.py` y `habits_router.py`
+- [ ] Eliminar `.gitkeep` de carpetas que ya tienen contenido
+
+### Desarrollo pendiente
+- [ ] `src/ai/` — vacío, pendiente capa de IA (integración Ollama/qwen2.5-coder)
+- [ ] `src/bot/` — vacío, pendiente bot Telegram
+- [ ] `.env.example` — variables de entorno documentadas
+- [ ] GitHub Actions CI — ejecutar pytest automáticamente en cada PR
+- [ ] Docker — verificar que `docker-compose up` levanta correctamente
+
+### Documentación
+- [ ] Actualizar `README.md` con estado real (qué funciona, qué no)
+- [ ] Crear `docs/diarios/2026-03-24-noche.md` con el detalle técnico de esta sesión
+
+---
+
 ## [0.4.0] — 2026-03-24
 
 ### Añadido
@@ -63,4 +121,4 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 
 ---
 
-_Última actualización: 24 marzo 2026_
+_Última actualización: 24 marzo 2026 — 22:55 CET_
