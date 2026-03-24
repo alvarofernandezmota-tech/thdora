@@ -1,116 +1,103 @@
-# THDORA Bot 📅
+# THDORA 🤖
 
-> **Sistema de gestión de citas con arquitectura modular profesional**
-
-Módulo Python del ecosistema THEA IA que implementa gestión completa de tiempo y productividad mediante arquitectura de 3 capas, separación de responsabilidades y principios SOLID.
+> **Ecosistema de gestión personal con IA local**  
+> Bot Telegram + FastAPI + Ollama (mistral-nemo:12b) + AppointmentManager
 
 [![Python 3.13](https://img.shields.io/badge/Python-3.13-blue.svg)](https://www.python.org/downloads/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green.svg)](https://fastapi.tiangolo.com/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Status: Active Development](https://img.shields.io/badge/Status-Active%20Development-green.svg)](https://github.com/alvarofernandezmota-tech/thdora)
-[![Part of THEA IA](https://img.shields.io/badge/Part%20of-THEA%20IA-purple.svg)](https://github.com/alvarofernandezmota-tech)
+[![Status: Active Development](https://img.shields.io/badge/Status-Active%20Development-orange.svg)]()
+[![Part of THEA IA](https://img.shields.io/badge/Part%20of-THEA%20IA-purple.svg)]()
 
 ---
 
-## 🌟 Contexto del Proyecto
+## 🌟 ¿Qué es THDORA?
 
-THDORA Bot es un componente del **proyecto THEA IA** — sistema completo de automatización e inteligencia artificial para gestión personal. Este módulo implementa la capa de gestión de tiempo y citas, diseñado como:
+THDORA es un **asistente personal con IA local** que combina:
 
-- **Microservicio independiente:** Arquitectura desacoplada para integración futura
-- **Prototipo funcional:** Validación de conceptos antes de integración con THEA IA
-- **Base escalable:** Preparado para migración a API REST + Bot Telegram + Ollama local
-
-### Stack objetivo
-
-```
-THDORA
-  ├── FastAPI          ← API REST
-  ├── Bot Telegram     ← Interfaz móvil
-  ├── Ollama local     ← IA local (mistral-nemo:12b)
-  │     └── GTX 1060 6GB VRAM + 6GB RAM
-  └── AppointmentManager ← Core de citas
-```
+- 📅 **Gestión de citas y hábitos** — AppointmentManager integrado
+- 🤖 **IA privada local** — Ollama + mistral-nemo:12b, sin costes, sin enviar datos a terceros
+- 📱 **Bot Telegram** — acceso desde cualquier dispositivo
+- ⚡ **API REST** — FastAPI para integración con otros sistemas
+- 📓 **Diario personal** — tracking de sesiones y decisiones
 
 ---
 
-## 🏗️ Arquitectura actual (v1.0)
-
-### Diseño de 3 capas
-
-```
-┌─────────────────────────────────────────┐
-│  PRESENTATION LAYER (UI)                │
-│  thdora_bot.py                          │
-│  - Interfaz CLI interactiva             │
-└─────────────────┬───────────────────────┘
-                  ↓
-┌─────────────────────────────────────────┐
-│  BUSINESS LOGIC LAYER                   │
-│  thdora_functions.py                    │
-│  - Operaciones CRUD                     │
-└─────────────────┬───────────────────────┘
-                  ↓
-┌─────────────────────────────────────────┐
-│  DATA LAYER                             │
-│  thdora_data.py                         │
-│  - Estructura de datos centralizada     │
-└─────────────────────────────────────────┘
-```
-
----
-
-## ⚡ Estado actual
-
-| Fase | Descripción | Estado |
-|------|-------------|--------|
-| Fase 1 | CRUD completo | ✅ 100% |
-| Fase 2 | Bot CLI interactivo | ✅ 100% |
-| Fase 3 | Arquitectura modular | ✅ 100% |
-| Fase 4 | Persistencia JSON | 🔄 25% |
-| Fase 5 | Tests unitarios | ⏳ |
-| Fase 6 | Logging y errores | ⏳ |
-| Fase 7 | FastAPI REST | ⏳ |
-| Fase 8 | Bot Telegram | ⏳ |
-| Fase 9 | Ollama IA local | ⏳ |
-
----
-
-## 🚀 Instalación
-
-```bash
-git clone https://github.com/alvarofernandezmota-tech/thdora.git
-cd thdora
-python src/thdora_bot.py
-```
-
----
-
-## 📁 Estructura
+## 🏗️ Arquitectura
 
 ```
 thdora/
 ├── src/
-│   ├── thdora_data.py         # Capa de datos
-│   ├── thdora_functions.py    # Lógica de negocio
-│   └── thdora_bot.py          # Presentación CLI
-├── docs/                      # Documentación técnica
-├── datos/                     # JSON persistencia
-├── ROADMAP.md                 # Plan completo
-└── README.md                  # Este archivo
+│   ├── core/           ← Lógica de negocio central
+│   │   ├── interfaces/  ← Contratos abstractos (ABC)
+│   │   └── impl/        ← Implementaciones concretas
+│   ├── api/            ← FastAPI endpoints
+│   ├── bot/            ← Bot Telegram
+│   └── ai/             ← Ollama + fine-tuning
+├── tests/
+│   ├── unit/
+│   ├── integration/
+│   └── e2e/
+├── docs/
+│   ├── architecture/   ← Diagramas y decisiones (ADR)
+│   ├── api/            ← Documentación de cada endpoint
+│   ├── modules/        ← Documentación de cada módulo
+│   └── diarios/        ← Diario de desarrollo
+├── .github/
+│   └── workflows/      ← CI/CD GitHub Actions
+├── docker/             ← Docker + Compose
+├── datos/              ← Persistencia JSON local
+├── pyproject.toml
+├── Makefile
+├── ROADMAP.md
+└── CHANGELOG.md
 ```
 
 ---
 
-## 🔗 Roadmap completo
+## 🚀 Instalación rápida
 
-Ver [ROADMAP.md](./ROADMAP.md) para el plan completo de desarrollo.
+```bash
+git clone https://github.com/alvarofernandezmota-tech/thdora.git
+cd thdora
+python -m venv .venv && source .venv/bin/activate
+pip install -e .
+
+# Ejecutar bot CLI
+python src/core/bot/thdora_bot.py
+
+# Ejecutar API
+uvicorn src.api.main:app --reload
+```
+
+---
+
+## 📊 Estado del proyecto
+
+| Módulo | Estado | Descripción |
+|--------|--------|-------------|
+| `core/interfaces` | ✅ v1.0 | Contratos ABC |
+| `core/impl` | ✅ v1.0 | MemoryLifeManager |
+| `core/bot` | ✅ v1.0 | CLI interactivo |
+| `api` | ⏳ v0.1 | FastAPI esqueleto |
+| `bot` | ⏳ pendiente | Telegram |
+| `ai` | ⏳ pendiente | Ollama local |
+
+---
+
+## 📖 Documentación
+
+- [Arquitectura del sistema](docs/architecture/ARCHITECTURE.md)
+- [Decisiones técnicas (ADR)](docs/architecture/decisions/)
+- [Módulo core](docs/modules/core.md)
+- [Módulo API](docs/modules/api.md)
+- [Diario de desarrollo](docs/diarios/)
+- [ROADMAP](ROADMAP.md)
+- [CHANGELOG](CHANGELOG.md)
 
 ---
 
 ## ✍️ Autor
 
-**Álvaro Fernández Mota**  
-[@alvarofernandezmota-tech](https://github.com/alvarofernandezmota-tech)  
-Metodología: EscuelaMusk — *"Aprende construyendo sistemas reales."*
-
----
-_Migrado desde repo personal → repo independiente: 24 marzo 2026_
+**Álvaro Fernández Mota** — [@alvarofernandezmota-tech](https://github.com/alvarofernandezmota-tech)  
+Metodología EscuelaMusk — *"Aprende construyendo sistemas reales."*

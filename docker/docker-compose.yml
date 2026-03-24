@@ -1,0 +1,28 @@
+# THDORA — Docker Compose
+# Fase 10: orquestación de servicios
+
+version: "3.9"
+
+services:
+  thdora-api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    ports:
+      - "8000:8000"
+    volumes:
+      - ../datos:/app/datos
+    environment:
+      - PYTHONPATH=/app
+    restart: unless-stopped
+
+  # Fase 8: Ollama (ejecutar en host con GPU, no en Docker)
+  # ollama:
+  #   image: ollama/ollama
+  #   ports:
+  #     - "11434:11434"
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - capabilities: [gpu]
