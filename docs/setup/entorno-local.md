@@ -6,12 +6,32 @@
 
 ---
 
-## Prerequisitos Windows
+## 0. Hardware de la máquina de desarrollo
 
-- Windows 11 con WSL2 habilitado
-- VSCode instalado en Windows
-- Extensión **WSL** de Microsoft instalada en VSCode
-- Cuenta GitHub con token fine-grained configurado
+| Componente | Especificación | Relevancia para IA |
+|-----------|---------------|-------------------|
+| **CPU** | Intel i5-8400 (6 núcleos, sin NPU) | Fallback si GPU no disponible |
+| **RAM** | 16 GB | Límite para modelos >7B en CPU |
+| **GPU** | NVIDIA GTX 1060 — **6 GB VRAM** | ✅ Soporta CUDA (Compute Capability 6.1) |
+| **SO** | Windows 11 + WSL2 + Ubuntu 22.04 | CUDA disponible via WSL2 |
+
+### Modelos que caben en la GTX 1060 (6GB VRAM)
+
+| Modelo | VRAM necesaria | Para qué sirve | Estado |
+|--------|---------------|----------------|--------|
+| `qwen2.5-coder:7b` | ~4.7 GB | ✅ Código, repos, OpenClaw | **Modelo principal** |
+| `llama3.2:8b` | ~4.7 GB | General, conversación | Opcional |
+| `phi3.5:3.8b` | ~2.3 GB | Tareas rápidas, respuestas cortas | Opcional futuro |
+| `qwen2.5:14b` | ~9 GB | ❌ No cabe entero en VRAM | Descartado |
+
+### Rendimiento esperado
+
+| Backend | Primera respuesta | Respuestas siguientes |
+|---------|------------------|----------------------|
+| **CPU pura** (sin CUDA) | 30–60 segundos | 10–20 segundos |
+| **GPU con CUDA** ✅ | 5–15 segundos | 2–5 segundos |
+
+> **⚠️ Problema detectado (24 marzo 2026):** Ollama corre en CPU pura porque CUDA no está activado en WSL2. Ver sección 4.4 para activarlo.
 
 ---
 
@@ -160,27 +180,68 @@ ollama --version
 
 ```bash
 # Modelo principal: qwen2.5-coder:7b (~4.7GB)
-# Balance óptimo RAM/rendimiento para máquina local
 ollama pull qwen2.5-coder:7b
 
 # Verificar
 ollama list
-# Debe aparecer qwen2.5-coder:7b
 ```
 
-### 4.3 Test del modelo
+### 4.3 Verificar si usa GPU o CPU
 
 ```bash
-ollama run qwen2.5-coder:7b
-# Escribir cualquier mensaje para verificar que responde
-# Ctrl+D para salir
+# Con el modelo cargado (haz una pregunta primero), ejecutar:
+ollama ps
 ```
 
-**Por qué qwen2.5-coder:7b:**
-- 7B parámetros: cabe en RAM de máquina de desarrollo sin GPU dedicada
-- Especializado en código: mejor para tareas de programación
-- ~4.7GB descarga: manejable
-- Alternativas descartadas: modelos 13B+ (demasiada RAM), modelos genéricos (peor en código)
+Output esperado **con GPU**:
+```
+NAME                    ID              SIZE    PROCESSOR    UNTIL
+qwen2.5-coder:7b        ...             5.5 GB  100% GPU     ...
+```
+
+Output si está en **CPU pura** (problema):
+```
+NAME                    ID              SIZE    PROCESSOR    UNTIL
+qwen2.5-coder:7b        ...             5.5 GB  100% CPU     ...
+```
+
+Si dice `100% CPU` → seguir con sección 4.4.
+
+### 4.4 Activar CUDA en WSL2 (GTX 1060)
+
+**Paso 1 — Instalar drivers NVIDIA en Windows** (no en WSL):
+- Descargar desde [nvidia.com/drivers](https://www.nvidia.com/drivers)
+- Driver para GTX 1060 con soporte CUDA/WSL2
+- Instalar en Windows y reiniciar
+
+**Paso 2 — Verificar que WSL2 ve la GPU:**
+```bash
+# En WSL2 Ubuntu
+nvidia-smi
+# Debe mostrar la GTX 1060 con CUDA version
+```
+
+**Paso 3 — Instalar CUDA Toolkit en WSL2:**
+```bash
+# Añadir repositorio NVIDIA CUDA para WSL2
+wget https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb
+sudo dpkg -i cuda-keyring_1.1-1_all.deb
+sudo apt-get update
+sudo apt-get install -y cuda-toolkit-12-x
+
+# Añadir al PATH en ~/.bashrc:
+export PATH=/usr/local/cuda/bin:$PATH
+export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
+source ~/.bashrc
+```
+
+**Paso 4 — Verificar que Ollama usa GPU:**
+```bash
+ollama run qwen2.5-coder:7b
+# En otra terminal:
+ollama ps
+# Debe mostrar: 100% GPU
+```
 
 ---
 
@@ -220,7 +281,6 @@ cd ~/projects
 git clone https://github.com/alvarofernandezmota-tech/thdora.git
 cd thdora
 
-# Abrir en VSCode
 # Opción 1: desde WSL (si code está instalado)
 code .
 
@@ -231,14 +291,9 @@ code .
 ### 6.1 Instalar dependencias Python
 
 ```bash
-# Crear entorno virtual
 python3 -m venv .venv
 source .venv/bin/activate
-
-# Instalar dependencias
 pip install -e ".[dev]"
-
-# Verificar tests
 pytest tests/
 # Debe pasar los 13 tests de MemoryLifeManager
 ```
@@ -254,6 +309,7 @@ pytest tests/
 | `openclaw skills list` se corta | Gateway no arrancó con systemd | Verificar `systemctl status` y reiniciar gateway |
 | `code: command not found` | VSCode no registrado en WSL | Usar opción `\\wsl$\Ubuntu\...` desde Windows |
 | `GITHUB_TOKEN` no encontrado | Variable no exportada | Añadir `export GITHUB_TOKEN=...` al `~/.bashrc` |
+| Ollama responde en 30-60s | CUDA no activo, corre en CPU | Seguir sección 4.4 para activar CUDA |
 
 ---
 
@@ -267,12 +323,23 @@ pytest tests/
 | OpenClaw | latest | ✅ |
 | Gateway OpenClaw | 127.0.0.1:18789 | ✅ |
 | GitHub MCP skill | instalado | ✅ |
-| Ollama | latest | ✅ |
+| Ollama | 0.18.2 | ✅ |
 | Modelo qwen2.5-coder:7b | ~4.7GB | ✅ |
+| CUDA / GPU | GTX 1060 6GB | ⚠️ Pendiente activar |
 | Bot Telegram | emparejado | ✅ |
 | VSCode + extensión WSL | instalado | ✅ |
 | Repo thdora clonado | ~/projects/thdora | ✅ |
 
 ---
 
-_Creado: 24 marzo 2026 — basado en el proceso de instalación del 23 marzo 2026_
+## 9. Hoja de ruta del hardware
+
+| Horizonte | Acción | Motivo |
+|-----------|--------|--------|
+| **Ahora** | Activar CUDA en GTX 1060 | x6 velocidad sin coste |
+| **Corto plazo** | Opcional: añadir `phi3.5:3.8b` | Respuestas rápidas para tareas simples |
+| **Futuro (~500€)** | Mini PC dedicado con GPU dedicada | IA corriendo 24/7 sin ocupar el PC principal |
+
+---
+
+_Creado: 24 marzo 2026 — actualizado con contexto hardware y CUDA_
