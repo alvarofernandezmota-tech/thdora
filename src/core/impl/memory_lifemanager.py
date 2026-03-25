@@ -18,11 +18,15 @@ Cuándo NO usar:
 Próxima implementación: JsonLifeManager (Fase 5)
 """
 
+import re
 from uuid import uuid4, UUID
 from datetime import date
-from typing import List, Dict
+from typing import List, Dict, FrozenSet
 
 from src.core.interfaces.abstract_lifemanager import AbstractLifeManager
+
+_TIME_RE = re.compile(r"^([01]\d|2[0-3]):[0-5]\d$")
+VALID_TYPES: FrozenSet[str] = frozenset({"médica", "personal", "trabajo", "otra"})
 
 
 class MemoryLifeManager(AbstractLifeManager):
@@ -35,24 +39,9 @@ class MemoryLifeManager(AbstractLifeManager):
     Attributes:
         appointments (Dict[str, List[Dict]]): Citas indexadas por fecha.
         habits (Dict[str, Dict[str, str]]): Hábitos indexados por fecha.
-
-    Example::
-
-        from src.core.impl import MemoryLifeManager
-        from datetime import date
-
-        mgr = MemoryLifeManager()
-        mgr.create_appointment(date.today(), "10:00", "Médico")
-        mgr.log_habit(date.today(), "sueno", "8h")
-        print(mgr.get_day_summary(date.today()))
     """
 
     def __init__(self) -> None:
-        """
-        Inicializa los almacenes de datos en memoria.
-
-        Complejidad: O(1)
-        """
         self.appointments: Dict[str, List[Dict]] = {}
         self.habits: Dict[str, Dict[str, str]] = {}
 
@@ -60,20 +49,29 @@ class MemoryLifeManager(AbstractLifeManager):
         """
         Crea una nueva cita y la almacena en memoria.
 
-        Genera un UUID v4 único para identificar la cita.
-        Crea la lista del día si no existe.
-
         Args:
             date (date): Fecha de la cita.
-            time (str): Hora en formato HH:MM.
-            type (str): Tipo/título de la cita.
+            time (str): Hora en formato HH:MM (24h).
+            type (str): Tipo de cita: ``"médica"``, ``"personal"``, ``"trabajo"``, ``"otra"``.
             notes (str): Notas opcionales.
 
         Returns:
             UUID: Identificador único asignado a la cita.
 
-        Complejidad: O(1)
+        Raises:
+            ValueError: Si ``time`` no tiene formato HH:MM válido.
+            ValueError: Si ``type`` no es un valor permitido.
         """
+        if not _TIME_RE.match(time):
+            raise ValueError(
+                f"Formato de hora inválido: '{time}'. Se espera HH:MM (ej: '09:30', '23:00')."
+            )
+        if type not in VALID_TYPES:
+            raise ValueError(
+                f"Tipo de cita inválido: '{type}'. "
+                f"Valores permitidos: {sorted(VALID_TYPES)}"
+            )
+
         apt_id = uuid4()
         date_str = str(date)
 
@@ -90,71 +88,38 @@ class MemoryLifeManager(AbstractLifeManager):
         return apt_id
 
     def get_appointments(self, date: date) -> List[Dict]:
-        """
-        Devuelve las citas de un día.
-
-        Args:
-            date (date): Día a consultar.
-
-        Returns:
-            List[Dict]: Lista de citas. Lista vacía si no hay ninguna.
-
-        Complejidad: O(1)
-        """
         return self.appointments.get(str(date), [])
 
-    def log_habit(self, date: date, habit: str, value: str) -> bool:
+    def delete_appointment(self, date: date, index: int) -> bool:
         """
-        Registra o actualiza el valor de un hábito para un día.
+        Elimina una cita por su posición en la lista del día.
 
-        Si el hábito ya existía para ese día, sobreescribe el valor.
-
-        Args:
-            date (date): Día del registro.
-            habit (str): Nombre del hábito (ej: ``"sueno"``, ``"THC"``)
-            value (str): Valor del hábito (ej: ``"8h"``, ``"0"``)
-
-        Returns:
-            bool: Siempre ``True`` en esta implementación.
-
-        Complejidad: O(1)
+        Raises:
+            IndexError: Si ``index`` está fuera de rango o el día no tiene citas.
         """
         date_str = str(date)
+        citas = self.appointments.get(date_str, [])
 
+        if not citas or index < 0 or index >= len(citas):
+            raise IndexError(
+                f"Índice {index} fuera de rango para {date_str} "
+                f"(hay {len(citas)} cita(s))"
+            )
+
+        self.appointments[date_str].pop(index)
+        return True
+
+    def log_habit(self, date: date, habit: str, value: str) -> bool:
+        date_str = str(date)
         if date_str not in self.habits:
             self.habits[date_str] = {}
-
         self.habits[date_str][habit] = value
         return True
 
     def get_habits(self, date: date) -> Dict[str, str]:
-        """
-        Devuelve los hábitos registrados de un día.
-
-        Args:
-            date (date): Día a consultar.
-
-        Returns:
-            Dict[str, str]: Diccionario {hábito: valor}.
-                            Diccionario vacío si no hay registros.
-
-        Complejidad: O(1)
-        """
         return self.habits.get(str(date), {})
 
     def get_day_summary(self, date: date) -> Dict:
-        """
-        Devuelve el resumen completo del día: citas + hábitos.
-
-        Args:
-            date (date): Día a consultar.
-
-        Returns:
-            Dict: Resumen estructurado con claves ``date``,
-                  ``appointments`` y ``habits``.
-
-        Complejidad: O(1)
-        """
         return {
             "date": str(date),
             "appointments": self.get_appointments(date),
