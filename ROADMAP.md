@@ -1,138 +1,112 @@
 # 🗺️ THDORA — ROADMAP
 
-> **Navegación rápida:** [README](README.md) · [Índice docs](docs/INDEX.md) · [CHANGELOG](CHANGELOG.md) · [Arquitectura](docs/architecture/ARCHITECTURE.md) · [Setup entorno](docs/setup/entorno-local.md)
+> **Navegación rápida:** [README](README.md) · [Índice docs](docs/INDEX.md) · [CHANGELOG](CHANGELOG.md) · [Arquitectura](docs/architecture/ARCHITECTURE.md)
 
-## Estado: v0.4.0 — 24 marzo 2026
+## Estado: v0.6.0 — 25 marzo 2026
 
 ```
-[████████████████████████] 100% ✅ FASE 1: Interfaces abstractas (AbstractLifeManager)
-[████████████████████████] 100% ✅ FASE 2: MemoryLifeManager (CRUD en memoria)
-[████████████████████████] 100% ✅ FASE 3: Bot CLI interactivo
-[███████████████████████▀]  95% 🔄 FASE 4: Monorepo enterprise + docs exhaustivos
-[░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 5: Persistencia JSON + tests unitarios
-[░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 6: FastAPI REST
-[░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 7: Bot Telegram
-[░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 8: Ollama IA local (qwen2.5-coder:7b + CUDA)
+[████████████████████████] 100% ✅ FASE 1: Setup inicial + estructura enterprise
+[████████████████████████] 100% ✅ FASE 2: Interfaces ABC + MemoryLifeManager
+[████████████████████████] 100% ✅ FASE 3: Monorepo enterprise + docs + ADRs
+[████████████████████████] 100% ✅ FASE 4: MemoryLifeManager completo + tests unitarios
+[████████████████████████] 100% ✅ FASE 5: JsonLifeManager + persistencia + tests
+[████████████████████████] 100% ✅ FASE 6: FastAPI REST + tests integración + docs
+[░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 7: Bot Telegram ← SIGUIENTE
+[░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 8: Ollama IA local (mistral/qwen2.5 + CUDA)
 [░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 9: OpenClaw + agentes IA (migración thea-ia)
 [░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 10: CI/CD + Docker + Deploy
-[░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 11: BD real (migración SQLAlchemy de thea-ia)
+[░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 11: BD real (SQLAlchemy + Alembic)
 ```
 
 ---
 
-## ✅ FASE 1-3 — Completadas
+## ✅ FASES 1-6 — Completadas (v0.6.0)
 
-- `AbstractLifeManager` — interfaz ABC con citas + hábitos
-- `MemoryLifeManager` — implementación en memoria con UUID, 13 tests passing
-- Bot CLI interactivo con menú
+### Fase 1 — Setup
+- `pyproject.toml`, `Makefile`, `.gitignore`, estructura de directorios
 
-📚 Docs: [core.md](docs/modules/core.md)
+### Fase 2 — Core inicial
+- `AbstractLifeManager` — interfaz ABC con métodos abstractos
+- `MemoryLifeManager` — implementación en memoria
 
----
+### Fase 3 — Monorepo enterprise
+- ADR-001 Monorepo, ADR-002 ABC, ADR-003 JSON, ADR-004 thea-ia
+- `docs/INDEX.md`, setup entorno local (WSL2 + Ollama + Telegram + CUDA)
+- Auditoría thea-ia completa
 
-## 🔄 FASE 4 — Monorepo enterprise + docs (95%)
+### Fase 4 — MemoryLifeManager completo
+- Validación hora (`HH:MM`) y tipo (`VALID_TYPES`)
+- 13 tests unitarios pasando, coverage 100%
 
-- [x] Migración AppointmentManager → `src/core/`
-- [x] Estructura enterprise completa
-- [x] Documentación de interfaces y módulos
-- [x] `pyproject.toml` completo
-- [x] `Makefile` con comandos de desarrollo
-- [x] ADR-001 Monorepo
-- [x] ADR-002 ABC Interfaces
-- [x] ADR-003 JSON Persistence
-- [x] ADR-004 Relación thea-ia
-- [x] Auditoría thea-ia completa
-- [x] Setup entorno local documentado (WSL2 + OpenClaw + Ollama + Telegram + CUDA)
-- [x] README con navegación rápida
-- [x] Índice maestro de docs
-- [ ] Diario 2026-03-24 completado al cierre del día
+### Fase 5 — JsonLifeManager + persistencia
+- `src/core/impl/json_lifemanager.py` — implementado y testeado
+- `datos/thdora.json` — datos reales (en `.gitignore`)
+- 18 tests unitarios pasando, coverage 100%
 
-📚 Docs: [INDEX.md](docs/INDEX.md) · [ADRs](docs/architecture/decisions/) · [Auditoría thea-ia](docs/auditoria/thea-ia.md)
+### Fase 6 — FastAPI REST
+- 6 endpoints implementados y testeados
+- Pydantic models, dependency injection
+- 16 tests de integración pasando, coverage 100% en routers
 
----
-
-## ⏳ FASE 5 — Persistencia JSON + Tests
-
-**Objetivo:** thdora recuerda cosas entre reinicios. Primera persistencia real.
-
-- [ ] `src/core/impl/json_lifemanager.py` — `JsonLifeManager` implementado
-- [ ] `datos/thdora.json` — fichero de datos (en `.gitignore`)
-- [ ] Tests unitarios `JsonLifeManager` con pytest
-- [ ] Coverage >80%
-- [ ] Pre-commit hooks
-
-📚 Docs: [ADR-003 JSON Persistence](docs/architecture/decisions/ADR-003-json-persistence.md)  
-🔍 Referencia thea-ia: [`src/theaia/models/`](https://github.com/alvarofernandezmota-tech/thea-ia/tree/main/src/theaia/models)
+📊 Coverage total: **87%** — 57/57 tests pasando
 
 ---
 
-## ⏳ FASE 6 — FastAPI REST
-
-**Objetivo:** thdora tiene API. Cualquier cliente puede consultar citas y hábitos.
-
-- [ ] `GET /appointments/{date}` — citas del día
-- [ ] `POST /appointments` — crear cita
-- [ ] `DELETE /appointments/{id}` — eliminar
-- [ ] `GET /habits/{date}` — hábitos del día
-- [ ] `POST /habits` — registrar hábito
-- [ ] `GET /summary/{date}` — resumen del día
-- [ ] Swagger UI automático
-- [ ] Pydantic models
-
-📚 Docs: [api.md](docs/modules/api.md)  
-🔍 Referencia thea-ia: [`src/theaia/api/`](https://github.com/alvarofernandezmota-tech/thea-ia/tree/main/src/theaia/api)
-
----
-
-## ⏳ FASE 7 — Bot Telegram
+## ⏳ FASE 7 — Bot Telegram ← ACTIVA
 
 **Objetivo:** thdora accesible desde el móvil. Primer uso real del sistema.
 
-- [ ] Setup `python-telegram-bot`
-- [ ] `/citas` — ver citas del día
-- [ ] `/nueva` — crear cita (ConversationHandler)
-- [ ] `/habito` — registrar hábito
-- [ ] `/resumen` — resumen del día
-- [ ] Notificaciones automáticas 15 min antes
+### Paso previo (API)
+- [ ] `GET /summary/{date}` — añadir endpoint de resumen diario
+- [ ] Test de integración del nuevo endpoint
 
-🔍 Referencia thea-ia: [`src/theaia/adapters/telegram/`](https://github.com/alvarofernandezmota-tech/thea-ia/tree/main/src/theaia/adapters/telegram) — `bot.py` (8KB) + `telegram_adapter.py` (14KB)
+### Fase 7a — Comandos explícitos
+- [ ] Setup `python-telegram-bot` en `src/bot/`
+- [ ] `/hoy` — resumen del día (citas + hábitos)
+- [ ] `/citas` — listar citas del día
+- [ ] `/cita` — crear cita (ConversationHandler)
+- [ ] `/borrar_cita` — eliminar cita por índice
+- [ ] `/habitos` — listar hábitos del día
+- [ ] `/habito` — registrar hábito
+- [ ] `TELEGRAM_TOKEN` en `.env`
+
+### Fase 7b — Lenguaje natural básico
+- [ ] Detección de intención por regex/patrones
+- [ ] "cita médica mañana a las 10" → `/cita`
+- [ ] "dormí 7 horas" → `/habito sueno 7h`
+
+🔍 Referencia thea-ia: [`src/theaia/adapters/telegram/`](https://github.com/alvarofernandezmota-tech/thea-ia/tree/main/src/theaia/adapters/telegram)
 
 ---
 
 ## ⏳ FASE 8 — Ollama IA local
 
 **Hardware:** GTX 1060 6GB VRAM + 16GB RAM + CUDA  
-**Modelo principal:** `qwen2.5-coder:7b` (~4.7GB VRAM) — especializado en código  
-**Modelo rápido (opcional):** `phi3.5:3.8b` (~2.3GB VRAM)
+**Modelo:** `mistral-nemo:12b` o `qwen2.5-coder:7b` según VRAM disponible
 
-- [ ] Activar CUDA en WSL2 (ver [Setup entorno §4.4](docs/setup/entorno-local.md#44-activar-cuda-en-wsl2-gtx-1060))
-- [ ] Verificar `ollama ps` → `100% GPU`
+- [ ] Activar CUDA en WSL2
 - [ ] `src/ai/ollama_client.py` — cliente Ollama
-- [ ] Conectar con bot Telegram
-- [ ] Comando `/pregunta <texto>` en el bot
+- [ ] Extraer NLP engine de thea-ia
+- [ ] Conectar con bot Telegram: `/pregunta <texto>`
+- [ ] Extracción de intención + parámetros vía IA
 
-📚 Docs: [Setup entorno](docs/setup/entorno-local.md)  
 🔍 Referencia thea-ia: [`src/theaia/core/nlp_engine.py`](https://github.com/alvarofernandezmota-tech/thea-ia/blob/main/src/theaia/core/nlp_engine.py) (15KB)
 
 ---
 
 ## ⏳ FASE 9 — OpenClaw + Agentes IA
 
-**Objetivo:** thdora controla repos GitHub desde Telegram. OpenClaw integrado como agente.
+- [ ] Integrar OpenClaw gateway con el bot
+- [ ] Agente GitHub: issues, PRs, commits desde Telegram
+- [ ] Orquestador de agentes (migrar de thea-ia)
 
-- [ ] Integrar OpenClaw gateway con el bot Telegram de thdora
-- [ ] Agente GitHub: leer issues, PRs, commits desde Telegram
-- [ ] Agente thdora: gestionar citas/hábitos con lenguaje natural
-- [ ] Orquestador de agentes
-
-🔍 Referencia thea-ia: [`src/theaia/core/orchestrator.py`](https://github.com/alvarofernandezmota-tech/thea-ia/blob/main/src/theaia/core/orchestrator.py) (14KB) · [`router.py`](https://github.com/alvarofernandezmota-tech/thea-ia/blob/main/src/theaia/core/router.py) (14KB)
+🔍 Referencia thea-ia: [`orchestrator.py`](https://github.com/alvarofernandezmota-tech/thea-ia/blob/main/src/theaia/core/orchestrator.py) · [`router.py`](https://github.com/alvarofernandezmota-tech/thea-ia/blob/main/src/theaia/core/router.py)
 
 ---
 
 ## ⏳ FASE 10 — CI/CD + Docker
 
 - [ ] GitHub Actions — tests automáticos en cada push
-- [ ] GitHub Actions — linting (black + flake8)
 - [ ] `Dockerfile` + `docker-compose.yml`
 - [ ] Deploy en Railway/VPS
 
@@ -140,15 +114,12 @@
 
 ## ⏳ FASE 11 — Base de datos real
 
-**Objetivo:** migrar de JSON a SQLite/PostgreSQL cuando el sistema lo requiera.
-
-- [ ] Evaluar SQLite vs PostgreSQL
-- [ ] `SqlLifeManager` implementado con SQLAlchemy
+- [ ] `SqlLifeManager` con SQLAlchemy
 - [ ] Migraciones con Alembic
-- [ ] Tests de migración JSON → SQL
+- [ ] Migración JSON → SQL
 
-🔍 Referencia thea-ia: [`src/theaia/database/`](https://github.com/alvarofernandezmota-tech/thea-ia/tree/main/src/theaia/database) — SQLAlchemy + Alembic ya implementados
+🔍 Referencia thea-ia: [`src/theaia/database/`](https://github.com/alvarofernandezmota-tech/thea-ia/tree/main/src/theaia/database)
 
 ---
 
-_Actualizado: 24 marzo 2026_
+_Actualizado: 25 marzo 2026 — 10:21 CET_
