@@ -1,1 +1,1 @@
-"""Tests de integración — testean interacción entre módulos."""
+# tests de integración — FastAPI endpoints completos
