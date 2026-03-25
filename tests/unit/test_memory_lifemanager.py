@@ -37,28 +37,28 @@ class TestCreateAppointment:
 
     def test_retorna_uuid(self, mgr: MemoryLifeManager, hoy: date) -> None:
         """El método debe devolver un UUID válido."""
-        result = mgr.create_appointment(hoy, "10:00", "Médico")
+        result = mgr.create_appointment(hoy, "10:00", "médica")
         assert isinstance(result, UUID)
 
     def test_ids_unicos(self, mgr: MemoryLifeManager, hoy: date) -> None:
         """Cada cita debe tener un ID diferente."""
-        id1 = mgr.create_appointment(hoy, "10:00", "Médico")
-        id2 = mgr.create_appointment(hoy, "12:00", "Reunión")
+        id1 = mgr.create_appointment(hoy, "10:00", "médica")
+        id2 = mgr.create_appointment(hoy, "12:00", "trabajo")
         assert id1 != id2
 
     def test_cita_se_almacena(self, mgr: MemoryLifeManager, hoy: date) -> None:
         """La cita debe aparecer al consultarla."""
-        mgr.create_appointment(hoy, "10:00", "Médico", "notas")
+        mgr.create_appointment(hoy, "10:00", "médica", "notas")
         citas = mgr.get_appointments(hoy)
         assert len(citas) == 1
-        assert citas[0]["type"] == "Médico"
+        assert citas[0]["type"] == "médica"
         assert citas[0]["time"] == "10:00"
         assert citas[0]["notes"] == "notas"
 
     def test_multiples_citas_mismo_dia(self, mgr: MemoryLifeManager, hoy: date) -> None:
         """Varias citas el mismo día deben acumularse."""
-        mgr.create_appointment(hoy, "10:00", "Médico")
-        mgr.create_appointment(hoy, "14:00", "Reunión")
+        mgr.create_appointment(hoy, "10:00", "médica")
+        mgr.create_appointment(hoy, "14:00", "trabajo")
         assert len(mgr.get_appointments(hoy)) == 2
 
 
@@ -73,7 +73,7 @@ class TestGetAppointments:
     def test_no_mezcla_dias(self, mgr: MemoryLifeManager, hoy: date) -> None:
         """Las citas de un día no deben aparecer en otro."""
         manana = date(2026, 3, 25)
-        mgr.create_appointment(hoy, "10:00", "Médico")
+        mgr.create_appointment(hoy, "10:00", "médica")
         assert mgr.get_appointments(manana) == []
 
 
@@ -119,7 +119,7 @@ class TestGetDaySummary:
 
     def test_resumen_incluye_citas_y_habitos(self, mgr: MemoryLifeManager, hoy: date) -> None:
         """El resumen debe incluir las citas y hábitos creados."""
-        mgr.create_appointment(hoy, "10:00", "Médico")
+        mgr.create_appointment(hoy, "10:00", "médica")
         mgr.log_habit(hoy, "sueno", "8h")
         summary = mgr.get_day_summary(hoy)
         assert len(summary["appointments"]) == 1
