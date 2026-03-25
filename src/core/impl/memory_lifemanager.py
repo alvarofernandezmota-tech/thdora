@@ -103,6 +103,35 @@ class MemoryLifeManager(AbstractLifeManager):
         """
         return self.appointments.get(str(date), [])
 
+    def delete_appointment(self, date: date, index: int) -> bool:
+        """
+        Elimina una cita por su posición en la lista del día.
+
+        Args:
+            date (date): Día de la cita a eliminar.
+            index (int): Posición 0-based de la cita en la lista del día.
+
+        Returns:
+            bool: ``True`` si la cita fue eliminada correctamente.
+
+        Raises:
+            IndexError: Si ``index`` está fuera del rango de citas del día,
+                        si el día no tiene citas, o si el índice es negativo.
+
+        Complejidad: O(n)
+        """
+        date_str = str(date)
+        citas = self.appointments.get(date_str, [])
+
+        if not citas or index < 0 or index >= len(citas):
+            raise IndexError(
+                f"Índice {index} fuera de rango para el día {date_str} "
+                f"({len(citas)} citas)"
+            )
+
+        self.appointments[date_str].pop(index)
+        return True
+
     def log_habit(self, date: date, habit: str, value: str) -> bool:
         """
         Registra o actualiza el valor de un hábito para un día.
