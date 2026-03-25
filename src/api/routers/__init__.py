@@ -1,11 +1,3 @@
-"""
-Routers FastAPI de la API REST de THDORA.
+from src.api.routers import appointments, habits, summary
 
-Exporta:
-    appointments : router CRUD de citas
-    habits       : router CRUD de hábitos
-"""
-
-from src.api.routers import appointments, habits
-
-__all__ = ["appointments", "habits"]
+__all__ = ["appointments", "habits", "summary"]

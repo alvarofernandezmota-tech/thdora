@@ -12,48 +12,35 @@ Ejecución::
 
 from fastapi import FastAPI
 
-from src.api.routers import appointments, habits
+from src.api.routers import appointments, habits, summary
 from src.core.impl.json_lifemanager import JsonLifeManager
 
 app = FastAPI(
     title="THDORA API",
     description="API REST del ecosistema de gestión personal THDORA",
-    version="0.5.0",
+    version="0.6.0",
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
-# Instancia compartida del gestor (inyectada en los routers vía Depends)
 _manager = JsonLifeManager()
 
 
 def get_manager() -> JsonLifeManager:
     """
     Dependency para inyectar el gestor en los endpoints.
-
-    Devuelve siempre la misma instancia (singleton de proceso).
-    En tests, se sobreescribe con app.dependency_overrides.
-
-    Returns:
-        JsonLifeManager: Instancia del gestor con persistencia JSON.
+    En tests se sobreescribe con app.dependency_overrides.
     """
     return _manager
 
 
-# Override de Depends en routers con la instancia real
 app.dependency_overrides[JsonLifeManager] = get_manager
 
-# Registrar routers
 app.include_router(appointments.router)
 app.include_router(habits.router)
+app.include_router(summary.router)
 
 
 @app.get("/", tags=["health"])
 def health_check() -> dict:
-    """
-    Health check del servicio.
-
-    Returns:
-        dict: Estado del servicio y versión.
-    """
-    return {"status": "ok", "service": "thdora", "version": "0.5.0"}
+    return {"status": "ok", "service": "thdora", "version": "0.6.0"}
