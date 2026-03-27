@@ -290,12 +290,7 @@ class SQLiteLifeManager(AbstractLifeManager):
             session.delete(cfg)
             return True
 
-    # ── Helpers ───────────────────────────────────────────────────────
-
-    @staticmethod
-    def _valid_time(time: str) -> bool:
-        import re
-        return bool(re.match(r"^([01]?\d|2[0-3]):[0-5]\d$", time))
+    # ── Resumen ───────────────────────────────────────────────────────
 
     def get_summary(self, date: str) -> dict[str, Any]:
         """Devuelve resumen del día: citas + hábitos."""
@@ -304,3 +299,14 @@ class SQLiteLifeManager(AbstractLifeManager):
             "appointments": self.get_appointments(date),
             "habits": self.get_habits(date),
         }
+
+    def get_day_summary(self, date: str) -> dict[str, Any]:
+        """Alias de get_summary para cumplir con AbstractLifeManager."""
+        return self.get_summary(date)
+
+    # ── Helpers ───────────────────────────────────────────────────────
+
+    @staticmethod
+    def _valid_time(time: str) -> bool:
+        import re
+        return bool(re.match(r"^([01]?\d|2[0-3]):[0-5]\d$", time))
