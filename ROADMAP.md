@@ -1,6 +1,6 @@
 # 🗺️ THDORA — ROADMAP
 
-> **Navegación rápida:** [README](README.md) · [Índice docs](docs/INDEX.md) · [CHANGELOG](CHANGELOG.md) · [Arquitectura](docs/architecture/ARCHITECTURE.md)
+> **Navegación rápida:** [README](README.md) · [Índice docs](docs/INDEX.md) · [CHANGELOG](CHANGELOG.md) · [Arquitectura](docs/architecture/ARCHITECTURE.md) · [Personal Data Platform](docs/PERSONAL-DATA-PLATFORM.md)
 
 ## Estado: v0.6.1 — 25 marzo 2026
 
@@ -16,6 +16,8 @@
 [░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 9: OpenClaw + agentes IA (migración thea-ia)
 [░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 10: CI/CD + Docker + Deploy
 [░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 11: BD real (SQLAlchemy + Alembic)
+[░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 12: Personal Data Platform — sync YAML → SQLite
+[░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 13: Bot tracking — /stats /habitos /nota-hoy + alertas
 ```
 
 ---
@@ -90,4 +92,54 @@
 
 ---
 
-_Actualizado: 25 marzo 2026 — 10:45 CET_
+## ⏳ FASE 12 — Personal Data Platform — sync YAML → SQLite
+
+**Objetivo:** Convertir thdora en el motor del ecosistema de tracking personal de Álvaro.  
+**Dependencias:** Fase 11 (SQLAlchemy) + Fase 7 (Bot Telegram)  
+**Docs completos:** [docs/PERSONAL-DATA-PLATFORM.md](docs/PERSONAL-DATA-PLATFORM.md)
+
+### Arquitectura
+```
+repo personal/ — YAML diarios (fuente de verdad humana)
+        ↓
+sync_tracking.py — lee YAMLs, valida schema, inserta en BD
+        ↓
+SQLite (thdora) — datos estructurados, consultas rápidas
+        ↓
+thdora API — nuevos endpoints /tracking/*
+```
+
+### Tareas F12
+- [ ] `src/tracking/models.py` — modelo SQLAlchemy `DailyRecord`
+- [ ] `src/tracking/sync.py` — lee YAML via GitHub API o ruta local
+- [ ] `src/tracking/parser.py` — valida y transforma YAML → `DailyRecord`
+- [ ] `GET /tracking/semana/{num}` — métricas automáticas de una semana
+- [ ] `GET /tracking/mes/{num}` — métricas de un mes
+- [ ] Tests unitarios del parser y sync
+
+**Semana estimada:** S14
+
+---
+
+## ⏳ FASE 13 — Bot tracking — /stats /habitos /nota-hoy + alertas
+
+**Objetivo:** El bot Telegram responde preguntas de tracking y manda alertas proactivas.  
+**Dependencias:** Fase 7 (Bot) + Fase 12 (PDP)
+
+### Comandos nuevos
+- [ ] `/stats` — resumen semanal completo (notas, estudio, sueño, sustancias)
+- [ ] `/habitos` — estado de hábitos de la semana actual
+- [ ] `/nota-hoy` — calcula nota del día automáticamente
+- [ ] `/racha` — rachas activas (días sin cocaína, ejercicio consecutivo, etc.)
+
+### Alertas automáticas (scheduler)
+- [ ] "Llevas 3 días sin ejercicio ⚠️"
+- [ ] "Ayer dormiste menos de 5h 😴"
+- [ ] "Esta semana vas bien en estudio 📚 +2h respecto S anterior"
+- [ ] Recordatorio nocturno: "Rellena el YAML de hoy"
+
+**Semana estimada:** S15
+
+---
+
+_Actualizado: 27 marzo 2026 17:42 CET — Fases 12-13 Personal Data Platform añadidas_
