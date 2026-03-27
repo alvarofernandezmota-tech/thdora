@@ -1,14 +1,15 @@
 """
 SQLiteLifeManager — implementación persistente de AbstractLifeManager.
 
-Usa SQLAlchemy + SQLite para almacenar citas y hábitos de forma
-persistente entre reinicios. Los datos sobreviven a reinicios del servidor.
+Usa SQLAlchemy + SQLite para almacenar citas, hábitos y configuración
+de hábitos de forma persistente entre reinicios.
 
 Diferencias respecto a MemoryLifeManager / JsonLifeManager:
     - Los datos persisten en ``data/thdora.db``
     - Los índices son ordinales por día (como en Json)
     - Thread-safe gracias al context manager de sesión
     - Soporta búsqueda por rango de fechas (para /agenda y /upcoming)
+    - Soporta HabitConfig (tipos adaptativos F9.2)
 
 Uso::
 
@@ -23,7 +24,7 @@ from sqlalchemy import and_
 
 from src.core.interfaces.abstract_lifemanager import AbstractLifeManager
 from src.db.base import get_session, init_db
-from src.db.models import Appointment, Habit
+from src.db.models import Appointment, Habit, HabitConfig
 
 
 class SQLiteLifeManager(AbstractLifeManager):
@@ -55,7 +56,6 @@ class SQLiteLifeManager(AbstractLifeManager):
             raise ValueError(f"Tipo inválido: {apt_type}")
 
         with get_session() as session:
-            # Calcular índice: número de citas del día + 1
             count = session.query(Appointment).filter(Appointment.date == date).count()
             apt = Appointment(
                 date=date,
@@ -66,7 +66,7 @@ class SQLiteLifeManager(AbstractLifeManager):
                 index=count + 1,
             )
             session.add(apt)
-            session.flush()  # obtener el id generado
+            session.flush()
             return apt.to_dict()
 
     def delete_appointment(self, date: str, index: int) -> bool:
@@ -139,6 +139,16 @@ class SQLiteLifeManager(AbstractLifeManager):
                 .all()
             )
             return [r.to_dict() for r in rows]
+
+    def check_appointment_conflict(self, date: str, time: str) -> dict | None:
+        """Devuelve la cita existente a esa hora, o None si no hay conflicto."""
+        with get_session() as session:
+            apt = (
+                session.query(Appointment)
+                .filter(and_(Appointment.date == date, Appointment.time == time))
+                .first()
+            )
+            return apt.to_dict() if apt else None
 
     # ── Hábitos ──────────────────────────────────────────────────────
 
@@ -214,6 +224,71 @@ class SQLiteLifeManager(AbstractLifeManager):
             for r in rows:
                 result.setdefault(r.date, {})[r.habit] = r.value
             return result
+
+    # ── HabitConfig ───────────────────────────────────────────────────
+
+    def get_habit_config(self, name: str) -> dict | None:
+        """Devuelve la config de un hábito por nombre, o None si no existe."""
+        with get_session() as session:
+            cfg = session.query(HabitConfig).filter(HabitConfig.name == name).first()
+            return cfg.to_dict() if cfg else None
+
+    def get_all_habit_configs(self) -> list[dict]:
+        """Devuelve la config de todos los hábitos ordenados por nombre."""
+        with get_session() as session:
+            rows = session.query(HabitConfig).order_by(HabitConfig.name).all()
+            return [r.to_dict() for r in rows]
+
+    def upsert_habit_config(
+        self,
+        name: str,
+        habit_type: str = "text",
+        unit: str | None = None,
+        min_val: float | None = None,
+        max_val: float | None = None,
+        quick_vals: list[str] | None = None,
+        xp_rule: str | None = None,
+    ) -> dict:
+        """
+        Crea o actualiza la configuración de un hábito.
+        quick_vals se almacena como string CSV: ["6h","7h"] → "6h,7h"
+        """
+        if habit_type not in ("numeric", "time", "boolean", "text"):
+            raise ValueError(f"Tipo inválido: {habit_type}. Usa: numeric, time, boolean, text")
+
+        quick_str = ",".join(quick_vals) if quick_vals else None
+
+        with get_session() as session:
+            cfg = session.query(HabitConfig).filter(HabitConfig.name == name).first()
+            if cfg:
+                cfg.habit_type = habit_type
+                cfg.unit = unit
+                cfg.min_val = min_val
+                cfg.max_val = max_val
+                cfg.quick_vals = quick_str
+                cfg.xp_rule = xp_rule
+            else:
+                cfg = HabitConfig(
+                    name=name,
+                    habit_type=habit_type,
+                    unit=unit,
+                    min_val=min_val,
+                    max_val=max_val,
+                    quick_vals=quick_str,
+                    xp_rule=xp_rule,
+                )
+                session.add(cfg)
+            session.flush()
+            return cfg.to_dict()
+
+    def delete_habit_config(self, name: str) -> bool:
+        """Borra la configuración de un hábito. Devuelve True si se borró."""
+        with get_session() as session:
+            cfg = session.query(HabitConfig).filter(HabitConfig.name == name).first()
+            if not cfg:
+                return False
+            session.delete(cfg)
+            return True
 
     # ── Helpers ───────────────────────────────────────────────────────
 

@@ -13,34 +13,24 @@ Ejecución::
 from fastapi import FastAPI
 
 from src.api.routers import appointments, habits, summary
-from src.core.impl.json_lifemanager import JsonLifeManager
+from src.api.routers import habit_config
+from src.api.deps import get_manager
+from src.core.impl.sqlite_lifemanager import SQLiteLifeManager
 
 app = FastAPI(
     title="THDORA API",
     description="API REST del ecosistema de gestión personal THDORA",
-    version="0.6.0",
+    version="0.9.2",
     docs_url="/docs",
     redoc_url="/redoc",
 )
 
-_manager = JsonLifeManager()
-
-
-def get_manager() -> JsonLifeManager:
-    """
-    Dependency para inyectar el gestor en los endpoints.
-    En tests se sobreescribe con app.dependency_overrides.
-    """
-    return _manager
-
-
-app.dependency_overrides[JsonLifeManager] = get_manager
-
 app.include_router(appointments.router)
 app.include_router(habits.router)
 app.include_router(summary.router)
+app.include_router(habit_config.router)
 
 
 @app.get("/", tags=["health"])
 def health_check() -> dict:
-    return {"status": "ok", "service": "thdora", "version": "0.6.0"}
+    return {"status": "ok", "service": "thdora", "version": "0.9.2"}
