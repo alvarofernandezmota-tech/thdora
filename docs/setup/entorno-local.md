@@ -1,10 +1,10 @@
 # Setup — Entorno local de desarrollo
 
 **Sistema operativo:** Windows 11 + WSL2 (Ubuntu 22.04)  
-**Última actualización:** 25 marzo 2026  
+**Última actualización:** 27 marzo 2026  
 **Estado:** ✅ Operativo
 
-> 🔗 **Referencia cruzada:** [`personal/00_sistema/openclaw/README.md`](https://github.com/alvarofernandezmota-tech/personal/blob/main/00_sistema/openclaw/README.md) — documentación completa del ecosistema OpenClaw
+> 🔗 **Referencia cruzada:** [`personal/00_sistema/openclaw/README.md`](https://github.com/alvarofernandezmota-tech/personal/blob/main/00_sistema/openclaw/README.md)
 
 ---
 
@@ -27,11 +27,12 @@
 
 ---
 
-## 1. Estado del entorno (25 marzo 2026)
+## 1. Estado del entorno (27 marzo 2026)
 
 | Componente | Versión | Estado | Notas |
 |-----------|---------|--------|---------|
 | Ubuntu WSL2 | 22.04.5 LTS | ✅ | |
+| Python | 3.10 | ✅ | venv en `~/projects/thdora/.venv` |
 | systemd | activo | ✅ | `/etc/wsl.conf` configurado |
 | Node.js | 22.x | ✅ | vía NodeSource |
 | OpenClaw | latest | ✅ | Gateway activo `127.0.0.1:18789` |
@@ -40,24 +41,23 @@
 | qwen2.5-coder:7b | ~4.7GB | ✅ | Responde correctamente |
 | auth-profiles.json | ollama local | ✅ | Creado en `~/.openclaw/agents/main/agent/` |
 | CUDA / GPU | GTX 1060 | ⚠️ | **Pendiente activar** — ver sección 4.4 |
-| Bot Telegram | emparejado | ✅ | THDORA responde |
+| Bot Telegram | emparejado | ✅ | THDORA responde — token en `.env` |
 | VSCode + OpenClaw ext | instalado | ✅ | |
-| Repo thdora | `~/projects/thdora` | ✅ | |
+| Repo thdora | `~/projects/thdora` | ✅ | venv creado 27/03/2026 |
 
 ### Errores pendientes
 
 | Error | Estado |
 |-------|--------|
-| `No API key found for provider "ollama"` aparece en algunos mensajes | ⚠️ Investigar |
+| `No API key found for provider "ollama"` | ⚠️ Investigar |
 | GitHub MCP via Telegram — THDORA no accede a repos todavía | ❌ Pendiente |
-| CUDA no activado — Ollama corre en CPU (30-60s respuesta) | ❌ Pendiente |
+| CUDA no activado — Ollama corre en CPU (30-60s respuesta) | ❌ Pendiente F8 |
 
 ---
 
 ## 2. WSL2 — Configuración base
 
 ```bash
-# Activar systemd
 sudo nano /etc/wsl.conf
 ```
 ```ini
@@ -65,7 +65,6 @@ sudo nano /etc/wsl.conf
 systemd=true
 ```
 ```powershell
-# Reiniciar desde PowerShell Windows
 wsl --shutdown && wsl
 ```
 
@@ -74,40 +73,12 @@ wsl --shutdown && wsl
 ## 3. OpenClaw — Instalación completa
 
 ```bash
-# 1. Instalar
 curl -fsSL https://openclaw.dev/install.sh | bash
-export PATH="$HOME/.openclaw/bin:$PATH"  # añadir a ~/.bashrc
-
-# 2. Setup inicial
+export PATH="$HOME/.openclaw/bin:$PATH"
 openclaw onboard --install-daemon
-
-# 3. Verificar gateway
 curl http://127.0.0.1:18789/health
-
-# 4. Instalar GitHub MCP
 openclaw skills install github-mcp
-export GITHUB_TOKEN="ghp_tu_token"  # añadir a ~/.bashrc
-
-# 5. Configurar Ollama como proveedor
-mkdir -p ~/.openclaw/agents/main/agent/
-cat > ~/.openclaw/agents/main/agent/auth-profiles.json << 'EOF'
-{
-  "profiles": [
-    {
-      "name": "ollama-local",
-      "provider": "ollama",
-      "baseUrl": "http://localhost:11434",
-      "model": "qwen2.5-coder:7b"
-    }
-  ],
-  "default": "ollama-local"
-}
-EOF
-
-# 6. Reiniciar gateway
-openclaw gateway restart
-
-# 7. Emparejar Telegram
+export GITHUB_TOKEN="ghp_tu_token"
 openclaw pairing start
 openclaw pairing approve
 ```
@@ -117,55 +88,78 @@ openclaw pairing approve
 ## 4. Ollama — LLM local
 
 ```bash
-# Instalar
 curl -fsSL https://ollama.ai/install.sh | sh
-
-# Descargar modelo
 ollama pull qwen2.5-coder:7b
-
-# Verificar GPU vs CPU
-ollama ps  # debe decir 100% GPU (si CUDA activo)
+ollama ps
 ```
 
-### 4.4 Activar CUDA (pendiente)
+### 4.4 Activar CUDA (pendiente — F8)
 
 ```bash
-# En Windows: instalar driver NVIDIA con soporte WSL2
-# En WSL2:
-nvidia-smi  # verificar que ve la GPU
-
-# Instalar CUDA Toolkit
+nvidia-smi
 wget https://developer.download.nvidia.com/compute/cuda/repos/wsl-ubuntu/x86_64/cuda-keyring_1.1-1_all.deb
 sudo dpkg -i cuda-keyring_1.1-1_all.deb
 sudo apt-get update && sudo apt-get install -y cuda-toolkit-12-x
-
 export PATH=/usr/local/cuda/bin:$PATH
 export LD_LIBRARY_PATH=/usr/local/cuda/lib64:$LD_LIBRARY_PATH
 ```
 
 ---
 
-## 5. Clonar thdora
+## 5. Setup thdora — entorno Python
+
+> ⚠️ `pip install -e ".[dev]"` falla en Python 3.10 con setuptools antiguo.
+> Usar instalación directa:
 
 ```bash
-cd ~/projects
-git clone https://github.com/alvarofernandezmota-tech/thdora.git
+cd ~/projects/thdora
+git clone https://github.com/alvarofernandezmota-tech/thdora.git  # si no existe
 cd thdora
-pip install -e ".[dev]"
-pytest tests/  # 57 tests deben pasar
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install fastapi uvicorn pydantic "python-telegram-bot>=21.0" httpx pytest pytest-cov pytest-asyncio
+```
+
+### Verificar instalación
+```bash
+pip show python-telegram-bot  # debe mostrar 22.x
+pytest tests/ -v               # 57 tests deben pasar
+```
+
+### Arrancar para desarrollo (2 terminales)
+```bash
+# Terminal 1 — API
+source .venv/bin/activate
+uvicorn src.api.main:app --reload
+
+# Terminal 2 — Bot
+source .venv/bin/activate
+python -m src.bot.main
 ```
 
 ---
 
-## 6. Errores conocidos y soluciones
+## 6. Variables de entorno (.env)
+
+```bash
+# Crear .env en la raíz del proyecto (NO commitear)
+cp .env.example .env
+# Editar con el token de BotFather
+TELEGRAM_BOT_TOKEN=tu_token_aqui
+```
+
+---
+
+## 7. Errores conocidos y soluciones
 
 | Error | Solución |
 |-------|----------|
+| `No module named 'setuptools.backends'` | Usar `pip install` directo, no `pip install -e` |
 | `No API key found for provider "ollama"` | Revisar `auth-profiles.json` + `openclaw gateway restart` |
-| `openclaw skills list` se corta | `systemctl restart openclaw-gateway` |
 | Ollama responde en 30-60s | CUDA no activo — ver sección 4.4 |
 | `GITHUB_TOKEN not found` | `export GITHUB_TOKEN=...` en `~/.bashrc` |
 
 ---
 
-_Actualizado: 25 marzo 2026_
+_Actualizado: 27 marzo 2026 — venv creado, Python 3.10, deps instaladas_
