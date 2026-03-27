@@ -17,11 +17,19 @@ Ejecución::
     # Opción 2 — directo
     python -m src.bot.main
 
-Dependencias::
+Handlers registrados::
 
-    python-telegram-bot >= 21.0
-    httpx >= 0.27.0
-    python-dotenv >= 1.0.0
+    Comandos:   /start  /citas  /habitos  /resumen  /cancelar
+    Flujos:     /nueva (5 pasos)  /habito (2 pasos)
+    Edición:   editar cita (4 pasos)  editar hábito (1 paso)
+    Inline:     borrar/confirmar cita, borrar/confirmar hábito,
+                acumular hábito, cancelar acción
+
+Orden de registro (importante para python-telegram-bot):
+    1. ConversationHandlers (mayor prioridad, capturan callbacks propios)
+    2. CallbackQueryHandlers globales (borrar, confirmar, acumular)
+    3. CommandHandlers simples
+    4. Error handler
 """
 
 import asyncio
@@ -30,13 +38,21 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from telegram.ext import ApplicationBuilder, CommandHandler
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler
 
 from src.bot.api_client import ThdoraApiClient
 from src.bot.handlers import (
+    build_edit_apt_handler,
+    build_edit_hab_handler,
     build_habito_handler,
     build_nueva_handler,
-    cmd_borrar,
+    cb_apt_delete,
+    cb_apt_delete_confirm,
+    cb_cancel_action,
+    cb_hab_add,
+    cb_hab_add_value,
+    cb_hab_delete,
+    cb_hab_delete_confirm,
     cmd_cancelar,
     cmd_citas,
     cmd_habitos,
@@ -44,6 +60,7 @@ from src.bot.handlers import (
     cmd_start,
     error_handler,
 )
+from telegram.ext import MessageHandler, filters
 
 # Cargar .env antes de leer variables de entorno
 load_dotenv()
@@ -60,6 +77,7 @@ logger = logging.getLogger(__name__)
 
 
 async def _check_api() -> None:
+    """Comprueba si la API está disponible al arrancar. No bloquea."""
     api = ThdoraApiClient()
     ok = await api.health()
     if ok:
@@ -73,6 +91,7 @@ async def _check_api() -> None:
 
 
 def _load_token() -> str:
+    """Lee TELEGRAM_BOT_TOKEN del entorno. Sale con error si no existe."""
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         logger.error(
@@ -84,21 +103,69 @@ def _load_token() -> str:
 
 
 def build_app(token: str):
+    """
+    Construye la aplicación de Telegram con todos los handlers.
+
+    Orden de registro:
+        1. ConversationHandlers (capturan sus propios entry_points y callbacks)
+        2. CallbackQueryHandlers globales (los que no pertenecen a ningún flujo)
+        3. MessageHandler para acumulación de hábitos (texto fuera de flujo)
+        4. CommandHandlers simples
+        5. Error handler
+    """
     app = ApplicationBuilder().token(token).build()
 
-    app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("citas", cmd_citas))
-    app.add_handler(CommandHandler("borrar", cmd_borrar))
-    app.add_handler(CommandHandler("habitos", cmd_habitos))
-    app.add_handler(CommandHandler("resumen", cmd_resumen))
-    app.add_handler(CommandHandler("cancelar", cmd_cancelar))
-
+    # ── 1. ConversationHandlers ─────────────────────────────────────
     app.add_handler(build_nueva_handler())
     app.add_handler(build_habito_handler())
+    app.add_handler(build_edit_apt_handler())   # activado por ^ae_ inline
+    app.add_handler(build_edit_hab_handler())   # activado por ^he_ inline
 
+    # ── 2. CallbackQueryHandlers globales ─────────────────────────────
+    # Citas
+    app.add_handler(CallbackQueryHandler(cb_apt_delete,         pattern=r"^ad_"))
+    app.add_handler(CallbackQueryHandler(cb_apt_delete_confirm, pattern=r"^adc_"))
+    # Hábitos
+    app.add_handler(CallbackQueryHandler(cb_hab_delete,         pattern=r"^hd_"))
+    app.add_handler(CallbackQueryHandler(cb_hab_delete_confirm, pattern=r"^hdc_"))
+    app.add_handler(CallbackQueryHandler(cb_hab_add,            pattern=r"^ha_"))
+    # Genérico
+    app.add_handler(CallbackQueryHandler(cb_cancel_action,      pattern=r"^cancel_action$"))
+
+    # ── 3. MessageHandler para acumulación (texto libre fuera de flujo) ───
+    # Solo se activa si hay contexto acum_hab_nombre en user_data
+    app.add_handler(
+        MessageHandler(
+            filters.TEXT & ~filters.COMMAND,
+            _route_free_text,
+        )
+    )
+
+    # ── 4. CommandHandlers simples ─────────────────────────────────
+    app.add_handler(CommandHandler("start",   cmd_start))
+    app.add_handler(CommandHandler("citas",   cmd_citas))
+    app.add_handler(CommandHandler("habitos", cmd_habitos))
+    app.add_handler(CommandHandler("resumen", cmd_resumen))
+    app.add_handler(CommandHandler("cancelar",cmd_cancelar))
+
+    # ── 5. Error handler ─────────────────────────────────────────
     app.add_error_handler(error_handler)
 
     return app
+
+
+async def _route_free_text(
+    update, context
+) -> None:
+    """
+    Enruta texto libre fuera de flujos de conversación.
+
+    Si hay un hábito pendiente de acumulación en user_data,
+    delega en cb_hab_add_value. En caso contrario, ignora.
+    """
+    if context.user_data.get("acum_hab_nombre"):
+        from src.bot.handlers import cb_hab_add_value
+        await cb_hab_add_value(update, context)
 
 
 def main() -> None:
