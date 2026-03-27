@@ -1,93 +1,87 @@
-# Índice de documentación — thdora
+# 📚 THDORA — Índice de documentación
 
-> Toda la documentación del proyecto organizada por categoría.  
-> Regla: **si no está aquí documentado, no existe.**
-
----
-
-## 📋 Visión general
-
-| Documento | Descripción | Ubicación |
-|-----------|-------------|----------|
-| README | Qué es thdora, cómo arrancarlo | [`/README.md`](/README.md) |
-| ROADMAP | Fases del proyecto, estado actual | [`/ROADMAP.md`](/ROADMAP.md) |
-| CHANGELOG | Historial de versiones y cambios | [`/CHANGELOG.md`](/CHANGELOG.md) |
+> **Navegación rápida:** [README](../README.md) · [CHANGELOG](../CHANGELOG.md) · [ROADMAP](../ROADMAP.md)
 
 ---
 
-## 🏗️ Arquitectura
-
-| Documento | Descripción | Ubicación |
-|-----------|-------------|----------|
-| Arquitectura general | Diagrama de capas, principios de diseño | [`docs/architecture/ARCHITECTURE.md`](architecture/ARCHITECTURE.md) |
-| **Mapa del repositorio** | **Dónde está cada cosa y para qué sirve** | [`docs/architecture/repo-map.md`](architecture/repo-map.md) |
-| ADR-001 Monorepo | Por qué un solo repo | [`docs/architecture/decisions/ADR-001-monorepo.md`](architecture/decisions/ADR-001-monorepo.md) |
-| ADR-002 ABC Interfaces | Por qué interfaces abstractas | [`docs/architecture/decisions/ADR-002-abc-interfaces.md`](architecture/decisions/ADR-002-abc-interfaces.md) |
-| ADR-003 JSON Persistence | Por qué JSON como primera persistencia | [`docs/architecture/decisions/ADR-003-json-persistence.md`](architecture/decisions/ADR-003-json-persistence.md) |
-| ADR-004 Relación thea-ia | Por qué thdora es independiente de thea-ia | [`docs/architecture/decisions/ADR-004-relacion-thea-ia.md`](architecture/decisions/ADR-004-relacion-thea-ia.md) |
-
----
-
-## 📦 Módulos
-
-| Documento | Descripción | Ubicación |
-|-----------|-------------|----------|
-| core | Interfaces ABC, MemoryLifeManager, JsonLifeManager | [`docs/modules/core.md`](modules/core.md) |
-| api | Endpoints FastAPI | [`docs/modules/api.md`](modules/api.md) |
-
----
-
-## ⚙️ Setup y entorno
-
-| Documento | Descripción | Ubicación |
-|-----------|-------------|----------|
-| Entorno local | WSL2 + OpenClaw + Ollama + Telegram + CUDA + PostgreSQL (Fase 11) | [`docs/setup/entorno-local.md`](setup/entorno-local.md) |
-
----
-
-## 🔍 Auditorías
-
-| Documento | Descripción | Ubicación |
-|-----------|-------------|----------|
-| Auditoría thea-ia | Inventario completo de módulos y plan de reutilización por fases | [`docs/auditoria/thea-ia.md`](auditoria/thea-ia.md) |
-
----
-
-## 📅 Diarios técnicos
-
-| Fecha | Horas | Resumen | Enlace |
-|-------|-------|---------|--------|
-| 2026-03-23 | ~2h | Setup OpenClaw + Ollama + primera conversación Telegram | [`docs/diarios/2026-03-23.md`](diarios/2026-03-23.md) |
-| 2026-03-24 | ~4h | Nacimiento repo thdora, arquitectura, 4 ADRs, auditoría thea-ia, repo-map, navegación completa | [`docs/diarios/2026-03-24.md`](diarios/2026-03-24.md) |
-
----
-
-## 📐 Convenciones
-
-### Nomenclatura de archivos
-- Docs de arquitectura: `UPPER_CASE.md` en raíz, `kebab-case.md` en subcarpetas
-- ADRs: `ADR-XXX-nombre-decision.md` — numerados en orden cronológico
-- Diarios: `YYYY-MM-DD.md` — uno por día trabajado
-- Módulos: `nombre-modulo.md` — en minúsculas
-
-### Cuándo crear un ADR
-Cada vez que se toma una decisión arquitectónica relevante que afecta al diseño del sistema. Ejemplos: elección de tecnología, patrón de diseño, estructura de datos, relación entre proyectos.
-
-### Cuándo actualizar el diario
-Al final de cada día de trabajo en thdora. Documenta **qué** se hizo, **cuánto tiempo** y **por qué**.
-
-### Cuándo actualizar el repo-map
-Cada vez que se crea una carpeta nueva o cambia la responsabilidad de un módulo.
-
-### Ecosistema completo
+## 🗂️ Estructura
 
 ```
-alvarofernandezmota-tech/
-├── thea-ia          ← proyecto original (intacto, historia)
-├── thdora           ← proyecto activo (evolución consciente)
-└── personal         ← diario personal y vida
+docs/
+├── INDEX.md                    ← este archivo
+├── ECOSYSTEM.md                ← visión del ecosistema completo
+├── GIT_GUIDE.md                ← flujo de trabajo Git
+├── PERSONAL-DATA-PLATFORM.md  ← visión de plataforma de datos
+├── architecture/
+│   ├── ARCHITECTURE.md         ← arquitectura del sistema
+│   └── adr/                    ← decisiones de arquitectura (ADR)
+├── auditoria/
+│   ├── thea-ia.md              ← relación con Thea IA
+│   └── 2026-03-25.md           ← auditoría completa 25-03
+├── diarios/
+│   ├── 2026-03-23.md
+│   ├── 2026-03-24.md
+│   ├── 2026-03-25.md
+│   └── 2026-03-27.md           ← sesión actual (F7)
+├── modules/
+│   ├── api.md                  ← módulo FastAPI
+│   ├── bot.md                  ← módulo Bot Telegram ← NUEVO
+│   └── core.md                 ← módulo Core (lógica)
+└── setup/
+    ├── entorno-local.md        ← setup WSL2 + venv
+    └── SETUP.md                ← guía completa instalación
 ```
 
 ---
 
-_Última actualización: 24 marzo 2026 — 21:51 CET_
+## 📖 Por dónde empezar
+
+| Si eres... | Empieza por... |
+|------------|----------------|
+| Nuevo en el proyecto | [README](../README.md) → [ARCHITECTURE](architecture/ARCHITECTURE.md) |
+| Configurando el entorno | [SETUP.md](setup/SETUP.md) → [entorno-local.md](setup/entorno-local.md) |
+| Trabajando en la API | [modules/api.md](modules/api.md) |
+| Trabajando en el bot | [modules/bot.md](modules/bot.md) |
+| Trabajando en el core | [modules/core.md](modules/core.md) |
+| Revisando historial | [CHANGELOG](../CHANGELOG.md) → [diarios/](diarios/) |
+| Viendo el futuro | [ROADMAP](../ROADMAP.md) |
+
+---
+
+## 🚦 Estado del proyecto — 27 marzo 2026
+
+| Módulo | Estado | Cobertura | Versión |
+|--------|--------|-----------|----------|
+| `src/core/` | ✅ Completo | 100% | 0.6.0 |
+| `src/api/` | ✅ Funcional | 87% | 0.6.1 |
+| `src/bot/` | ✅ Funcional (mejorable) | — | 0.7.0 |
+
+### Endpoints API disponibles
+
+| Método | Ruta | Estado |
+|--------|------|--------|
+| GET | `/health` | ✅ |
+| GET | `/appointments/{date}` | ✅ |
+| POST | `/appointments/{date}` | ✅ |
+| DELETE | `/appointments/{date}/{index}` | ✅ |
+| GET | `/habits/{date}` | ✅ |
+| POST | `/habits/{date}` | ✅ |
+| GET | `/summary/{date}` | ✅ |
+| PUT | `/appointments/{date}/{index}` | ⏳ Pendiente |
+| DELETE | `/habits/{date}/{habit}` | ⏳ Pendiente |
+| PUT | `/habits/{date}/{habit}` | ⏳ Pendiente |
+
+---
+
+## 📅 Diarios de sesión
+
+| Fecha | Fase | Logro principal |
+|-------|------|-----------------|
+| [23 mar](diarios/2026-03-23.md) | F1 | Diseño inicial + ADRs |
+| [24 mar](diarios/2026-03-24.md) | F2–F5 | Core + API + tests (61 tests) |
+| [25 mar](diarios/2026-03-25.md) | F6 | Summary endpoint + limpieza (87% coverage) |
+| [27 mar](diarios/2026-03-27.md) | F7 | Bot Telegram funcional (api_client + handlers + main) |
+
+---
+
+_Última actualización: 27 marzo 2026 — 21:00 CET_
