@@ -1,15 +1,16 @@
 """
-Router de citas — v2 con SQLiteLifeManager.
+Router de citas — v2.1 (F9.2: endpoint conflicto de hora).
 
 Endpoints::
 
-    POST   /appointments/{date}               → crear cita
-    GET    /appointments/{date}               → citas del día
-    DELETE /appointments/{date}/{index}       → borrar por índice
-    PUT    /appointments/{date}/{index}       → editar cita
-    GET    /appointments/range/{from}/{to}    → citas en rango de fechas
-    GET    /appointments/upcoming/{from}      → próximas citas
-    GET    /appointments/week/{date}          → citas de la semana (lun–dom)
+    POST   /appointments/{date}                     → crear cita
+    GET    /appointments/{date}                     → citas del día
+    GET    /appointments/{date}/conflict/{time}     → conflicto de hora (None o cita)
+    DELETE /appointments/{date}/{index}             → borrar por índice
+    PUT    /appointments/{date}/{index}             → editar cita
+    GET    /appointments/range/{from}/{to}          → citas en rango
+    GET    /appointments/upcoming/{from}            → próximas citas
+    GET    /appointments/week/{date}                → citas de la semana (lun–dom)
 """
 
 from datetime import date as date_type, timedelta
@@ -24,7 +25,7 @@ from src.core.impl.sqlite_lifemanager import SQLiteLifeManager
 router = APIRouter(prefix="/appointments", tags=["appointments"])
 
 
-# ── Modelos Pydantic ─────────────────────────────────────────────────
+# ── Modelos Pydantic ───────────────────────────────────────────────────────
 
 class AppointmentCreate(BaseModel):
     time: str
@@ -55,22 +56,17 @@ class AppointmentCreatedResponse(BaseModel):
     index: int
 
 
-# ── Helper ───────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────
 
 def _parse_date(date_str: str) -> str:
-    """Valida YYYY-MM-DD y devuelve el string. HTTP 422 si inválido."""
     try:
         date_type.fromisoformat(date_str)
         return date_str
     except ValueError:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Fecha inválida: '{date_str}'. Usa YYYY-MM-DD.",
-        )
+        raise HTTPException(status_code=422, detail=f"Fecha inválida: '{date_str}'. Usa YYYY-MM-DD.")
 
 
 def _week_bounds(date_str: str) -> tuple[str, str]:
-    """Devuelve (lunes, domingo) de la semana que contiene date_str."""
     d = date_type.fromisoformat(date_str)
     monday = d - timedelta(days=d.weekday())
     sunday = monday + timedelta(days=6)
@@ -79,30 +75,23 @@ def _week_bounds(date_str: str) -> tuple[str, str]:
 
 def _to_response(apt: dict) -> AppointmentResponse:
     return AppointmentResponse(
-        id=apt["id"],
-        date=apt["date"],
-        time=apt["time"],
-        name=apt.get("name", ""),
-        type=apt.get("type", "otra"),
-        notes=apt.get("notes"),
-        index=apt["index"],
+        id=apt["id"], date=apt["date"], time=apt["time"],
+        name=apt.get("name", ""), type=apt.get("type", "otra"),
+        notes=apt.get("notes"), index=apt["index"],
     )
 
 
-# ── Endpoints ───────────────────────────────────────────────────────
+# ── Endpoints ─────────────────────────────────────────────────────────────
 
 @router.post("/{date_str}", response_model=AppointmentCreatedResponse, status_code=201)
 def create_appointment(
-    date_str: str,
-    body: AppointmentCreate,
+    date_str: str, body: AppointmentCreate,
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> AppointmentCreatedResponse:
     """Crea una nueva cita."""
     _parse_date(date_str)
     try:
-        apt = manager.create_appointment(
-            date_str, body.time, body.type, body.notes, body.name
-        )
+        apt = manager.create_appointment(date_str, body.time, body.type, body.notes, body.name)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return AppointmentCreatedResponse(id=apt["id"], index=apt["index"])
@@ -110,10 +99,9 @@ def create_appointment(
 
 @router.get("/week/{date_str}", response_model=Dict[str, List[AppointmentResponse]])
 def get_appointments_week(
-    date_str: str,
-    manager: SQLiteLifeManager = Depends(get_manager),
+    date_str: str, manager: SQLiteLifeManager = Depends(get_manager),
 ) -> Dict[str, List[AppointmentResponse]]:
-    """Devuelve citas de la semana (lun–dom) que contiene date_str."""
+    """Citas de la semana (lun–dom) que contiene date_str."""
     _parse_date(date_str)
     monday, sunday = _week_bounds(date_str)
     rows = manager.get_appointments_range(monday, sunday)
@@ -125,11 +113,10 @@ def get_appointments_week(
 
 @router.get("/range/{date_from}/{date_to}", response_model=Dict[str, List[AppointmentResponse]])
 def get_appointments_range(
-    date_from: str,
-    date_to: str,
+    date_from: str, date_to: str,
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> Dict[str, List[AppointmentResponse]]:
-    """Devuelve citas en un rango de fechas agrupadas por día."""
+    """Citas en rango de fechas agrupadas por día."""
     _parse_date(date_from)
     _parse_date(date_to)
     rows = manager.get_appointments_range(date_from, date_to)
@@ -145,16 +132,35 @@ def get_upcoming(
     limit: int = Query(default=10, ge=1, le=50),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> List[AppointmentResponse]:
-    """Devuelve las próximas citas desde date_from (máx limit)."""
+    """Próximas citas desde date_from (máx limit)."""
     _parse_date(date_from)
     rows = manager.get_upcoming_appointments(date_from, limit)
     return [_to_response(apt) for apt in rows]
 
 
+@router.get("/{date_str}/conflict/{time_str}", response_model=Optional[AppointmentResponse])
+def check_conflict(
+    date_str: str,
+    time_str: str,
+    manager: SQLiteLifeManager = Depends(get_manager),
+) -> Optional[AppointmentResponse]:
+    """
+    Comprueba si ya existe una cita a esa hora exacta.
+
+    - 200 + cita   → hay conflicto
+    - 404          → hora libre
+    """
+    _parse_date(date_str)
+    apts = manager.get_appointments(date_str)
+    for apt in apts:
+        if apt["time"] == time_str:
+            return _to_response(apt)
+    raise HTTPException(status_code=404, detail="Hora libre.")
+
+
 @router.get("/{date_str}", response_model=List[AppointmentResponse])
 def get_appointments(
-    date_str: str,
-    manager: SQLiteLifeManager = Depends(get_manager),
+    date_str: str, manager: SQLiteLifeManager = Depends(get_manager),
 ) -> List[AppointmentResponse]:
     """Lista las citas del día ordenadas por hora."""
     _parse_date(date_str)
@@ -163,8 +169,7 @@ def get_appointments(
 
 @router.delete("/{date_str}/{index}", status_code=204)
 def delete_appointment(
-    date_str: str,
-    index: int,
+    date_str: str, index: int,
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> None:
     """Borra la cita con ese índice ordinal del día."""
@@ -176,20 +181,15 @@ def delete_appointment(
 
 @router.put("/{date_str}/{index}", response_model=AppointmentResponse)
 def update_appointment(
-    date_str: str,
-    index: int,
-    body: AppointmentUpdate,
+    date_str: str, index: int, body: AppointmentUpdate,
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> AppointmentResponse:
     """Edita campos de una cita. Solo actualiza los campos no-None."""
     _parse_date(date_str)
     try:
         updated = manager.update_appointment(
-            date_str, index,
-            time=body.time,
-            name=body.name,
-            apt_type=body.type,
-            notes=body.notes,
+            date_str, index, time=body.time, name=body.name,
+            apt_type=body.type, notes=body.notes,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
