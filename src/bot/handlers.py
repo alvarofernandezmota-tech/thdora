@@ -3,6 +3,9 @@ from telegram import Update
 from telegram.ext import ContextTypes
 from src.bot.api_client import get_summary, get_appointments, create_appointment, log_habit
 
+TIPOS_VALIDOS = {"médica", "personal", "trabajo", "otra"}
+TIPOS_TEXTO = "médica | personal | trabajo | otra"
+
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     await update.message.reply_text(
@@ -67,15 +70,26 @@ async def cmd_cita(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not args or len(args) < 2:
         await update.message.reply_text(
             "📝 Uso: /cita HH:MM tipo [notas]\n"
-            "Ej: /cita 10:30 Médico revisión anual"
+            f"Tipos válidos: {TIPOS_TEXTO}\n\n"
+            "Ej: /cita 10:30 médica revisión anual"
+        )
+        return
+    hora = args[0]
+    tipo = args[1].lower()
+    notas = " ".join(args[2:]) if len(args) > 2 else ""
+
+    if tipo not in TIPOS_VALIDOS:
+        await update.message.reply_text(
+            f"❌ Tipo '{tipo}' no válido.\n"
+            f"Tipos permitidos: {TIPOS_TEXTO}"
         )
         return
     try:
-        hora = args[0]
-        tipo = args[1]
-        notas = " ".join(args[2:]) if len(args) > 2 else ""
         await create_appointment(hora, tipo, notas)
-        await update.message.reply_text(f"✅ Cita creada:\n⏰ {hora} — {tipo}\n💬 {notas}" if notas else f"✅ Cita creada:\n⏰ {hora} — {tipo}")
+        msg = f"✅ Cita creada:\n⏰ {hora} — {tipo}"
+        if notas:
+            msg += f"\n💬 {notas}"
+        await update.message.reply_text(msg)
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
 
