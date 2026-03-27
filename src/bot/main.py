@@ -15,15 +15,13 @@ Ejecución::
     make run-bot
 
     # Opción 2 — directo
-    TELEGRAM_BOT_TOKEN=<token> python -m src.bot.main
-
-    # Opción 3 — con .env cargado previamente
-    export $(cat .env | xargs) && python -m src.bot.main
+    python -m src.bot.main
 
 Dependencias::
 
     python-telegram-bot >= 21.0
     httpx >= 0.27.0
+    python-dotenv >= 1.0.0
 """
 
 import asyncio
@@ -31,6 +29,7 @@ import logging
 import os
 import sys
 
+from dotenv import load_dotenv
 from telegram.ext import ApplicationBuilder, CommandHandler
 
 from src.bot.api_client import ThdoraApiClient
@@ -46,12 +45,14 @@ from src.bot.handlers import (
     error_handler,
 )
 
+# Cargar .env antes de leer variables de entorno
+load_dotenv()
+
 logging.basicConfig(
     format="%(asctime)s — %(name)s — %(levelname)s — %(message)s",
     level=logging.INFO,
     stream=sys.stdout,
 )
-# Silenciar logs muy verbosos de httpx y telegram
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram.ext").setLevel(logging.WARNING)
 
@@ -59,7 +60,6 @@ logger = logging.getLogger(__name__)
 
 
 async def _check_api() -> None:
-    """Comprueba que la FastAPI de THDORA está disponible al arrancar."""
     api = ThdoraApiClient()
     ok = await api.health()
     if ok:
@@ -73,12 +73,6 @@ async def _check_api() -> None:
 
 
 def _load_token() -> str:
-    """
-    Lee el token de TELEGRAM_BOT_TOKEN.
-
-    Raises:
-        SystemExit: Si la variable no está definida.
-    """
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         logger.error(
@@ -90,18 +84,8 @@ def _load_token() -> str:
 
 
 def build_app(token: str):
-    """
-    Construye y configura la Application de python-telegram-bot.
-
-    Args:
-        token: Token del bot de Telegram.
-
-    Returns:
-        Application configurada con todos los handlers registrados.
-    """
     app = ApplicationBuilder().token(token).build()
 
-    # ── Handlers de comando simples ────────────────────────────────────────────
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("citas", cmd_citas))
     app.add_handler(CommandHandler("borrar", cmd_borrar))
@@ -109,29 +93,18 @@ def build_app(token: str):
     app.add_handler(CommandHandler("resumen", cmd_resumen))
     app.add_handler(CommandHandler("cancelar", cmd_cancelar))
 
-    # ── ConversationHandlers ───────────────────────────────────────────────────
     app.add_handler(build_nueva_handler())
     app.add_handler(build_habito_handler())
 
-    # ── Error handler global ───────────────────────────────────────────────────
     app.add_error_handler(error_handler)
 
     return app
 
 
 def main() -> None:
-    """
-    Punto de entrada principal del bot.
-
-    Comprueba la API, construye la Application y arranca el polling.
-    """
     token = _load_token()
-
-    # Comprobación no bloqueante de la API antes de arrancar
     asyncio.run(_check_api())
-
     app = build_app(token)
-
     logger.info("🤖 THDORA bot arrancando (polling)…")
     app.run_polling(
         drop_pending_updates=True,
