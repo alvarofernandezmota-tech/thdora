@@ -1,1 +1,35 @@
-aW1wb3J0IGh0dHB4CmZyb20gZGF0ZXRpbWUgaW1wb3J0IGRhdGUKCkJBU0VfVVJMID0gImh0dHA6Ly9sb2NhbGhvc3Q6ODAwMCIKCgphc3luYyBkZWYgZ2V0X3N1bW1hcnkoKSAtPiBkaWN0OgogICAgdG9kYXkgPSBkYXRlLnRvZGF5KCkuaXNvZm9ybWF0KCkKICAgIGFzeW5jIHdpdGggaHR0cHguQXN5bmNDbGllbnQoKSBhcyBjbGllbnQ6CiAgICAgICAgciA9IGF3YWl0IGNsaWVudC5nZXQoZiJ7QkFTRV9VUkx9L3N1bW1hcnkve3RvZGF5fSIpCiAgICAgICAgci5yYWlzZV9mb3Jfc3RhdHVzKCkKICAgICAgICByZXR1cm4gci5qc29uKCkKCgphc3luYyBkZWYgZ2V0X2FwcG9pbnRtZW50cygpIC0+IGxpc3Q6CiAgICB0b2RheSA9IGRhdGUudG9kYXkoKS5pc29mb3JtYXQoKQogICAgYXN5bmMgd2l0aCBodHRweC5Bc3luY0NsaWVudCgpIGFzIGNsaWVudDoKICAgICAgICByID0gYXdhaXQgY2xpZW50LmdldChmIntCQVNFX1VSTH0vYXBwb2ludG1lbnRzL3t0b2RheX0iKQogICAgICAgIHIucmFpc2VfZm9yX3N0YXR1cygpCiAgICAgICAgcmV0dXJuIHIuanNvbigpCgoKYXN5bmMgZGVmIGNyZWF0ZV9hcHBvaW50bWVudChkYXRhOiBkaWN0KSAtPiBkaWN0OgogICAgdG9kYXkgPSBkYXRhLmdldCgiZGF0ZSIsIGRhdGUudG9kYXkoKS5pc29mb3JtYXQoKSkKICAgIGFzeW5jIHdpdGggaHR0cHguQXN5bmNDbGllbnQoKSBhcyBjbGllbnQ6CiAgICAgICAgciA9IGF3YWl0IGNsaWVudC5wb3N0KGYie0JBU0VfVVJMfS9hcHBvaW50bWVudHMve3RvZGF5fSIsIGpzb249ZGF0YSkKICAgICAgICByLnJhaXNlX2Zvcl9zdGF0dXMoKQogICAgICAgIHJldHVybiByLmpzb24oKQoKCmFzeW5jIGRlZiBsb2dfaGFiaXQoZGF0YTogZGljdCkgLT4gZGljdDoKICAgIGFzeW5jIHdpdGggaHR0cHguQXN5bmNDbGllbnQoKSBhcyBjbGllbnQ6CiAgICAgICAgciA9IGF3YWl0IGNsaWVudC5wb3N0KGYie0JBU0VfVVJMfS9oYWJpdHMiLCBqc29uPWRhdGEpCiAgICAgICAgci5yYWlzZV9mb3Jfc3RhdHVzKCkKICAgICAgICByZXR1cm4gci5qc29uKCkK
+import httpx
+from datetime import date
+
+BASE_URL = "http://localhost:8000"
+
+
+async def get_summary() -> dict:
+    today = date.today().isoformat()
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{BASE_URL}/summary/{today}")
+        r.raise_for_status()
+        return r.json()
+
+
+async def get_appointments() -> list:
+    today = date.today().isoformat()
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{BASE_URL}/appointments/{today}")
+        r.raise_for_status()
+        return r.json()
+
+
+async def create_appointment(data: dict) -> dict:
+    today = data.get("date", date.today().isoformat())
+    async with httpx.AsyncClient() as client:
+        r = await client.post(f"{BASE_URL}/appointments/{today}", json=data)
+        r.raise_for_status()
+        return r.json()
+
+
+async def log_habit(data: dict) -> dict:
+    async with httpx.AsyncClient() as client:
+        r = await client.post(f"{BASE_URL}/habits", json=data)
+        r.raise_for_status()
+        return r.json()
