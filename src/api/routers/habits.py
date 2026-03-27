@@ -1,87 +1,139 @@
 """
-Router de hábitos (habits) para la API REST de THDORA.
+Router de hábitos — v2 con SQLiteLifeManager.
 
 Endpoints::
 
-    POST   /habits/{date}          → registrar o sobreescribir hábito
-    GET    /habits/{date}          → listar hábitos del día
-    DELETE /habits/{date}/{habit}  → eliminar un hábito concreto
-    PUT    /habits/{date}/{habit}  → actualizar el valor de un hábito
-
-Diseño:
-    Los hábitos se almacenan como Dict[str, str] en el JSON.
-    DELETE y PUT operan directamente sobre ese dict y persisten.
-    El cálculo de valores acumulativos ('+2L') se hace en el bot
-    (handlers.py) antes de llamar a POST — la API siempre recibe
-    el valor final ya calculado.
+    POST   /habits/{date}                   → registrar/sobreescribir hábito
+    GET    /habits/{date}                   → hábitos del día
+    DELETE /habits/{date}/{habit}           → borrar hábito
+    PUT    /habits/{date}/{habit}           → actualizar valor
+    GET    /habits/range/{from}/{to}        → hábitos en rango agrupados por día
+    GET    /habits/week/{date}              → hábitos de la semana (lun–dom)
+    GET    /habits/stats/{habit}            → historial de un hábito concreto
 """
 
-from datetime import date as date_type
-from typing import Dict, List
+from datetime import date as date_type, timedelta
+from typing import Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from src.api.deps import get_manager
-from src.core.impl.json_lifemanager import JsonLifeManager
+from src.core.impl.sqlite_lifemanager import SQLiteLifeManager
 
 router = APIRouter(prefix="/habits", tags=["habits"])
 
 
-# ── Modelos Pydantic ─────────────────────────────────────────────────────────
+# ── Modelos Pydantic ─────────────────────────────────────────────────
 
 class HabitCreate(BaseModel):
-    """Payload para registrar un hábito."""
     habit: str
     value: str
 
 
 class HabitUpdate(BaseModel):
-    """Payload para actualizar el valor de un hábito existente."""
     value: str
 
 
 class HabitResponse(BaseModel):
-    """Hábito devuelto por GET."""
     habit: str
     value: str
 
 
-# ── Helper ─────────────────────────────────────────────────────────────
+class HabitDayResponse(BaseModel):
+    date: str
+    habits: Dict[str, str]
 
-def _parse_date(date_str: str) -> date_type:
-    """Parsea YYYY-MM-DD. Lanza HTTP 422 si el formato es inválido."""
+
+# ── Helper ───────────────────────────────────────────────────────────
+
+def _parse_date(date_str: str) -> str:
     try:
-        return date_type.fromisoformat(date_str)
+        date_type.fromisoformat(date_str)
+        return date_str
     except ValueError:
         raise HTTPException(
             status_code=422,
-            detail=f"Fecha inválida: '{date_str}'. Usa el formato YYYY-MM-DD.",
+            detail=f"Fecha inválida: '{date_str}'. Usa YYYY-MM-DD.",
         )
 
 
-# ── Endpoints ──────────────────────────────────────────────────────────
+def _week_bounds(date_str: str) -> tuple[str, str]:
+    d = date_type.fromisoformat(date_str)
+    monday = d - timedelta(days=d.weekday())
+    sunday = monday + timedelta(days=6)
+    return str(monday), str(sunday)
+
+
+# ── Endpoints ───────────────────────────────────────────────────────
 
 @router.post("/{date_str}", status_code=201)
 def log_habit(
     date_str: str,
     body: HabitCreate,
-    manager: JsonLifeManager = Depends(get_manager),
-) -> Dict[str, str]:
-    """Registra o sobreescribe un hábito del día."""
-    parsed_date = _parse_date(date_str)
-    manager.log_habit(parsed_date, body.habit, body.value)
-    return {"habit": body.habit, "value": body.value}
+    manager: SQLiteLifeManager = Depends(get_manager),
+) -> HabitResponse:
+    """Registra o sobreescribe un hábito del día (upsert)."""
+    _parse_date(date_str)
+    result = manager.log_habit(date_str, body.habit, body.value)
+    return HabitResponse(habit=result["habit"], value=result["value"])
+
+
+@router.get("/week/{date_str}", response_model=List[HabitDayResponse])
+def get_habits_week(
+    date_str: str,
+    manager: SQLiteLifeManager = Depends(get_manager),
+) -> List[HabitDayResponse]:
+    """Hábitos de la semana (lun–dom) que contiene date_str."""
+    _parse_date(date_str)
+    monday, sunday = _week_bounds(date_str)
+    data = manager.get_habits_range(monday, sunday)
+    return [HabitDayResponse(date=d, habits=h) for d, h in sorted(data.items())]
+
+
+@router.get("/range/{date_from}/{date_to}", response_model=List[HabitDayResponse])
+def get_habits_range(
+    date_from: str,
+    date_to: str,
+    manager: SQLiteLifeManager = Depends(get_manager),
+) -> List[HabitDayResponse]:
+    """Hábitos en rango de fechas agrupados por día."""
+    _parse_date(date_from)
+    _parse_date(date_to)
+    data = manager.get_habits_range(date_from, date_to)
+    return [HabitDayResponse(date=d, habits=h) for d, h in sorted(data.items())]
+
+
+@router.get("/stats/{habit_name}", response_model=List[HabitDayResponse])
+def get_habit_stats(
+    habit_name: str,
+    days: int = Query(default=30, ge=1, le=365),
+    manager: SQLiteLifeManager = Depends(get_manager),
+) -> List[HabitDayResponse]:
+    """
+    Historial de un hábito concreto últimos N días.
+    Útil para gráficas y tendencias (base para RPG stats).
+    """
+    from datetime import date as dt
+    today = str(dt.today())
+    date_from = str(dt.today() - timedelta(days=days))
+    data = manager.get_habits_range(date_from, today)
+    result = [
+        HabitDayResponse(date=d, habits={habit_name: h[habit_name]})
+        for d, h in sorted(data.items())
+        if habit_name in h
+    ]
+    return result
 
 
 @router.get("/{date_str}", response_model=List[HabitResponse])
 def get_habits(
     date_str: str,
-    manager: JsonLifeManager = Depends(get_manager),
+    manager: SQLiteLifeManager = Depends(get_manager),
 ) -> List[HabitResponse]:
     """Lista los hábitos del día."""
-    parsed_date = _parse_date(date_str)
-    habits = manager.get_habits(parsed_date)
+    _parse_date(date_str)
+    habits = manager.get_habits(date_str)
     return [HabitResponse(habit=k, value=v) for k, v in habits.items()]
 
 
@@ -89,26 +141,16 @@ def get_habits(
 def delete_habit(
     date_str: str,
     habit: str,
-    manager: JsonLifeManager = Depends(get_manager),
+    manager: SQLiteLifeManager = Depends(get_manager),
 ) -> None:
-    """
-    Elimina un hábito concreto del día.
-
-    Raises:
-        HTTP 404 si el hábito no existe en ese día.
-    """
-    parsed_date = _parse_date(date_str)
-    date_key = str(parsed_date)
-    habits = manager._data.get("habits", {}).get(date_key, {})
-
-    if habit not in habits:
+    """Borra un hábito concreto del día."""
+    _parse_date(date_str)
+    deleted = manager.delete_habit(date_str, habit)
+    if not deleted:
         raise HTTPException(
             status_code=404,
-            detail=f"Hábito '{habit}' no encontrado el {date_key}.",
+            detail=f"Hábito '{habit}' no encontrado el {date_str}.",
         )
-
-    del manager._data["habits"][date_key][habit]
-    manager._save()
 
 
 @router.put("/{date_str}/{habit}", response_model=HabitResponse)
@@ -116,25 +158,14 @@ def update_habit(
     date_str: str,
     habit: str,
     body: HabitUpdate,
-    manager: JsonLifeManager = Depends(get_manager),
+    manager: SQLiteLifeManager = Depends(get_manager),
 ) -> HabitResponse:
-    """
-    Actualiza el valor de un hábito existente.
-
-    Raises:
-        HTTP 404 si el hábito no existe en ese día.
-    """
-    parsed_date = _parse_date(date_str)
-    date_key = str(parsed_date)
-    habits = manager._data.get("habits", {}).get(date_key, {})
-
-    if habit not in habits:
+    """Actualiza el valor de un hábito existente."""
+    _parse_date(date_str)
+    updated = manager.update_habit(date_str, habit, body.value)
+    if not updated:
         raise HTTPException(
             status_code=404,
-            detail=f"Hábito '{habit}' no encontrado el {date_key}. "
-                   f"Usa POST para crearlo.",
+            detail=f"Hábito '{habit}' no encontrado el {date_str}. Usa POST para crearlo.",
         )
-
-    manager._data["habits"][date_key][habit] = body.value
-    manager._save()
-    return HabitResponse(habit=habit, value=body.value)
+    return HabitResponse(habit=updated["habit"], value=updated["value"])

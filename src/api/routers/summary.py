@@ -1,44 +1,52 @@
 """
-Router de resumen diario para la API REST de THDORA.
+Router de resumen diario — v2 con SQLiteLifeManager.
 
-Endpoints:
-    GET /summary/{date} → resumen completo del día (citas + hábitos)
+Endpoints::
+
+    GET /summary/{date}          → resumen del día (citas + hábitos)
+    GET /summary/week/{date}     → resumen de la semana
 """
 
-from fastapi import APIRouter, Depends, HTTPException
-from datetime import date as date_type
+from datetime import date as date_type, timedelta
+from typing import Any, Dict, List
 
-from src.api.models.summary import DaySummaryResponse
-from src.core.impl.json_lifemanager import JsonLifeManager
+from fastapi import APIRouter, Depends, HTTPException
+
+from src.api.deps import get_manager
+from src.core.impl.sqlite_lifemanager import SQLiteLifeManager
 
 router = APIRouter(prefix="/summary", tags=["summary"])
 
 
-def _parse_date(date_str: str) -> date_type:
+def _parse_date(date_str: str) -> str:
     try:
-        return date_type.fromisoformat(date_str)
+        date_type.fromisoformat(date_str)
+        return date_str
     except ValueError:
-        raise HTTPException(
-            status_code=422,
-            detail=f"Fecha inválida: '{date_str}'. Usa el formato YYYY-MM-DD.",
-        )
+        raise HTTPException(status_code=422, detail=f"Fecha inválida: '{date_str}'.")
 
 
-@router.get("/{date_str}", response_model=DaySummaryResponse)
-def get_day_summary(
+@router.get("/{date_str}")
+def get_summary(
     date_str: str,
-    manager: JsonLifeManager = Depends(),
-) -> DaySummaryResponse:
-    """
-    Devuelve el resumen completo del día: fecha, citas y hábitos.
+    manager: SQLiteLifeManager = Depends(get_manager),
+) -> Dict[str, Any]:
+    """Resumen completo del día: citas + hábitos."""
+    _parse_date(date_str)
+    return manager.get_summary(date_str)
 
-    Args:
-        date_str: Fecha en formato YYYY-MM-DD.
-        manager: Instancia del gestor inyectada.
 
-    Returns:
-        DaySummaryResponse: Resumen del día.
-    """
-    parsed_date = _parse_date(date_str)
-    summary = manager.get_day_summary(parsed_date)
-    return DaySummaryResponse(**summary)
+@router.get("/week/{date_str}")
+def get_summary_week(
+    date_str: str,
+    manager: SQLiteLifeManager = Depends(get_manager),
+) -> List[Dict[str, Any]]:
+    """Resumen de cada día de la semana que contiene date_str."""
+    _parse_date(date_str)
+    d = date_type.fromisoformat(date_str)
+    monday = d - timedelta(days=d.weekday())
+    result = []
+    for i in range(7):
+        day = str(monday + timedelta(days=i))
+        result.append(manager.get_summary(day))
+    return result
