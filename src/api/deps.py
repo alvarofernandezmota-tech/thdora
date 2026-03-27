@@ -1,45 +1,27 @@
 """
-Dependencias compartidas de la API THDORA.
+Dependencias de la API — v2 con SQLiteLifeManager.
 
-Proporciona un singleton de ``JsonLifeManager`` para que todos los
-routers compartan la misma instancia y el mismo fichero JSON.
+A partir de F9, la API usa SQLiteLifeManager por defecto.
+El MemoryLifeManager queda como fallback para tests.
 
 Uso en routers::
 
-    from fastapi import Depends
     from src.api.deps import get_manager
 
-    @router.get("/...")
-    def mi_endpoint(manager = Depends(get_manager)):
-        ...
-
-Por qué singleton:
-    JsonLifeManager mantiene una caché en memoria (_data) que se
-    sincroniza con el fichero JSON en cada escritura. Si cada request
-    creara una instancia nueva, las escrituras concurrentes podrían
-    sobreescribirse entre sí. Con un singleton compartido, todas las
-    operaciones pasan por el mismo objeto y el fichero siempre refleja
-    el estado real.
-¿Cuándo migrar?
-    En Fase 11 (SQLAlchemy) este módulo se reemplaza por una sesión
-    de base de datos. El resto del código no cambia.
+    @router.get("/appointments/{date}")
+    def list_appointments(date: str, mgr = Depends(get_manager)):
+        return mgr.get_appointments(date)
 """
 
 from functools import lru_cache
 
-from src.core.impl.json_lifemanager import JsonLifeManager
+from src.core.impl.sqlite_lifemanager import SQLiteLifeManager
 
 
 @lru_cache(maxsize=1)
-def get_manager() -> JsonLifeManager:
+def get_manager() -> SQLiteLifeManager:
     """
-    Devuelve el singleton de JsonLifeManager.
-
-    ``lru_cache(maxsize=1)`` garantiza que solo se crea una instancia
-    durante toda la vida del proceso, independientemente de cuántos
-    requests lleguen en paralelo.
-
-    Returns:
-        La única instancia de JsonLifeManager del proceso.
+    Singleton del manager de datos.
+    lru_cache garantiza una sola instancia durante toda la vida del proceso.
     """
-    return JsonLifeManager()
+    return SQLiteLifeManager()

@@ -4,15 +4,15 @@ build-backend = "setuptools.backends.legacy:build"
 
 [project]
 name = "thdora"
-version = "0.7.0"
-description = "Ecosistema de gestión personal con IA local — Bot Telegram + FastAPI + Ollama"
+version = "0.8.0"
+description = "Ecosistema de gestión personal con IA local — Bot Telegram + FastAPI + SQLite + Ollama"
 readme = "README.md"
 license = { text = "MIT" }
 requires-python = ">=3.10"
 authors = [
     { name = "Álvaro Fernández Mota", email = "" }
 ]
-keywords = ["telegram-bot", "fastapi", "ollama", "life-management", "ai", "personal-assistant"]
+keywords = ["telegram-bot", "fastapi", "ollama", "life-management", "ai", "personal-assistant", "sqlite"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -31,6 +31,7 @@ dependencies = [
     "httpx>=0.27.0",
     "python-dotenv>=1.0.0",
     "dateparser>=1.2.0",
+    "sqlalchemy>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -43,6 +44,7 @@ dev = [
     "flake8>=7.0.0",
     "mypy>=1.8.0",
     "pre-commit>=3.6.0",
+    "alembic>=1.13.0",
 ]
 
 [tool.pytest.ini_options]
@@ -63,14 +65,13 @@ strict = true
 ignore_missing_imports = true
 
 [tool.setuptools.packages.find]
-where = ["."]  
+where = ["."]
 include = ["src*"]
 
-# ── Entorno de desarrollo ────────────────────────────────────────────────────
+# ── Entorno de desarrollo ──────────────────────────────────────────────
 # Ubuntu 22.04 WSL2 — Python 3.10
-# Activar venv : source .venv/bin/activate
-# Instalar deps: pip install fastapi uvicorn pydantic "python-telegram-bot>=21.0" \
-#                httpx python-dotenv dateparser \
-#                pytest pytest-cov pytest-asyncio
-# Arrancar API : make run-api    (uvicorn src.api.main:app --reload)
-# Arrancar bot : make run-bot    (python -m src.bot.main)
+# Activar venv  : source .venv/bin/activate
+# Instalar deps : pip install sqlalchemy fastapi uvicorn pydantic \
+#                 "python-telegram-bot>=21.0" httpx python-dotenv dateparser
+# Arrancar API  : make run-api
+# Arrancar bot  : make run-bot
