@@ -1,13 +1,12 @@
 """
-Handlers del bot Telegram de THDORA — v4.0 (F10 UI Unificada).
+Handlers del bot Telegram de THDORA — v3.1 (F9.3 Mejoras de navegación).
 
-Novedades F10:
-    - Menú principal desde /start con botones inline
-    - _show_day() como función central: citas + hábitos + acciones en un solo mensaje
-    - Vista semana con navegación ◀️▶️ por semanas
-    - Botón 🏠 Home en cada vista para volver al menú
-    - Botón ❌ Cancelar siempre visible en conversaciones activas
-    - ➕ Nueva cita y ✏️ Hábito accesibles desde cualquier punto
+Mantiene F9.2 intacto y añade:
+    - Botón 🏠 Menú en la barra ◀️ Hoy ▶️
+    - Botón ← Volver al día tras borrar/editar/crear
+    - Vista semana con /semana — 7 días clicables
+    - /start con botones inline de acceso rápido
+    - Botón para pasar de citas ↔ hábitos del mismo día
 """
 
 import logging
@@ -36,7 +35,7 @@ from src.bot.api_client import ApiError, ThdoraApiClient
 logger = logging.getLogger(__name__)
 api = ThdoraApiClient()
 
-# ── Estados de conversación ────────────────────────────────────
+# ── Estados de conversación ────────────────────────────────────────────
 NUEVA_DATE, NUEVA_TIME, NUEVA_NOMBRE, NUEVA_TYPE, NUEVA_NOTES, NUEVA_CONFLICT = range(6)
 HABITO_NOMBRE, HABITO_VALUE, HABITO_CONFLICT = range(10, 13)
 EDIT_APT_TIME, EDIT_APT_NOMBRE, EDIT_APT_TYPE, EDIT_APT_NOTES = range(20, 24)
@@ -52,15 +51,15 @@ _RE_ACUM   = re.compile(r"^\+([\d\.]+)(.*)$")
 _RE_NUMBER = re.compile(r"^([\d\.]+)(.*)$")
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 # HELPERS DE FECHA
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 
 def _parse_date_flex(text: str) -> Optional[str]:
     t = text.strip().lower()
-    if t in ("hoy", "today"):                    return str(date.today())
-    if t in ("mañana", "manana", "tomorrow"):    return str(date.today() + timedelta(days=1))
-    if t in ("ayer", "yesterday"):               return str(date.today() - timedelta(days=1))
+    if t in ("hoy", "today"):                     return str(date.today())
+    if t in ("mañana", "manana", "tomorrow"):     return str(date.today() + timedelta(days=1))
+    if t in ("ayer", "yesterday"):                return str(date.today() - timedelta(days=1))
     try:
         datetime.strptime(t, "%Y-%m-%d")
         return t
@@ -90,23 +89,22 @@ def _date_label(date_str: str) -> str:
     d = datetime.strptime(date_str, "%Y-%m-%d").date()
     day_names = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
     dow = day_names[d.weekday()]
-    if date_str == today:     return f"hoy {dow} {d.day} {_month(d.month)}"
-    if date_str == tomorrow:  return f"mañana {dow} {d.day} {_month(d.month)}"
-    if date_str == yesterday: return f"ayer {dow} {d.day} {_month(d.month)}"
-    return f"{dow} {d.day} {_month(d.month)} {d.year}"
+    months = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"]
+    short = f"{dow} {d.day} {months[d.month-1]}"
+    if date_str == today:     return f"hoy — {short}"
+    if date_str == tomorrow:  return f"mañana — {short}"
+    if date_str == yesterday: return f"ayer — {short}"
+    return short
 
 
-def _month(m: int) -> str:
-    return ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"][m-1]
-
-
-# ══════════════════════════════════════════════════════════════════
-# HELPERS ACUMULACIÓN
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
+# HELPERS DE ACUMULACIÓN
+# ════════════════════════════════════════════════════════════════════════
 
 def _accumulate_value(existing: Optional[str], new_input: str) -> str:
     m_new = _RE_ACUM.match(new_input.strip())
-    if not m_new: return new_input
+    if not m_new:
+        return new_input
     increment = float(m_new.group(1))
     unit = m_new.group(2).strip()
     if existing:
@@ -127,47 +125,108 @@ def _clean_acum_context(context: ContextTypes.DEFAULT_TYPE) -> None:
     context.user_data.pop("acum_hab_nombre", None)
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
+# HELPERS DE FORMATO
+# ════════════════════════════════════════════════════════════════════════
+
+def _fmt_appointments(apts: list, date_str: str) -> str:
+    if not apts:
+        return f"📅 No hay citas el *{date_str}*\\."
+    lines = [f"📅 *Citas del {date_str}:*\n"]
+    for a in apts:
+        idx    = a.get("index", "?")
+        nombre = a.get("name", "") or a.get("type", "")
+        notas  = f"\n      _{a['notes']}_" if a.get("notes") else ""
+        lines.append(f"  *{idx}\\. {a['time']}* — {nombre} \\[{a['type']}\\]{notas}")
+    return "\n".join(lines)
+
+
+def _fmt_habits(habits: dict, date_str: str) -> str:
+    if not habits:
+        return f"📊 No hay hábitos registrados el *{date_str}*\\."
+    lines = [f"📊 *Hábitos del {date_str}:*\n"]
+    for h, v in habits.items():
+        lines.append(f"  • {h}: `{v}`")
+    return "\n".join(lines)
+
+
+# ════════════════════════════════════════════════════════════════════════
 # TECLADOS
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 
-def _kb_main() -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📅 Citas",     callback_data="menu_citas"),
-         InlineKeyboardButton("📊 Hábitos",  callback_data="menu_habitos")],
-        [InlineKeyboardButton("📋 Semana",    callback_data="menu_semana")],
-        [InlineKeyboardButton("➕ Nueva cita", callback_data="menu_nueva"),
-         InlineKeyboardButton("✏️ Hábito",     callback_data="menu_habito")],
-        [InlineKeyboardButton("⚙️ Config",    callback_data="menu_config")],
-    ])
-
-
-def _kb_day_nav(date_str: str) -> InlineKeyboardMarkup:
+def _nav_keyboard(date_str: str, prefix: str) -> InlineKeyboardMarkup:
+    """Barra de navegación ◀️ Hoy ▶️ + cambio de vista + 🏠 Menú."""
     d      = datetime.strptime(date_str, "%Y-%m-%d").date()
     prev_d = str(d - timedelta(days=1))
     next_d = str(d + timedelta(days=1))
     today  = str(date.today())
+    other  = "habitos" if prefix == "citas" else "citas"
+    other_emoji = "📊" if prefix == "citas" else "📅"
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("◀️",        callback_data=f"day_nav_{prev_d}"),
-         InlineKeyboardButton("📅 Hoy",    callback_data=f"day_nav_{today}"),
-         InlineKeyboardButton("▶️",        callback_data=f"day_nav_{next_d}")],
-        [InlineKeyboardButton("➕ Cita",   callback_data=f"day_nueva_{date_str}"),
-         InlineKeyboardButton("✏️ Hábito", callback_data=f"day_habito_{date_str}"),
-         InlineKeyboardButton("📋 Semana", callback_data="menu_semana")],
-        [InlineKeyboardButton("🏠 Menú",   callback_data="menu_home")],
+        [
+            InlineKeyboardButton("◀️",      callback_data=f"{prefix}_nav_{prev_d}"),
+            InlineKeyboardButton("📅 Hoy",  callback_data=f"{prefix}_nav_{today}"),
+            InlineKeyboardButton("▶️",      callback_data=f"{prefix}_nav_{next_d}"),
+        ],
+        [
+            InlineKeyboardButton(f"{other_emoji} Ver {other}",  callback_data=f"{other}_nav_{date_str}"),
+            InlineKeyboardButton("📋 Semana",                    callback_data=f"semana_nav_{_monday(date_str)}"),
+        ],
+        [
+            InlineKeyboardButton("🏠 Menú", callback_data="menu_home"),
+        ],
     ])
 
 
-def _kb_week_nav(monday: str) -> InlineKeyboardMarkup:
-    d      = datetime.strptime(monday, "%Y-%m-%d").date()
+def _kb_back(date_str: str, prefix: str = "citas") -> InlineKeyboardMarkup:
+    """Botones de retorno tras una acción."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("← Volver al día", callback_data=f"{prefix}_nav_{date_str}"),
+            InlineKeyboardButton("🏠 Menú",          callback_data="menu_home"),
+        ],
+    ])
+
+
+def _monday(date_str: str) -> str:
+    d = datetime.strptime(date_str, "%Y-%m-%d").date()
+    return str(d - timedelta(days=d.weekday()))
+
+
+def _kb_week_nav(monday_str: str) -> InlineKeyboardMarkup:
+    d      = datetime.strptime(monday_str, "%Y-%m-%d").date()
     prev_w = str(d - timedelta(weeks=1))
     next_w = str(d + timedelta(weeks=1))
     this_w = str(date.today() - timedelta(days=date.today().weekday()))
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("◀️ Semana ant.", callback_data=f"week_nav_{prev_w}"),
-         InlineKeyboardButton("Semana sig. ▶️", callback_data=f"week_nav_{next_w}")],
-        [InlineKeyboardButton("📅 Esta semana", callback_data=f"week_nav_{this_w}"),
-         InlineKeyboardButton("🏠 Menú",        callback_data="menu_home")],
+        [
+            InlineKeyboardButton("◀️ Semana ant.",  callback_data=f"semana_nav_{prev_w}"),
+            InlineKeyboardButton("Semana sig. ▶️",  callback_data=f"semana_nav_{next_w}"),
+        ],
+        [
+            InlineKeyboardButton("📅 Esta semana",  callback_data=f"semana_nav_{this_w}"),
+            InlineKeyboardButton("🏠 Menú",          callback_data="menu_home"),
+        ],
+    ])
+
+
+def _kb_start() -> InlineKeyboardMarkup:
+    today = str(date.today())
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("📅 Citas hoy",   callback_data=f"citas_nav_{today}"),
+            InlineKeyboardButton("📊 Hábitos hoy", callback_data=f"habitos_nav_{today}"),
+        ],
+        [
+            InlineKeyboardButton("📋 Semana",       callback_data=f"semana_nav_{_monday(today)}"),
+        ],
+        [
+            InlineKeyboardButton("➕ Nueva cita",   callback_data="quick_nueva"),
+            InlineKeyboardButton("✏️ Hábito",       callback_data="quick_habito"),
+        ],
+        [
+            InlineKeyboardButton("⚙️ Config",       callback_data="quick_config"),
+        ],
     ])
 
 
@@ -190,7 +249,7 @@ def _kb_hab_value(cfg: Optional[dict]) -> Optional[InlineKeyboardMarkup]:
     if habit_type == "boolean":
         return InlineKeyboardMarkup([[
             InlineKeyboardButton("✅ Sí", callback_data="hval_1"),
-            InlineKeyboardButton("❌ No",  callback_data="hval_0"),
+            InlineKeyboardButton("❌ No", callback_data="hval_0"),
         ]])
     if quick_vals:
         row, rows = [], []
@@ -207,7 +266,7 @@ def _kb_hab_value(cfg: Optional[dict]) -> Optional[InlineKeyboardMarkup]:
 def _kb_apt_actions(date_str: str, index: int) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("🗑️ Borrar", callback_data=f"ad_{date_str}_{index}"),
-        InlineKeyboardButton("✏️ Editar",  callback_data=f"ae_{date_str}_{index}"),
+        InlineKeyboardButton("✏️ Editar", callback_data=f"ae_{date_str}_{index}"),
     ]])
 
 
@@ -222,8 +281,8 @@ def _kb_hab_actions(date_str: str, habit: str) -> InlineKeyboardMarkup:
     h = habit[:15]
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("🗑️", callback_data=f"hd_{date_str}_{h}"),
-        InlineKeyboardButton("✏️",       callback_data=f"he_{date_str}_{h}"),
-        InlineKeyboardButton("➕",             callback_data=f"ha_{date_str}_{h}"),
+        InlineKeyboardButton("✏️", callback_data=f"he_{date_str}_{h}"),
+        InlineKeyboardButton("➕", callback_data=f"ha_{date_str}_{h}"),
     ]])
 
 
@@ -235,7 +294,7 @@ def _kb_hab_confirm(date_str: str, habit: str) -> InlineKeyboardMarkup:
     ]])
 
 
-def _kb_hab_conflict() -> InlineKeyboardMarkup:
+def _kb_hab_conflict(nombre: str, existing_val: str, new_val: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("✏️ Sobreescribir", callback_data="hconf_overwrite"),
         InlineKeyboardButton("➕ Sumar",          callback_data="hconf_add"),
@@ -243,65 +302,146 @@ def _kb_hab_conflict() -> InlineKeyboardMarkup:
     ]])
 
 
-def _kb_conflict_apt() -> InlineKeyboardMarkup:
+def _kb_conflict_apt(date_str: str, time: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Crear igual",  callback_data="aptconf_ok"),
-        InlineKeyboardButton("❌ Cambiar hora", callback_data="aptconf_change"),
+        InlineKeyboardButton("✅ Crear de todas formas", callback_data="aptconf_ok"),
+        InlineKeyboardButton("❌ Cambiar hora",          callback_data="aptconf_change"),
     ]])
 
 
-def _kb_back(date_str: str) -> InlineKeyboardMarkup:
-    """Botones de retorno tras una acción."""
-    return InlineKeyboardMarkup([[
-        InlineKeyboardButton("📆 Ver día", callback_data=f"day_nav_{date_str}"),
-        InlineKeyboardButton("🏠 Menú",   callback_data="menu_home"),
-    ]])
+# ════════════════════════════════════════════════════════════════════════
+# /start — menú principal con botones
+# ════════════════════════════════════════════════════════════════════════
+
+async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    await update.message.reply_text(
+        "👋 *Hola, soy THDORA*\n"
+        "_Tu asistente personal de gestión de vida_\n\n"
+        "*Comandos:*\n"
+        "  📅 /citas · 📊 /habitos · 📋 /semana · 📝 /resumen\n"
+        "  ➕ /nueva · ✏️ /habito · ⚙️ /config · ❌ /cancelar",
+        parse_mode="Markdown",
+        reply_markup=_kb_start(),
+    )
 
 
-# ══════════════════════════════════════════════════════════════════
-# VISTA DÍA — función central
-# ══════════════════════════════════════════════════════════════════
+async def cb_menu_home(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    await query.message.reply_text(
+        "👋 *THDORA* — ¿qué quieres hacer?",
+        parse_mode="Markdown",
+        reply_markup=_kb_start(),
+    )
 
-async def _show_day(msg, date_str: str) -> None:
+
+async def cb_quick_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Botones rápidos desde /start."""
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    if data == "quick_nueva":
+        context.user_data.clear()
+        await query.message.reply_text(
+            "📅 *Nueva cita — paso 1/5*\n\n¿Para qué fecha?\n`hoy`, `mañana`, `27/03`…",
+            parse_mode="Markdown",
+        )
+    elif data == "quick_habito":
+        context.user_data.clear()
+        context.user_data["habito_date"] = str(date.today())
+        await query.message.reply_text(
+            "✏️ *Registrar hábito — paso 1/2*\n\n¿Qué hábito registras hoy?",
+            parse_mode="Markdown",
+            reply_markup=_kb_habitos(),
+        )
+    elif data == "quick_config":
+        await query.message.reply_text("⚙️ Usa /config para gestionar los tipos de hábitos.")
+
+
+# ════════════════════════════════════════════════════════════════════════
+# /citas con navegación ◀️▶️
+# ════════════════════════════════════════════════════════════════════════
+
+async def cmd_citas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _clean_acum_context(context)
+    date_str = _parse_date_arg(context.args[0] if context.args else None)
+    await _show_citas(update.message, date_str)
+
+
+async def _show_citas(msg, date_str: str) -> None:
     try:
-        apts   = await api.get_appointments(date_str)
-        habits = await api.get_habits(date_str)
+        apts = await api.get_appointments(date_str)
     except ApiError:
-        await msg.reply_text("⚠️ Error al conectar con la API\.")
+        await msg.reply_text("⚠️ Error al conectar con la API.")
         return
 
     label = _date_label(date_str)
-    lines = [f"📆 *{label.upper()}*\n"]
+    nav   = _nav_keyboard(date_str, "citas")
 
-    lines.append("📅 *CITAS*")
-    if apts:
-        for a in apts:
-            nombre = a.get("name") or a.get("type", "")
-            notas  = f" — _{a['notes']}_" if a.get("notes") else ""
-            lines.append(f"  `{a['time']}` {nombre} \[{a['type']}\]{notas}")
-    else:
-        lines.append("  _Sin citas_")
-
-    lines.append("")
-    lines.append("📊 *HÁBITOS*")
-    if habits:
-        for h, v in habits.items():
-            lines.append(f"  • {h}: `{v}`")
-    else:
-        lines.append("  _Sin registros_")
-
-    await msg.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=_kb_day_nav(date_str))
-
-    for a in apts:
-        idx    = a.get("index", 0)
-        nombre = a.get("name") or a.get("type", "")
-        notas  = f"\n📝 _{a['notes']}_" if a.get("notes") else ""
+    if not apts:
         await msg.reply_text(
-            f"📅 `{a['time']}` *{nombre}* \[{a['type']}\]{notas}",
+            f"📅 No hay citas el *{label}*\.",
+            parse_mode="Markdown",
+            reply_markup=nav,
+        )
+        return
+
+    await msg.reply_text(
+        f"📅 *Citas del {label}:*",
+        parse_mode="Markdown",
+        reply_markup=nav,
+    )
+    for apt in apts:
+        idx    = apt.get("index", 0)
+        nombre = apt.get("name", "") or apt.get("type", "")
+        notas  = f"\n📝 _{apt['notes']}_" if apt.get("notes") else ""
+        await msg.reply_text(
+            f"📅 *{apt['time']}* — {nombre} \[{apt['type']}\]{notas}",
             parse_mode="Markdown",
             reply_markup=_kb_apt_actions(date_str, idx),
         )
 
+
+async def cb_citas_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    date_str = query.data.replace("citas_nav_", "")
+    await _show_citas(query.message, date_str)
+
+
+# ════════════════════════════════════════════════════════════════════════
+# /habitos con navegación ◀️▶️
+# ════════════════════════════════════════════════════════════════════════
+
+async def cmd_habitos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    _clean_acum_context(context)
+    date_str = _parse_date_arg(context.args[0] if context.args else None)
+    await _show_habitos(update.message, date_str)
+
+
+async def _show_habitos(msg, date_str: str) -> None:
+    try:
+        habits = await api.get_habits(date_str)
+    except ApiError:
+        await msg.reply_text("⚠️ Error al conectar con la API.")
+        return
+
+    label = _date_label(date_str)
+    nav   = _nav_keyboard(date_str, "habitos")
+
+    if not habits:
+        await msg.reply_text(
+            f"📊 No hay hábitos el *{label}*\.",
+            parse_mode="Markdown",
+            reply_markup=nav,
+        )
+        return
+
+    await msg.reply_text(
+        f"📊 *Hábitos del {label}:*",
+        parse_mode="Markdown",
+        reply_markup=nav,
+    )
     for h, v in habits.items():
         await msg.reply_text(
             f"• *{h}*: `{v}`",
@@ -310,158 +450,64 @@ async def _show_day(msg, date_str: str) -> None:
         )
 
 
-# ══════════════════════════════════════════════════════════════════
-# VISTA SEMANA
-# ══════════════════════════════════════════════════════════════════
+async def cb_habitos_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    date_str = query.data.replace("habitos_nav_", "")
+    await _show_habitos(query.message, date_str)
 
-async def _show_week(msg, monday_str: str) -> None:
+
+# ════════════════════════════════════════════════════════════════════════
+# /semana — vista semanal con días clicables
+# ════════════════════════════════════════════════════════════════════════
+
+async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    monday = str(date.today() - timedelta(days=date.today().weekday()))
+    await _show_semana(update.message, monday)
+
+
+async def _show_semana(msg, monday_str: str) -> None:
     monday    = datetime.strptime(monday_str, "%Y-%m-%d").date()
+    sunday    = monday + timedelta(days=6)
     today     = date.today()
     day_names = ["Lun", "Mar", "Mié", "Jue", "Vie", "Sáb", "Dom"]
-    sunday    = monday + timedelta(days=6)
-    lines     = [f"📋 *SEMANA {monday.day} {_month(monday.month)} — {sunday.day} {_month(sunday.month)} {sunday.year}*\n"]
-    btn_days  = []
+    months    = ["ene","feb","mar","abr","may","jun","jul","ago","sep","oct","nov","dic"]
+
+    lines = [f"📋 *Semana {monday.day} {months[monday.month-1]} — {sunday.day} {months[sunday.month-1]} {sunday.year}*\n"]
+    btn_days = []
 
     for i in range(7):
         d     = monday + timedelta(days=i)
         d_str = str(d)
         dow   = day_names[i]
-        mark  = " ◄ hoy" if d == today else ""
+        mark  = " ◀ hoy" if d == today else ""
         try:
             apts   = await api.get_appointments(d_str)
             habits = await api.get_habits(d_str)
-            apt_t  = f"📅{len(apts)}" if apts   else "—"
-            hab_t  = f"📊{len(habits)}" if habits else "—"
+            apt_t  = f"📅{len(apts)}"   if apts   else "  —"
+            hab_t  = f"📊{len(habits)}" if habits else "  —"
             lines.append(f"  {dow} {d.day:02d}  {apt_t}  {hab_t}{mark}")
         except ApiError:
             lines.append(f"  {dow} {d.day:02d}  ⚠️{mark}")
-        btn_days.append(InlineKeyboardButton(f"{dow} {d.day}", callback_data=f"day_nav_{d_str}"))
+        btn_days.append(InlineKeyboardButton(
+            f"{dow} {d.day}", callback_data=f"citas_nav_{d_str}"
+        ))
 
     nav_kb  = _kb_week_nav(monday_str)
     full_kb = InlineKeyboardMarkup([btn_days[:4], btn_days[4:]] + nav_kb.inline_keyboard)
     await msg.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=full_kb)
 
 
-# ══════════════════════════════════════════════════════════════════
-# /start — Menú principal
-# ══════════════════════════════════════════════════════════════════
-
-async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    await _send_main_menu(update.message)
-
-
-async def _send_main_menu(msg) -> None:
-    await msg.reply_text(
-        "👋 *THDORA v4\.0*\n_Tu asistente personal_\n\n¿Qué quieres hacer?",
-        parse_mode="Markdown",
-        reply_markup=_kb_main(),
-    )
-
-
-async def cb_menu_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def cb_semana_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    data  = query.data
-    today = str(date.today())
-
-    if data == "menu_home":
-        await _send_main_menu(query.message)
-    elif data == "menu_citas":
-        await _show_day(query.message, today)
-    elif data == "menu_habitos":
-        await _show_day(query.message, today)
-    elif data == "menu_semana":
-        monday = str(date.today() - timedelta(days=date.today().weekday()))
-        await _show_week(query.message, monday)
-    elif data == "menu_nueva":
-        context.user_data.clear()
-        await query.message.reply_text(
-            "📅 *Nueva cita — paso 1/5*\n\n¿Para qué fecha?\n`hoy`, `mañana`, `27/03`…",
-            parse_mode="Markdown",
-        )
-    elif data == "menu_habito":
-        context.user_data.clear()
-        context.user_data["habito_date"] = today
-        await query.message.reply_text(
-            "✏️ *Registrar hábito — paso 1/2*\n\n¿Qué hábito registras hoy?",
-            parse_mode="Markdown",
-            reply_markup=_kb_habitos(),
-        )
-    elif data == "menu_config":
-        await query.message.reply_text("⚙️ Usa /config para gestionar tipos de hábitos\.")
+    monday_str = query.data.replace("semana_nav_", "")
+    await _show_semana(query.message, monday_str)
 
 
-# ══════════════════════════════════════════════════════════════════
-# NAVEGACIÓN DÍA y SEMANA
-# ══════════════════════════════════════════════════════════════════
-
-async def cb_day_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    date_str = query.data.replace("day_nav_", "")
-    await _show_day(query.message, date_str)
-
-
-async def cb_week_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    query = update.callback_query
-    await query.answer()
-    await _show_week(query.message, query.data.replace("week_nav_", ""))
-
-
-async def cb_day_nueva(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    date_str = query.data.replace("day_nueva_", "")
-    context.user_data.clear()
-    context.user_data["nueva_date"] = date_str
-    await query.message.reply_text(
-        f"📅 *Nueva cita — {date_str}*\n\n🕰 ¿A qué hora? \(HH:MM\)",
-        parse_mode="Markdown",
-    )
-    return NUEVA_TIME
-
-
-async def cb_day_habito(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update.callback_query
-    await query.answer()
-    date_str = query.data.replace("day_habito_", "")
-    context.user_data.clear()
-    context.user_data["habito_date"] = date_str
-    await query.message.reply_text(
-        "✏️ *Registrar hábito*\n\n¿Qué hábito registras?",
-        parse_mode="Markdown",
-        reply_markup=_kb_habitos(),
-    )
-    return HABITO_NOMBRE
-
-
-# ══════════════════════════════════════════════════════════════════
-# /citas  /habitos  /semana (comandos — todos van a _show_day / _show_week)
-# ══════════════════════════════════════════════════════════════════
-
-async def cmd_citas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    _clean_acum_context(context)
-    await _show_day(update.message, _parse_date_arg(context.args[0] if context.args else None))
-
-
-async def cmd_habitos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    _clean_acum_context(context)
-    await _show_day(update.message, _parse_date_arg(context.args[0] if context.args else None))
-
-
-async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    monday = str(date.today() - timedelta(days=date.today().weekday()))
-    await _show_week(update.message, monday)
-
-
-async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    monday = str(date.today() - timedelta(days=date.today().weekday()))
-    await _show_week(update.message, monday)
-
-
-# ══════════════════════════════════════════════════════════════════
-# CALLBACKS CITAS
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
+# CALLBACKS CITAS — borrar / editar
+# ════════════════════════════════════════════════════════════════════════
 
 async def cb_apt_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -475,9 +521,12 @@ async def cb_apt_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TY
     await query.answer()
     _, date_str, idx_str = query.data.split("_", 2)
     try:
-        ok = await api.delete_appointment(date_str, int(idx_str))
+        ok  = await api.delete_appointment(date_str, int(idx_str))
         txt = "🗑️ Cita eliminada\." if ok else "⚠️ Cita no encontrada \(ya borrada\)\."
-        await query.edit_message_text(txt, parse_mode="Markdown", reply_markup=_kb_back(date_str))
+        await query.edit_message_text(
+            txt, parse_mode="Markdown",
+            reply_markup=_kb_back(date_str, "citas"),
+        )
     except ApiError:
         await query.edit_message_text("⚠️ Error al borrar la cita\.", parse_mode="Markdown")
 
@@ -531,19 +580,22 @@ async def cb_apt_edit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def cb_apt_edit_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text  = update.message.text.strip()
-    notes = text if text.lower() != "/skip" else None
-    d     = context.user_data.get("edit_apt_date", "")
-    idx   = context.user_data.get("edit_apt_index", 0)
+    text     = update.message.text.strip()
+    notes    = text if text.lower() != "/skip" else None
+    date_str = context.user_data.get("edit_apt_date", "")
+    index    = context.user_data.get("edit_apt_index", 0)
     try:
-        await api.update_appointment(d, idx,
+        await api.update_appointment(
+            date_str, index,
             time=context.user_data.get("edit_apt_time"),
             name=context.user_data.get("edit_apt_nombre"),
             apt_type=context.user_data.get("edit_apt_type"),
             notes=notes,
         )
         await update.message.reply_text(
-            f"✅ *Cita {idx} actualizada\.*", parse_mode="Markdown", reply_markup=_kb_back(d)
+            f"✅ *Cita {index} actualizada\.*",
+            parse_mode="Markdown",
+            reply_markup=_kb_back(date_str, "citas"),
         )
     except ApiError:
         await _reply_api_error(update)
@@ -551,9 +603,9 @@ async def cb_apt_edit_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return ConversationHandler.END
 
 
-# ══════════════════════════════════════════════════════════════════
-# /nueva
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
+# /nueva — ConversationHandler (5 pasos + conflicto)
+# ════════════════════════════════════════════════════════════════════════
 
 async def nueva_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
@@ -589,8 +641,9 @@ async def nueva_recv_time(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         if conflict:
             nc = conflict.get("name") or conflict.get("type", "cita")
             await update.message.reply_text(
-                f"⚠️ *Ya tienes una cita a las {text}:* _{nc}_\n\n¿Crear igual o cambiar hora?",
-                parse_mode="Markdown", reply_markup=_kb_conflict_apt(),
+                f"⚠️ *Ya tienes una cita a las {text}:* _{nc}_\n\n¿Crear de todas formas o cambiar hora?",
+                parse_mode="Markdown",
+                reply_markup=_kb_conflict_apt(date_str, text),
             )
             return NUEVA_CONFLICT
     except Exception:
@@ -608,7 +661,8 @@ async def nueva_conflict_response(update: Update, context: ContextTypes.DEFAULT_
     if query.data == "aptconf_ok":
         t = context.user_data.get("nueva_time", "")
         await query.edit_message_text(
-            f"✅ Hora: *{t}*\n\n📝 *Paso 3/5* — ¿Cómo se llama la cita?", parse_mode="Markdown"
+            f"✅ Hora: *{t}*\n\n📝 *Paso 3/5* — ¿Cómo se llama la cita?",
+            parse_mode="Markdown",
         )
         return NUEVA_NOMBRE
     await query.edit_message_text("🕰 Escribe la nueva hora \(HH:MM\):", parse_mode="Markdown")
@@ -622,8 +676,9 @@ async def nueva_recv_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return NUEVA_NOMBRE
     context.user_data["nueva_nombre"] = nombre
     await update.message.reply_text(
-        f"✅ Nombre: *{nombre}*\n\n📋 *Paso 4/5* — ¿Tipo?",
-        parse_mode="Markdown", reply_markup=_kb_tipos(),
+        f"✅ Nombre: *{nombre}*\n\n📋 *Paso 4/5* — ¿Tipo de cita?",
+        parse_mode="Markdown",
+        reply_markup=_kb_tipos(),
     )
     return NUEVA_TYPE
 
@@ -631,9 +686,10 @@ async def nueva_recv_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 async def nueva_recv_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    context.user_data["nueva_type"] = query.data.replace("tipo_", "")
+    apt_type = query.data.replace("tipo_", "")
+    context.user_data["nueva_type"] = apt_type
     await query.edit_message_text(
-        f"✅ Tipo: *{context.user_data['nueva_type']}*\n\n📝 *Paso 5/5* — Nota? \(/skip para omitir\)",
+        f"✅ Tipo: *{apt_type}*\n\n📝 *Paso 5/5* — ¿Alguna nota? \(/skip para omitir\)",
         parse_mode="Markdown",
     )
     return NUEVA_NOTES
@@ -652,10 +708,15 @@ async def _save_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     nm = context.user_data.get("nueva_nombre", "")
     tp = context.user_data.get("nueva_type", "otra")
     try:
-        await api.create_appointment(d, t, nm, tp, notes)
+        result = await api.create_appointment(d, t, nm, tp, notes)
+        idx    = result.get("index", "?")
         await update.message.reply_text(
-            f"✅ *Cita creada*\n\n  📅 {d}  🕰 {t}\n  📝 {nm} \[{tp}\]\n  💬 {notes or '—'}",
-            parse_mode="Markdown", reply_markup=_kb_back(d),
+            f"✅ *Cita creada*\n\n"
+            f"  📅 {d}  🕰 {t}\n"
+            f"  📝 {nm} \[{tp}\]\n"
+            f"  💬 {notes or '—'}",
+            parse_mode="Markdown",
+            reply_markup=_kb_back(d, "citas"),
         )
     except ApiError:
         await _reply_api_error(update)
@@ -663,9 +724,9 @@ async def _save_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     return ConversationHandler.END
 
 
-# ══════════════════════════════════════════════════════════════════
-# CALLBACKS HÁBITOS
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
+# CALLBACKS HÁBITOS — borrar / editar / sumar
+# ════════════════════════════════════════════════════════════════════════
 
 async def cb_hab_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -681,7 +742,10 @@ async def cb_hab_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TY
     try:
         ok  = await api.delete_habit(date_str, habit)
         txt = "🗑️ Hábito eliminado\." if ok else "⚠️ Hábito no encontrado \(ya borrado\)\."
-        await query.edit_message_text(txt, parse_mode="Markdown", reply_markup=_kb_back(date_str))
+        await query.edit_message_text(
+            txt, parse_mode="Markdown",
+            reply_markup=_kb_back(date_str, "habitos"),
+        )
     except ApiError:
         await query.edit_message_text("⚠️ Error al borrar el hábito\.", parse_mode="Markdown")
 
@@ -701,10 +765,11 @@ async def cb_hab_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if cfg:
         htype = cfg.get("habit_type", "text")
         unit  = cfg.get("unit") or ""
-        hint  = f" \({HABIT_TYPE_EMOJIS.get(htype,'')} {htype}{' · '+unit if unit else ''}\)"
+        hint  = f" \({HABIT_TYPE_EMOJIS.get(htype, '')} {htype}{' · ' + unit if unit else ''}\)"
     await query.edit_message_text(
-        f"✏️ *Editar '{habit}'*{hint}\n\nNuevo valor:",
-        parse_mode="Markdown", reply_markup=kb,
+        f"✏️ *Editar hábito '{habit}'*{hint}\n\nNuevo valor:",
+        parse_mode="Markdown",
+        reply_markup=kb,
     )
     return EDIT_HAB_VALUE
 
@@ -730,10 +795,11 @@ async def _do_edit_habit(msg, context, value: str) -> int:
         await api.update_habit(date_str, habit, value)
         await msg.reply_text(
             f"✅ *{habit}* actualizado a `{value}`\.",
-            parse_mode="Markdown", reply_markup=_kb_back(date_str),
+            parse_mode="Markdown",
+            reply_markup=_kb_back(date_str, "habitos"),
         )
     except ApiError:
-        await msg.reply_text("⚠️ Error al actualizar el hábito\.")
+        await msg.reply_text("⚠️ Error al actualizar el hábito.")
     context.user_data.clear()
     return ConversationHandler.END
 
@@ -745,7 +811,9 @@ async def cb_hab_add(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None
     context.user_data["acum_hab_date"]   = date_str
     context.user_data["acum_hab_nombre"] = habit
     await query.edit_message_text(
-        f"➕ *Sumar a '{habit}'*\n\nIncremento \(ej: `+2`, `+30min`\) o nuevo valor directo:",
+        f"➕ *Sumar a '{habit}'*\n\n"
+        "Incremento \(ej: `+2`, `+30min`, `+1.5L`\)\n"
+        "O escribe el nuevo valor directo para sobreescribir:",
         parse_mode="Markdown",
     )
 
@@ -754,7 +822,8 @@ async def cb_hab_add_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     new_input = update.message.text.strip()
     date_str  = context.user_data.get("acum_hab_date", "")
     habit     = context.user_data.get("acum_hab_nombre", "")
-    if not date_str or not habit: return
+    if not date_str or not habit:
+        return
     try:
         habits      = await api.get_habits(date_str)
         existing    = habits.get(habit)
@@ -763,23 +832,25 @@ async def cb_hab_add_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         op = "acumulado" if new_input.startswith("+") else "actualizado"
         await update.message.reply_text(
             f"✅ *{habit}* {op}: `{existing or '0'}` → `{final_value}`",
-            parse_mode="Markdown", reply_markup=_kb_back(date_str),
+            parse_mode="Markdown",
+            reply_markup=_kb_back(date_str, "habitos"),
         )
     except ApiError:
         await _reply_api_error(update)
     _clean_acum_context(context)
 
 
-# ══════════════════════════════════════════════════════════════════
-# /habito
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
+# /habito — ConversationHandler con UI adaptativa
+# ════════════════════════════════════════════════════════════════════════
 
 async def habito_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     context.user_data["habito_date"] = str(date.today())
     await update.message.reply_text(
         "✏️ *Registrar hábito — paso 1/2*\n\n¿Qué hábito registras hoy?",
-        parse_mode="Markdown", reply_markup=_kb_habitos(),
+        parse_mode="Markdown",
+        reply_markup=_kb_habitos(),
     )
     return HABITO_NOMBRE
 
@@ -814,12 +885,15 @@ async def _ask_habito_value(msg, context, nombre: str) -> int:
     if cfg:
         htype = cfg.get("habit_type", "text")
         unit  = cfg.get("unit") or ""
-        hint  = f" \({HABIT_TYPE_EMOJIS.get(htype,'')} {htype}{' · '+unit if unit else ''}\)"
+        hint  = f" \({HABIT_TYPE_EMOJIS.get(htype, '')} {htype}{' · ' + unit if unit else ''}\)"
     prompt = f"✅ Hábito: *{nombre}*{hint}\n\n📊 *Paso 2/2* — ¿Cuál es el valor?"
     if kb:
         await msg.reply_text(prompt, parse_mode="Markdown", reply_markup=kb)
     else:
-        await msg.reply_text(prompt + " \(ej: `8h`, `30min`, `2L`\)\nUsa `+N` para acumular\.", parse_mode="Markdown")
+        await msg.reply_text(
+            prompt + " \(ej: `8h`, `30min`, `2L`\)\nUsa `+N` para acumular\.",
+            parse_mode="Markdown",
+        )
     return HABITO_VALUE
 
 
@@ -852,15 +926,19 @@ async def _save_habito(msg, context, new_input: str) -> int:
             context.user_data["habito_existing_val"] = existing
             await msg.reply_text(
                 f"⚠️ *{nombre}* ya tiene `{existing}` hoy\.\n¿Qué haces con `{new_input}`?",
-                parse_mode="Markdown", reply_markup=_kb_hab_conflict(),
+                parse_mode="Markdown",
+                reply_markup=_kb_hab_conflict(nombre, existing, new_input),
             )
             return HABITO_CONFLICT
         final_value = _accumulate_value(existing, new_input)
         await api.log_habit(date_str, nombre, final_value)
         extra = f"\n  \({existing} + {new_input[1:]} = {final_value}\)" if new_input.startswith("+") and existing else ""
         await msg.reply_text(
-            f"✅ *Hábito registrado*\n\n  📊 {nombre}: `{final_value}`\n  📅 {date_str}{extra}",
-            parse_mode="Markdown", reply_markup=_kb_back(date_str),
+            f"✅ *Hábito registrado*\n\n"
+            f"  📊 {nombre}: `{final_value}`\n"
+            f"  📅 {date_str}{extra}",
+            parse_mode="Markdown",
+            reply_markup=_kb_back(date_str, "habitos"),
         )
     except ApiError:
         await _reply_api_error_msg(msg)
@@ -876,7 +954,10 @@ async def habito_conflict_response(update: Update, context: ContextTypes.DEFAULT
     new_val  = context.user_data.get("habito_new_val", "")
     existing = context.user_data.get("habito_existing_val", "")
     if query.data == "hconf_cancel":
-        await query.edit_message_text("❌ Cancelado\.", reply_markup=_kb_back(date_str))
+        await query.edit_message_text(
+            "❌ Operación cancelada\.",
+            reply_markup=_kb_back(date_str, "habitos"),
+        )
         context.user_data.clear()
         return ConversationHandler.END
     final_value = _accumulate_value(existing, f"+{new_val}") if query.data == "hconf_add" else new_val
@@ -885,17 +966,18 @@ async def habito_conflict_response(update: Update, context: ContextTypes.DEFAULT
         op = "sumado" if query.data == "hconf_add" else "sobreescrito"
         await query.edit_message_text(
             f"✅ *{nombre}* {op}: `{existing}` → `{final_value}`",
-            parse_mode="Markdown", reply_markup=_kb_back(date_str),
+            parse_mode="Markdown",
+            reply_markup=_kb_back(date_str, "habitos"),
         )
     except ApiError:
-        await query.edit_message_text("⚠️ Error al guardar el hábito\.")
+        await query.edit_message_text("⚠️ Error al guardar el hábito.")
     context.user_data.clear()
     return ConversationHandler.END
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 # /config
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 
 async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     try:
@@ -922,7 +1004,7 @@ async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
 async def cfg_recv_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     nombre = update.message.text.strip()
     if not nombre:
-        await update.message.reply_text("❌ El nombre no puede estar vacío\.")
+        await update.message.reply_text("❌ El nombre no puede estar vacío.")
         return CFG_NOMBRE
     context.user_data["cfg_nombre"] = nombre
     await update.message.reply_text(
@@ -981,23 +1063,49 @@ async def _save_habit_config(msg, context, unit, quick_vals) -> None:
         await msg.reply_text(
             f"✅ *{nombre}* configurado:\n  Tipo: {habit_type}  Unidad: {unit or '—'}\n  Botones: {quick_str}",
             parse_mode="Markdown",
-            reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menú", callback_data="menu_home")]])
         )
     except Exception as e:
         await msg.reply_text(f"⚠️ Error al guardar la config: {e}")
     context.user_data.clear()
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
+# /resumen
+# ════════════════════════════════════════════════════════════════════════
+
+async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    date_str = _parse_date_arg(context.args[0] if context.args else None)
+    try:
+        summary = await api.get_summary(date_str)
+        apts    = summary.get("appointments", [])
+        habits  = summary.get("habits", {})
+        label   = _date_label(date_str)
+        text = (
+            f"📋 *Resumen del {label}*\n\n"
+            + _fmt_appointments(apts, date_str)
+            + "\n\n"
+            + _fmt_habits(habits, date_str)
+        )
+        await update.message.reply_text(
+            text, parse_mode="Markdown",
+            reply_markup=_kb_back(date_str, "citas"),
+        )
+    except ApiError:
+        await _reply_api_error(update)
+
+
+# ════════════════════════════════════════════════════════════════════════
 # /cancelar
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 
 async def cmd_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     await update.message.reply_text(
         "❌ Operación cancelada\.",
         parse_mode="Markdown",
-        reply_markup=InlineKeyboardMarkup([[InlineKeyboardButton("🏠 Menú", callback_data="menu_home")]])
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🏠 Menú", callback_data="menu_home")
+        ]])
     )
     return ConversationHandler.END
 
@@ -1008,9 +1116,9 @@ async def cb_cancel_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     await query.delete_message()
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 # ERROR HANDLER
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
     logger.error("Error no controlado en update %s: %s", update, context.error, exc_info=True)
@@ -1019,30 +1127,33 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 async def _reply_api_error(update: Update) -> None:
     msg = update.message or (update.callback_query.message if update.callback_query else None)
     if msg:
-        await msg.reply_text("⚠️ No pude conectar con la API\. Asegúrate: `make run-api`", parse_mode="Markdown")
+        await msg.reply_text(
+            "⚠️ No pude conectar con la API\. Asegúrate: `make run-api`",
+            parse_mode="Markdown",
+        )
 
 
 async def _reply_api_error_msg(msg) -> None:
-    await msg.reply_text("⚠️ No pude conectar con la API\. Asegúrate: `make run-api`", parse_mode="Markdown")
+    await msg.reply_text(
+        "⚠️ No pude conectar con la API\. Asegúrate: `make run-api`",
+        parse_mode="Markdown",
+    )
 
 
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 # FACTORIES DE CONVERSATIONHANDLER
-# ══════════════════════════════════════════════════════════════════
+# ════════════════════════════════════════════════════════════════════════
 
 def build_nueva_handler() -> ConversationHandler:
     return ConversationHandler(
-        entry_points=[
-            CommandHandler("nueva", nueva_start),
-            CallbackQueryHandler(cb_day_nueva, pattern=r"^day_nueva_"),
-        ],
+        entry_points=[CommandHandler("nueva", nueva_start)],
         states={
             NUEVA_DATE:     [MessageHandler(filters.TEXT & ~filters.COMMAND, nueva_recv_date)],
             NUEVA_TIME:     [MessageHandler(filters.TEXT & ~filters.COMMAND, nueva_recv_time)],
             NUEVA_CONFLICT: [CallbackQueryHandler(nueva_conflict_response, pattern=r"^aptconf_")],
             NUEVA_NOMBRE:   [MessageHandler(filters.TEXT & ~filters.COMMAND, nueva_recv_nombre)],
             NUEVA_TYPE:     [CallbackQueryHandler(nueva_recv_type, pattern=r"^tipo_")],
-            NUEVA_NOTES:    [
+            NUEVA_NOTES: [
                 CommandHandler("skip", nueva_skip_notes),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, nueva_recv_notes),
             ],
@@ -1054,10 +1165,7 @@ def build_nueva_handler() -> ConversationHandler:
 
 def build_habito_handler() -> ConversationHandler:
     return ConversationHandler(
-        entry_points=[
-            CommandHandler("habito", habito_start),
-            CallbackQueryHandler(cb_day_habito, pattern=r"^day_habito_"),
-        ],
+        entry_points=[CommandHandler("habito", habito_start)],
         states={
             HABITO_NOMBRE: [
                 CallbackQueryHandler(habito_recv_nombre_inline, pattern=r"^hab_"),
@@ -1080,7 +1188,7 @@ def build_edit_apt_handler() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[CallbackQueryHandler(cb_apt_edit_start, pattern=r"^ae_")],
         states={
-            EDIT_APT_TIME:   [
+            EDIT_APT_TIME: [
                 CommandHandler("skip", lambda u, c: _skip_to(u, c, EDIT_APT_NOMBRE, "Nuevo nombre o /skip:")),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, cb_apt_edit_time),
             ],
@@ -1119,11 +1227,11 @@ def build_config_handler() -> ConversationHandler:
         states={
             CFG_NOMBRE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cfg_recv_nombre)],
             CFG_TYPE:   [CallbackQueryHandler(cfg_recv_type, pattern=r"^cfgt_")],
-            CFG_UNIT:   [
+            CFG_UNIT: [
                 CommandHandler("skip", lambda u, c: cfg_recv_unit(u, c)),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, cfg_recv_unit),
             ],
-            CFG_QUICK:  [
+            CFG_QUICK: [
                 CommandHandler("skip", lambda u, c: cfg_recv_quick(u, c)),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, cfg_recv_quick),
             ],

@@ -1,5 +1,5 @@
 """
-Entrypoint del bot Telegram de THDORA — v4.0 (F10 UI Unificada).
+Entrypoint del bot Telegram de THDORA — v3.1 (F9.3 Mejoras de navegación).
 
 Variables de entorno::
     TELEGRAM_BOT_TOKEN   → token de @BotFather (obligatorio)
@@ -29,11 +29,13 @@ from src.bot.handlers import (
     build_edit_apt_handler,
     build_edit_hab_handler,
     build_config_handler,
-    # Menú principal
-    cb_menu_dispatch,
     # Navegación
-    cb_day_nav,
-    cb_week_nav,
+    cb_citas_nav,
+    cb_habitos_nav,
+    cb_semana_nav,
+    # Menú
+    cb_menu_home,
+    cb_quick_dispatch,
     # Citas
     cb_apt_delete,
     cb_apt_delete_confirm,
@@ -88,30 +90,27 @@ def _load_token() -> str:
 def build_app(token: str):
     app = ApplicationBuilder().token(token).build()
 
-    # ── 1. ConversationHandlers ───────────────────────────────────────────────
-    app.add_handler(build_nueva_handler())     # /nueva + day_nueva_
-    app.add_handler(build_habito_handler())    # /habito + day_habito_
+    # ── 1. ConversationHandlers ───────────────────────────────────────────
+    app.add_handler(build_nueva_handler())     # /nueva
+    app.add_handler(build_habito_handler())    # /habito
     app.add_handler(build_edit_apt_handler())  # ^ae_
     app.add_handler(build_edit_hab_handler())  # ^he_
     app.add_handler(build_config_handler())    # /config
 
     # ── 2. CallbackQueryHandlers globales ─────────────────────────────────
-    # Menú principal
-    app.add_handler(CallbackQueryHandler(cb_menu_dispatch, pattern=r"^menu_"))
-    # Navegación día / semana
-    app.add_handler(CallbackQueryHandler(cb_day_nav,  pattern=r"^day_nav_"))
-    app.add_handler(CallbackQueryHandler(cb_week_nav, pattern=r"^week_nav_"))
-    # Citas
+    app.add_handler(CallbackQueryHandler(cb_menu_home,      pattern=r"^menu_home$"))
+    app.add_handler(CallbackQueryHandler(cb_quick_dispatch, pattern=r"^quick_"))
+    app.add_handler(CallbackQueryHandler(cb_citas_nav,      pattern=r"^citas_nav_"))
+    app.add_handler(CallbackQueryHandler(cb_habitos_nav,    pattern=r"^habitos_nav_"))
+    app.add_handler(CallbackQueryHandler(cb_semana_nav,     pattern=r"^semana_nav_"))
     app.add_handler(CallbackQueryHandler(cb_apt_delete,         pattern=r"^ad_"))
     app.add_handler(CallbackQueryHandler(cb_apt_delete_confirm, pattern=r"^adc_"))
-    # Hábitos
     app.add_handler(CallbackQueryHandler(cb_hab_delete,         pattern=r"^hd_"))
     app.add_handler(CallbackQueryHandler(cb_hab_delete_confirm, pattern=r"^hdc_"))
     app.add_handler(CallbackQueryHandler(cb_hab_add,            pattern=r"^ha_"))
-    # Genérico
-    app.add_handler(CallbackQueryHandler(cb_cancel_action, pattern=r"^cancel_action$"))
+    app.add_handler(CallbackQueryHandler(cb_cancel_action,      pattern=r"^cancel_action$"))
 
-    # ── 3. Texto libre (acumulación fuera de flujos) ───────────────────────
+    # ── 3. Texto libre (acumulación fuera de flujos) ──────────────────────
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _route_free_text))
 
     # ── 4. Comandos ───────────────────────────────────────────────────────
@@ -122,7 +121,7 @@ def build_app(token: str):
     app.add_handler(CommandHandler("resumen",  cmd_resumen))
     app.add_handler(CommandHandler("cancelar", cmd_cancelar))
 
-    # ── 5. Error handler ────────────────────────────────────────────────────
+    # ── 5. Error handler ──────────────────────────────────────────────────
     app.add_error_handler(error_handler)
 
     return app
@@ -137,7 +136,7 @@ def main() -> None:
     token = _load_token()
     asyncio.run(_check_api())
     app = build_app(token)
-    logger.info("🤖 THDORA bot v4.0 arrancando (polling)…")
+    logger.info("🤖 THDORA bot v3.1 arrancando (polling)…")
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=["message", "callback_query"],
