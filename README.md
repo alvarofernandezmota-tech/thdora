@@ -1,134 +1,167 @@
-# thdora 🤖
+# 🧠 THDORA
 
-> **Asistente personal con IA local**  
-> Bot Telegram + FastAPI + Ollama (qwen2.5-coder:7b) + OpenClaw
+> **Tu asistente personal de gestión de vida — Bot Telegram + FastAPI + SQLite + IA (próximamente)**
 
-[![Python 3.13](https://img.shields.io/badge/Python-3.13-blue.svg)](https://www.python.org/downloads/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.110-green.svg)](https://fastapi.tiangolo.com/)
-[![Ollama](https://img.shields.io/badge/Ollama-local-black.svg)](https://ollama.ai)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Status: Active](https://img.shields.io/badge/Status-Active%20Development-orange.svg)]()
-
----
-
-## 🦭 Navegación rápida
-
-| Quiero... | Ir a |
-|-----------|------|
-| Entender qué es thdora | [Este README ↓](#qué-es-thdora) |
-| Ver el plan del proyecto | [🗂️ ROADMAP.md](ROADMAP.md) |
-| Ver cambios recientes | [📝 CHANGELOG.md](CHANGELOG.md) |
-| Montar el entorno local | [⚙️ Setup entorno](docs/setup/entorno-local.md) |
-| Entender la arquitectura | [🏗️ ARCHITECTURE.md](docs/architecture/ARCHITECTURE.md) |
-| Ver decisiones técnicas | [📚 ADRs](docs/architecture/decisions/) |
-| Ver toda la documentación | [📂 Índice docs](docs/INDEX.md) |
-| Entender relación con thea-ia | [🔍 ADR-004](docs/architecture/decisions/ADR-004-relacion-thea-ia.md) |
-| Ver historial de trabajo | [📅 Diarios](docs/diarios/) |
+[![Python](https://img.shields.io/badge/python-3.10%2B-blue)](https://python.org)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.110%2B-009688)](https://fastapi.tiangolo.com)
+[![SQLite](https://img.shields.io/badge/SQLite-3-003B57)](https://sqlite.org)
+[![python-telegram-bot](https://img.shields.io/badge/python--telegram--bot-21%2B-2CA5E0)](https://python-telegram-bot.org)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 ---
 
-## ❓ Qué es thdora
+## ¿Qué es THDORA?
 
-thdora es un **asistente personal con IA local** diseñado para correr en tu propia máquina, sin APIs de pago, sin enviar datos a terceros.
+THDORA es un ecosistema de **gestión personal** que vive en Telegram. Registra citas, hábitos diarios y genera resúmenes — todo desde el móvil, sin abrir ningún app extra.
 
-- 📅 **Gestión de citas y hábitos** — JsonLifeManager con persistencia local
-- 🤖 **IA privada local** — Ollama + qwen2.5-coder:7b sobre GTX 1060
-- 📱 **Bot Telegram** — acceso desde el móvil, siempre disponible
-- ⚡ **API REST** — FastAPI para integraciones
-- 🔧 **OpenClaw** — control de repos GitHub desde el bot
-
-**thdora es la evolución de [thea-ia](https://github.com/alvarofernandezmota-tech/thea-ia)** — misma visión, arquitectura más limpia. Ver [ADR-004](docs/architecture/decisions/ADR-004-relacion-thea-ia.md).
+Los datos se guardan en **SQLite local** (persisten entre reinicios) y se exponen a través de una **API REST** con FastAPI. En el futuro próximo: gamificación RPG y procesamiento con IA local.
 
 ---
 
-## 🖥️ Hardware y stack local
+## ✨ Funcionalidades actuales (v0.8.0)
 
-| Componente | Detalle |
-|-----------|----------|
-| CPU | Intel i5-8400 (6 núcleos) |
-| RAM | 16 GB |
-| GPU | NVIDIA GTX 1060 — 6 GB VRAM (CUDA 6.1) |
-| SO | Windows 11 + WSL2 + Ubuntu 22.04 |
-| LLM | qwen2.5-coder:7b via Ollama |
-| Gateway | OpenClaw 127.0.0.1:18789 |
-| Bot | Telegram (emparejado con OpenClaw) |
+### Bot Telegram
 
----
+| Comando | Descripción |
+|---------|-------------|
+| `/start` | Bienvenida y lista de comandos |
+| `/nueva` | Crear cita en 5 pasos (fecha → hora → nombre → tipo → notas) |
+| `/citas [fecha]` | Ver citas del día con botones inline Borrar/Editar |
+| `/habito` | Registrar hábito rápido con teclado + acumulación `+N` |
+| `/habitos [fecha]` | Ver hábitos del día con botones inline |
+| `/resumen [fecha]` | Resumen completo: citas + hábitos |
+| `/cancelar` | Cancelar cualquier operación en curso |
 
-## 🏗️ Arquitectura
+**Fechas aceptadas:** `hoy`, `mañana`, `ayer`, `27/03`, `2026-03-27`, `lunes`, `el viernes`…
+
+**Hábitos acumulables:** escribe `+2` para sumar al valor existente, o el valor directo para sobreescribir.
+
+### API REST (FastAPI)
 
 ```
-thdora/
-├── src/
-│   ├── core/
-│   │   ├── interfaces/     ← contratos ABC (LifeManager, etc.)
-│   │   └── impl/           ← implementaciones (Memory, Json, ...)
-│   ├── api/             ← FastAPI endpoints
-│   ├── bot/             ← Bot Telegram
-│   └── ai/              ← Ollama + agentes
-├── tests/
-│   ├── unit/
-│   ├── integration/
-│   └── e2e/
-├── docs/
-│   ├── INDEX.md         ← índice maestro de toda la doc
-│   ├── architecture/    ← ARCHITECTURE.md + ADRs
-│   ├── setup/           ← entorno local, CUDA, Ollama
-│   ├── auditoria/       ← auditoría de thea-ia
-│   ├── modules/         ← doc por módulo
-│   └── diarios/         ← diario técnico diario
-├── datos/             ← persistencia JSON local (.gitignore)
-├── docker/
-├── pyproject.toml
-├── Makefile
-├── ROADMAP.md
-└── CHANGELOG.md
+Citas:
+  POST   /appointments/{date}                → crear cita
+  GET    /appointments/{date}                → citas del día
+  GET    /appointments/week/{date}           → citas de la semana (lun–dom)
+  GET    /appointments/range/{from}/{to}     → citas en rango
+  GET    /appointments/upcoming/{date}       → próximas citas
+  PUT    /appointments/{date}/{index}        → editar cita
+  DELETE /appointments/{date}/{index}        → borrar cita
+
+Hábitos:
+  POST   /habits/{date}                      → registrar hábito (upsert)
+  GET    /habits/{date}                      → hábitos del día
+  GET    /habits/week/{date}                 → hábitos de la semana
+  GET    /habits/range/{from}/{to}           → hábitos en rango
+  GET    /habits/stats/{habit}?days=30       → historial de un hábito
+  PUT    /habits/{date}/{habit}              → actualizar valor
+  DELETE /habits/{date}/{habit}              → borrar hábito
+
+Resumen:
+  GET    /summary/{date}                     → citas + hábitos del día
+  GET    /summary/week/{date}                → resumen de la semana
 ```
 
 ---
 
 ## 🚀 Instalación rápida
 
+### Requisitos
+
+- Python 3.10+
+- Token de bot de Telegram ([@BotFather](https://t.me/BotFather))
+
+### Pasos
+
 ```bash
+# 1. Clonar
 git clone https://github.com/alvarofernandezmota-tech/thdora.git
 cd thdora
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
 
-# Verificar que todo funciona
-pytest tests/
-# ✅ 13 tests passing
+# 2. Entorno virtual
+python -m venv .venv
+source .venv/bin/activate  # Linux/Mac/WSL
+# .venv\Scripts\activate   # Windows
+
+# 3. Dependencias
+pip install -e .
+
+# 4. Variables de entorno
+cp .env.example .env
+# Editar .env: añadir TELEGRAM_BOT_TOKEN
+
+# 5. Arrancar
+make run-api   # terminal 1 → API en http://localhost:8000
+make run-bot   # terminal 2 → Bot Telegram
 ```
 
-Para el entorno completo (Ollama, OpenClaw, CUDA, Telegram) → ver [docs/setup/entorno-local.md](docs/setup/entorno-local.md).
+### Variables de entorno
 
----
-
-## 📊 Estado del proyecto
-
-| Módulo | Estado | Fase |
-|--------|--------|------|
-| `core/interfaces` | ✅ Completo | Fase 3 |
-| `core/impl/MemoryLifeManager` | ✅ Completo + 13 tests | Fase 4 |
-| `core/impl/JsonLifeManager` | 🔄 En progreso | Fase 5 |
-| `api` FastAPI | ⏳ Esqueleto | Fase 6 |
-| `bot` Telegram | ⏳ Pendiente | Fase 7 |
-| `ai` Ollama | ⏳ Pendiente | Fase 9 |
-| CUDA activado | ⚠️ Pendiente | Setup |
-
----
-
-## 🧯 Ecosistema
-
-```
-alvarofernandezmota-tech/
-├── thea-ia    ← proyecto original (intacto, historia, referencia de código)
-├── thdora     ← este repo (proyecto activo)
-└── personal   ← diario personal y vida
+```env
+TELEGRAM_BOT_TOKEN=tu_token_aqui
+THDORA_API_URL=http://localhost:8000   # opcional, por defecto
+THDORA_DB_URL=sqlite:///data/thdora.db # opcional, por defecto
 ```
 
 ---
 
-## ✍️ Autor
+## 🗂️ Estructura del proyecto
 
-**Álvaro Fernández Mota** — [@alvarofernandezmota-tech](https://github.com/alvarofernandezmota-tech)
+```
+thdora/
+├── src/
+│   ├── api/              ← FastAPI: routers, modelos, deps
+│   │   └── routers/      ← appointments.py, habits.py, summary.py
+│   ├── bot/              ← Bot Telegram: handlers, main, api_client
+│   ├── core/             ← Abstracción + implementaciones
+│   │   └── impl/         ← SQLiteLifeManager (activo), JsonLifeManager
+│   ├── db/               ← SQLAlchemy: base.py, models.py
+│   └── ai/               ← (F10 — pendiente)
+├── data/                 ← thdora.db (SQLite, no versionado)
+├── tests/                ← unit/, integration/, e2e/
+├── docs/                 ← Documentación completa
+├── pyproject.toml        ← deps: fastapi, sqlalchemy, python-telegram-bot…
+└── Makefile              ← make run-api, make run-bot, make test
+```
+
+---
+
+## 🛣️ Hoja de ruta
+
+| Fase | Estado | Descripción |
+|------|--------|-------------|
+| F1–F6 | ✅ | Base, abstracción, API REST, JSON |
+| F7 | ✅ | Bot Telegram v2 con inline buttons |
+| F8 | ✅ | Endpoints de rango y semana |
+| F9 | ✅ | **Persistencia SQLite** |
+| F10 | 🔶 | **Gamificación RPG** — XP, niveles, rachas |
+| F11 | ⚪ | IA local (Groq / Ollama) |
+| F12 | ⚪ | Dashboard web |
+| F13 | ⚪ | Despliegue (Docker + VPS) |
+
+---
+
+## 📚 Documentación
+
+- [Índice de documentación](docs/INDEX.md)
+- [CHANGELOG](CHANGELOG.md)
+- [ROADMAP](ROADMAP.md)
+- [Arquitectura](docs/architecture/ARCHITECTURE.md)
+- [Módulo DB](docs/modules/db.md)
+- [Módulo Bot](docs/modules/bot.md)
+
+---
+
+## 🧪 Tests
+
+```bash
+make test
+# o directamente:
+pytest --cov=src
+```
+
+---
+
+## 📄 Licencia
+
+MIT — Álvaro Fernández Mota, 2026

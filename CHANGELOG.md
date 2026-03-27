@@ -1,46 +1,59 @@
 # 📝 THDORA — CHANGELOG
 
-> **Navegación rápida:** [README](README.md) · [Índice docs](docs/INDEX.md) · [ROADMAP](ROADMAP.md) · [Arquitectura](docs/architecture/ARCHITECTURE.md)
+> **Navegación rápida:** [README](README.md) · [Índice docs](docs/INDEX.md) · [ROADMAP](ROADMAP.md)
 
-Todos los cambios importantes del proyecto se documentan aquí.  
 Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 
 ---
 
-## [0.7.1] — 2026-03-27 (noche)
+## [0.8.0] — 2026-03-27 (noche)
+
+### Añadido — F9: Persistencia SQLite
+- `src/db/__init__.py` — módulo de persistencia
+- `src/db/base.py` — engine SQLAlchemy, `get_session()`, `init_db()`, `Base` declarativa
+- `src/db/models.py` — ORM: tablas `appointments` + `habits` con `to_dict()`
+- `src/db/migrations/README.md` — Alembic pendiente F9.2
+- `src/core/impl/sqlite_lifemanager.py` — `SQLiteLifeManager` completo:
+  - CRUD citas: `get/create/delete/update_appointment`
+  - CRUD hábitos: `get/log/delete/update_habit` con upsert
+  - Extras: `get_appointments_range`, `get_upcoming_appointments`, `get_habits_range`, `get_summary`
+- `src/api/deps.py` — reescrito: singleton `SQLiteLifeManager` vía `lru_cache`
+- `data/.gitkeep` — carpeta donde vive `thdora.db`
+- `docs/modules/db.md` — documentación completa del módulo DB
+- `pyproject.toml` — v0.8.0, `sqlalchemy>=2.0.0` en deps, `alembic` en dev
+
+### Añadido — F9.1: Routers migrados a SQLite
+- `src/api/routers/appointments.py` — **reescrito completo**:
+  - Usa `SQLiteLifeManager` (abandona `JsonLifeManager`)
+  - Nuevos endpoints: `GET /appointments/week/{date}`, `GET /appointments/range/{from}/{to}`, `GET /appointments/upcoming/{date}?limit=N`
+- `src/api/routers/habits.py` — **reescrito completo**:
+  - Usa `SQLiteLifeManager`
+  - Nuevos endpoints: `GET /habits/week/{date}`, `GET /habits/range/{from}/{to}`, `GET /habits/stats/{habit}?days=N`
+- `src/api/routers/summary.py` — reescrito: nuevo `GET /summary/week/{date}`
+
+### Añadido — F7 fixes (handlers v2.1)
+- `src/bot/handlers.py` v2.1:
+  - Fix bug tipo `/nueva`: `etipo_` y `tipo_` son patrones distintos — ya no se interfieren
+  - Fix contexto acum suelto: `_clean_acum_context()` al entrar en `/citas` y `/habitos`
+  - `_clean_acum_context()` también al completar la acumulación
+  - Helper `_skip_to()` y `_skip_to_type()` para flujo edición limpio
+
+### Cambios de arquitectura
+- `JsonLifeManager` sigue disponible pero ya no se usa en producción
+- Los datos ahora viven en `data/thdora.db` (SQLite), persisten entre reinicios
+- `data/` añadido a `.gitignore` (no versionar la BD)
+
+---
+
+## [0.7.1] — 2026-03-27
 
 ### Añadido
 - `src/api/deps.py` — singleton `get_manager()` con `lru_cache(maxsize=1)`
-- `src/api/routers/appointments.py` — nuevo endpoint `PUT /appointments/{date}/{index}` (editar cita)
-- `src/api/routers/habits.py` — nuevos endpoints `DELETE /habits/{date}/{habit}` y `PUT /habits/{date}/{habit}`
-- `src/bot/api_client.py` — métodos nuevos: `update_appointment`, `delete_habit`, `update_habit`, `_put()`
-- `src/bot/handlers.py` — **reescritura completa v2:**
-  - Flujo `/nueva` con **5 pasos** (fecha → hora → nombre → tipo → notas)
-  - Fechas flexibles con `dateparser` (`hoy`, `mañana`, `ayer`, `27/03`, `lunes`…)
-  - `/citas` con botones inline 🗑️ Borrar / ✏️ Editar por cita
-  - `/habitos` con botones inline 🗑️ / ✏️ / ➕ por hábito
-  - Confirmación antes de borrar cita o hábito
-  - Hábitos acumulables: `+2L` suma al valor existente (detecta unidades)
-  - 4 ConversationHandlers: `nueva_cita`, `registrar_habito`, `editar_cita`, `editar_habito`
-- `src/bot/main.py` — v2: registra los 4 ConversationHandlers + 6 CallbackQueryHandlers globales + `_route_free_text` para acumulación
+- Endpoint `PUT /appointments/{date}/{index}` — editar cita
+- Endpoints `DELETE/PUT /habits/{date}/{habit}` — borrar/editar hábito
+- `src/bot/api_client.py` — métodos: `update_appointment`, `delete_habit`, `update_habit`, `_put()`
+- `src/bot/handlers.py` v2: flujo `/nueva` 5 pasos, fechas flexibles, inline buttons, acumulación `+N`
 - `docs/modules/bot.md` — documentación completa del módulo bot
-- `docs/auditoria/2026-03-27.md` — auditoría de la sesión
-
-### Bugs conocidos (pendientes de fix)
-- `/nueva` paso 4 (tipo) se salta: el nombre se captura bien en paso 3 pero el ConversationHandler pasa directo a paso 5 sin mostrar el teclado inline de tipo
-- Contexto `acum_hab_nombre` puede quedar suelto en `user_data` e interceptar texto en `/habitos`
-
-### Probado en vivo
-- ✅ `/start` — menú nuevo con fechas aceptadas
-- ✅ `/nueva` — 5 pasos (paso tipo con bug menor)
-- ✅ `/citas` — botones inline por cita
-- ✅ `/habitos` — botones inline por hábito
-- ✅ `/habito` — teclado + acumulación funcionan
-- ✅ `/resumen` — citas + hábitos
-- ✅ `dateparser` instalado y activo
-
-### Dependencias nuevas
-- `dateparser==1.4.0` — parseo de fechas en lenguaje natural
 
 ---
 
@@ -48,21 +61,21 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 
 ### Añadido
 - `src/bot/api_client.py` — cliente HTTP asíncrono con `ThdoraApiClient`
-- `src/bot/handlers.py` — handlers v1 (4 pasos, sin inline buttons)
-- `src/bot/main.py` — entrypoint con health check al arrancar
+- `src/bot/handlers.py` v1
+- `src/bot/main.py` — entrypoint con health check
 
 ---
 
 ## [0.6.1] — 2026-03-25
 
 ### Añadido
-- `GET /summary/{date}` — endpoint de resumen diario (citas + hábitos) — **cierra Fase 6**
+- `GET /summary/{date}` — resumen diario (citas + hábitos)
 
 ---
 
 ## [0.6.0] — 2026-03-25
 
-### Limpieza y reorganización
+### Limpieza
 - Eliminados 8 ficheros zombie de `src/core/` y `src/api/` raíz
 - Coverage total subió de 45% a 87%
 - Tests reorganizados en `unit/` + `integration/` + `e2e/`
@@ -72,38 +85,28 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 ## [0.5.0] — 2026-03-24 (noche)
 
 ### Añadido
-- `src/core/impl/memory_lifemanager.py`, `src/core/impl/json_lifemanager.py`
-- `src/api/routers/appointments.py`, `src/api/routers/habits.py`
-- Tests unitarios e integración (61 tests)
+- `MemoryLifeManager`, `JsonLifeManager`
+- Routers `appointments.py`, `habits.py`
+- 61 tests unitarios + integración
 
 ---
 
 ## [0.4.0] — 2026-03-24
-
 ### Añadido
 - `docs/INDEX.md`, ADR-003, ADR-004
 
----
-
 ## [0.3.0] — 2026-03-24
-
 ### Añadido
 - ADR-001, ADR-002, arquitectura, módulos core y api
 
----
-
 ## [0.2.0] — 2026-03-24
-
 ### Añadido
 - `AbstractLifeManager`, `MemoryLifeManager`, 13 tests
 
----
-
 ## [0.1.0] — 2026-03-24
-
 ### Añadido
 - Repo inicial: estructura base, `pyproject.toml`, `Makefile`
 
 ---
 
-_Última actualización: 27 marzo 2026 — 21:40 CET_
+_Última actualización: 27 marzo 2026 — 22:21 CET_

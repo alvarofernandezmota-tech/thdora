@@ -4,90 +4,133 @@
 
 ---
 
-## Estado actual — v0.7.1 (27 marzo 2026)
+## Estado actual — v0.8.0 (27 marzo 2026)
 
 ```
-FastAPI (endpoints CRUD completos)
+Bot Telegram (7 comandos + 4 ConversationHandlers + inline buttons)
     ↕ httpx async
-ThdoraApiClient (7 métodos + update/delete)
-    ↕ python-telegram-bot 22
-Bot Telegram (5 comandos + 4 ConversationHandlers + inline buttons)
+ThdoraApiClient (9 métodos)
+    ↕ FastAPI REST
+API (14 endpoints: CRUD + semana + rango + stats)
+    ↕ SQLAlchemy ORM
+SQLite (data/thdora.db — persistencia real)
 ```
 
 **Lo que funciona hoy:**
 - `/start` `/citas` `/habitos` `/habito` `/nueva` `/resumen` `/cancelar`
 - Inline buttons: borrar/editar citas y hábitos, acumulación `+N`
 - Fechas flexibles: `hoy`, `mañana`, `ayer`, `27/03`, nombres de día
-- API: GET/POST/DELETE/PUT para citas y hábitos
+- API: 14 endpoints — CRUD + rango + semana + stats + upcoming
+- **Datos persistentes en SQLite** — sobreviven a reinicios
 
 ---
 
-## 🔴 F7 — Fixes y cierre (próxima sesión)
+## ✅ Completadas
 
-> Objetivo: dejar F7 sin bugs conocidos y con tests
+### F1–F5 — Base, abstracción, core
+- `AbstractLifeManager`, `MemoryLifeManager`, `JsonLifeManager`
+- Arquitectura limpia con ADRs
 
-- [ ] **Fix bug tipo `/nueva`** — el paso 4 (tipo inline) se salta, cita se crea siempre con "otra"
-- [ ] **Fix contexto acumulación suelto** — limpiar `acum_hab_nombre` al entrar en `/citas` y `/habitos`
-- [ ] **Quitar UUID de mensajes** — solo mostrar índice numérico
-- [ ] **Navegación temporal** — botones ◀️ Ayer / ▶️ Mañana en `/citas` y `/habitos`
-- [ ] **Tests API nuevos** — `PUT /appointments`, `DELETE/PUT /habits`
-- [ ] **`/agenda`** — vista de los próximos 7 días con citas
+### F6 — FastAPI REST
+- Endpoints CRUD para citas y hábitos
+- `GET /summary/{date}`
+
+### F7 — Bot Telegram v2
+- 5 comandos + `/nueva` 5 pasos + inline buttons
+- Fechas flexibles con `dateparser`
+- Acumulación `+N` en hábitos
+- Fix bug tipo `/nueva` (v2.1)
+- Fix contexto acum suelto (v2.1)
+
+### F8 — Endpoints temporales
+- `GET /appointments/week/{date}` — citas de la semana
+- `GET /appointments/range/{from}/{to}` — citas en rango
+- `GET /appointments/upcoming/{date}` — próximas citas
+- `GET /habits/week/{date}` — hábitos de la semana
+- `GET /habits/range/{from}/{to}` — hábitos en rango
+- `GET /habits/stats/{habit}?days=N` — historial hábito
+- `GET /summary/week/{date}` — resumen semanal
+
+### F9 — Persistencia SQLite ✅
+- `src/db/base.py` — SQLAlchemy engine + `get_session()` + `init_db()`
+- `src/db/models.py` — tablas `appointments` + `habits`
+- `SQLiteLifeManager` — CRUD completo + rangos + upsert
+- Routers migrados: ya no usan `JsonLifeManager`
+- `data/thdora.db` — archivo SQLite local
 
 ---
 
-## 🟠 F8 — Endpoints y calendario (después de F7)
+## 🔶 F10 — Gamificación RPG (próxima)
 
-> Objetivo: ampliar la API con vistas temporales y mejorar la gestión de calendario
+> **Objetivo:** convertir el tracking de hábitos en un videojuego
 
-- [ ] `GET /appointments/upcoming` — próximas citas desde hoy (para `/proximas`)
-- [ ] `GET /summary/week/{date}` — resumen semanal de hábitos con totales
-- [ ] `/resumen` con botón ➕ Nueva cita inline
-- [ ] `src/bot/config.py` — centralizar `TELEGRAM_BOT_TOKEN`, `API_URL`, timeouts
-- [ ] Comando `/agenda` en bot (7 días, citas agrupadas por día)
+### Sistema de XP y niveles
+
+| Hábito | Condición | XP |
+|--------|-----------|----|
+| sueño | ≥ 7h | +20 XP |
+| ejercicio | cualquier valor | +30 XP |
+| estudio | cualquier valor | +40 XP |
+| agua | ≥ 2L | +15 XP |
+| humor | ≥ 7 | +10 XP |
+| sin sustancias | valor = 0 | +50 XP |
+| racha 7 días | todos los hábitos | +200 XP bonus |
+
+**Niveles:**
+```
+0      XP → Novato
+500    XP → Aprendiz
+1500   XP → Guerrero
+3500   XP → Maestro
+7500   XP → Leyenda
+```
+
+### Tareas F10
+- [ ] `src/db/models.py` — nueva tabla `player_stats` (xp, level, streak, last_update)
+- [ ] `src/core/rpg/xp_engine.py` — cálculo de XP por hábito
+- [ ] `src/core/rpg/level_system.py` — niveles y umbrales
+- [ ] `src/core/rpg/streak_tracker.py` — rachas diarias
+- [ ] `src/api/routers/rpg.py` — endpoints: `GET /rpg/stats`, `POST /rpg/process/{date}`
+- [ ] `src/bot/handlers.py` — `/stats` — ver nivel, XP, racha actual
+- [ ] `/resumen` muestra XP ganado del día + nivel actual
+- [ ] Notificación automática al subir de nivel
+- [ ] Misiones diarias: "Registra 5 hábitos hoy" → bonus XP
+- [ ] Tests del motor RPG
 
 ---
 
-## 🟡 F9 — Persistencia real (SQLite)
+## ⚪ F11 — IA local (Groq / Ollama)
 
-> Objetivo: pasar de JSON a base de datos real
-
-- [ ] `SQLiteLifeManager` implementando `AbstractLifeManager`
-- [ ] Migraciones con `alembic`
-- [ ] Tests de integración con BD real
-- [ ] Mantener `JsonLifeManager` como fallback
-
----
-
-## 🟢 F10 — IA integrada
-
-> Objetivo: procesamiento de lenguaje natural para crear citas y registrar hábitos
+> **Objetivo:** procesamiento de lenguaje natural y análisis de patrones
 
 - [ ] Groq API para comandos de texto libre: "mañana a las 10 tengo médico"
 - [ ] Ollama local para análisis de datos personales
 - [ ] Comando `/ia` — modo conversación libre
-- [ ] Sugerencias automáticas de hábitos basadas en patrones
+- [ ] Sugerencias automáticas basadas en patrones de hábitos
+- [ ] Análisis semanal: "Esta semana dormiste menos que la anterior"
 
 ---
 
-## ⚪ F11 — Dashboard web
+## ⚪ F12 — Dashboard web
 
-> Objetivo: interfaz visual para el historial
+> **Objetivo:** interfaz visual para el historial
 
-- [ ] FastAPI con Jinja2 o React frontend
-- [ ] Gráficas de hábitos (Chart.js)
+- [ ] FastAPI + Jinja2 o React
+- [ ] Gráficas de hábitos por semana/mes
+- [ ] Barra de XP y nivel RPG
 - [ ] Exportar datos a CSV/JSON
 
 ---
 
-## ⚪ F12 — Despliegue
+## ⚪ F13 — Despliegue
 
-> Objetivo: THDORA corriendo 24/7
+> **Objetivo:** THDORA corriendo 24/7
 
-- [ ] Docker Compose: `api` + `bot` + volumen de datos
-- [ ] VPS o Raspberry Pi local
-- [ ] Variables de entorno con `python-dotenv` en producción
+- [ ] Docker Compose: `api` + `bot` + volumen `data/`
+- [ ] VPS o Raspberry Pi
 - [ ] Health checks y reinicio automático
+- [ ] Backup automático de `thdora.db`
 
 ---
 
-_Última actualización: 27 marzo 2026 — 21:40 CET_
+_Última actualización: 27 marzo 2026 — 22:21 CET_
