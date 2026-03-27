@@ -1,23 +1,14 @@
 """
-Entrypoint del bot Telegram de THDORA — v3.0 (F9.2).
-
-Lee el token de la variable de entorno ``TELEGRAM_BOT_TOKEN``,
-registra todos los handlers y arranca el bot en modo polling.
+Entrypoint del bot Telegram de THDORA — v4.0 (F10 UI Unificada).
 
 Variables de entorno::
-
     TELEGRAM_BOT_TOKEN   → token de @BotFather (obligatorio)
     THDORA_API_URL       → URL de la FastAPI (por defecto http://localhost:8000)
 
-Ejecución::
-
-    make run-bot          # Makefile
-    python -m src.bot.main
-
-Orden de registro (importante):
+Orden de registro:
     1. ConversationHandlers (mayor prioridad)
     2. CallbackQueryHandlers globales
-    3. MessageHandler para texto libre (acumulación)
+    3. MessageHandler texto libre (acumulación)
     4. CommandHandlers simples
     5. Error handler
 """
@@ -28,8 +19,7 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler
-from telegram.ext import MessageHandler, filters
+from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from src.bot.api_client import ThdoraApiClient
 from src.bot.handlers import (
@@ -39,23 +29,26 @@ from src.bot.handlers import (
     build_edit_apt_handler,
     build_edit_hab_handler,
     build_config_handler,
-    # Callbacks citas
+    # Menú principal
+    cb_menu_dispatch,
+    # Navegación
+    cb_day_nav,
+    cb_week_nav,
+    # Citas
     cb_apt_delete,
     cb_apt_delete_confirm,
-    # Callbacks hábitos
+    # Hábitos
     cb_hab_delete,
     cb_hab_delete_confirm,
     cb_hab_add,
     cb_hab_add_value,
-    # Navegación
-    cb_citas_nav,
-    cb_habitos_nav,
-    # Genéricos
+    # Genérico
     cb_cancel_action,
-    # Comandos simples
+    # Comandos
     cmd_start,
     cmd_citas,
     cmd_habitos,
+    cmd_semana,
     cmd_resumen,
     cmd_cancelar,
     # Error
@@ -81,10 +74,7 @@ async def _check_api() -> None:
     if ok:
         logger.info("✅ API de THDORA disponible en %s", api.base_url)
     else:
-        logger.warning(
-            "⚠\ufe0f  API de THDORA no responde en %s — el bot arranca igualmente.",
-            api.base_url,
-        )
+        logger.warning("⚠️  API de THDORA no responde en %s — el bot arranca igualmente.", api.base_url)
 
 
 def _load_token() -> str:
@@ -98,17 +88,19 @@ def _load_token() -> str:
 def build_app(token: str):
     app = ApplicationBuilder().token(token).build()
 
-    # ── 1. ConversationHandlers ──────────────────────────────────────────────
-    app.add_handler(build_nueva_handler())       # /nueva (5 pasos + conflicto)
-    app.add_handler(build_habito_handler())      # /habito (2 pasos + UI adaptativa)
-    app.add_handler(build_edit_apt_handler())    # editar cita (^ae_)
-    app.add_handler(build_edit_hab_handler())    # editar hábito (^he_)
-    app.add_handler(build_config_handler())      # /config — gestionar HabitConfig
+    # ── 1. ConversationHandlers ───────────────────────────────────────────────
+    app.add_handler(build_nueva_handler())     # /nueva + day_nueva_
+    app.add_handler(build_habito_handler())    # /habito + day_habito_
+    app.add_handler(build_edit_apt_handler())  # ^ae_
+    app.add_handler(build_edit_hab_handler())  # ^he_
+    app.add_handler(build_config_handler())    # /config
 
-    # ── 2. CallbackQueryHandlers globales ──────────────────────────────────────
-    # Navegación ◀️▶️
-    app.add_handler(CallbackQueryHandler(cb_citas_nav,   pattern=r"^citas_nav_"))
-    app.add_handler(CallbackQueryHandler(cb_habitos_nav, pattern=r"^habitos_nav_"))
+    # ── 2. CallbackQueryHandlers globales ─────────────────────────────────
+    # Menú principal
+    app.add_handler(CallbackQueryHandler(cb_menu_dispatch, pattern=r"^menu_"))
+    # Navegación día / semana
+    app.add_handler(CallbackQueryHandler(cb_day_nav,  pattern=r"^day_nav_"))
+    app.add_handler(CallbackQueryHandler(cb_week_nav, pattern=r"^week_nav_"))
     # Citas
     app.add_handler(CallbackQueryHandler(cb_apt_delete,         pattern=r"^ad_"))
     app.add_handler(CallbackQueryHandler(cb_apt_delete_confirm, pattern=r"^adc_"))
@@ -117,29 +109,26 @@ def build_app(token: str):
     app.add_handler(CallbackQueryHandler(cb_hab_delete_confirm, pattern=r"^hdc_"))
     app.add_handler(CallbackQueryHandler(cb_hab_add,            pattern=r"^ha_"))
     # Genérico
-    app.add_handler(CallbackQueryHandler(cb_cancel_action,      pattern=r"^cancel_action$"))
+    app.add_handler(CallbackQueryHandler(cb_cancel_action, pattern=r"^cancel_action$"))
 
-    # ── 3. MessageHandler texto libre (acumulación fuera de flujo) ──────────────
-    app.add_handler(MessageHandler(
-        filters.TEXT & ~filters.COMMAND,
-        _route_free_text,
-    ))
+    # ── 3. Texto libre (acumulación fuera de flujos) ───────────────────────
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _route_free_text))
 
-    # ── 4. CommandHandlers simples ──────────────────────────────────────────
-    app.add_handler(CommandHandler("start",   cmd_start))
-    app.add_handler(CommandHandler("citas",   cmd_citas))
-    app.add_handler(CommandHandler("habitos", cmd_habitos))
-    app.add_handler(CommandHandler("resumen", cmd_resumen))
-    app.add_handler(CommandHandler("cancelar",cmd_cancelar))
+    # ── 4. Comandos ───────────────────────────────────────────────────────
+    app.add_handler(CommandHandler("start",    cmd_start))
+    app.add_handler(CommandHandler("citas",    cmd_citas))
+    app.add_handler(CommandHandler("habitos",  cmd_habitos))
+    app.add_handler(CommandHandler("semana",   cmd_semana))
+    app.add_handler(CommandHandler("resumen",  cmd_resumen))
+    app.add_handler(CommandHandler("cancelar", cmd_cancelar))
 
-    # ── 5. Error handler ───────────────────────────────────────────────────
+    # ── 5. Error handler ────────────────────────────────────────────────────
     app.add_error_handler(error_handler)
 
     return app
 
 
 async def _route_free_text(update, context) -> None:
-    """Enruta texto libre fuera de flujos: solo para acumulación de hábitos."""
     if context.user_data.get("acum_hab_nombre"):
         await cb_hab_add_value(update, context)
 
@@ -148,7 +137,7 @@ def main() -> None:
     token = _load_token()
     asyncio.run(_check_api())
     app = build_app(token)
-    logger.info("🤖 THDORA bot v3.0 arrancando (polling)…")
+    logger.info("🤖 THDORA bot v4.0 arrancando (polling)…")
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=["message", "callback_query"],
