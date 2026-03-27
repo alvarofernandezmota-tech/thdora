@@ -2,7 +2,7 @@
 
 > **Navegación rápida:** [README](README.md) · [Índice docs](docs/INDEX.md) · [CHANGELOG](CHANGELOG.md) · [Arquitectura](docs/architecture/ARCHITECTURE.md) · [Personal Data Platform](docs/PERSONAL-DATA-PLATFORM.md)
 
-## Estado: v0.6.1 — 25 marzo 2026
+## Estado: v0.7.0 — 27 marzo 2026
 
 ```
 [████████████████████████] 100% ✅ FASE 1: Setup inicial + estructura enterprise
@@ -11,18 +11,18 @@
 [████████████████████████] 100% ✅ FASE 4: MemoryLifeManager completo + tests unitarios
 [████████████████████████] 100% ✅ FASE 5: JsonLifeManager + persistencia + tests
 [████████████████████████] 100% ✅ FASE 6: FastAPI REST (7 endpoints) + tests + docs
-[░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 7: Bot Telegram ← SIGUIENTE
+[███████████████▌░░░░░░░░]  60% 🔄 FASE 7: Bot Telegram ← EN PROGRESO
 [░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 8: Ollama IA local (mistral/qwen2.5 + CUDA)
 [░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 9: OpenClaw + agentes IA (migración thea-ia)
 [░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 10: CI/CD + Docker + Deploy
 [░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 11: BD real (SQLAlchemy + Alembic)
 [░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 12: Personal Data Platform — sync YAML → SQLite
-[░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 13: Bot tracking — /stats /habitos /nota-hoy + alertas
+[░░░░░░░░░░░░░░░░░░░░░░░░]   0% ⏳ FASE 13: Bot tracking — /stats /nota-hoy /racha + alertas
 ```
 
 ---
 
-## ✅ FASES 1-6 — Completadas (v0.6.1)
+## ✅ FASES 1–6 — Completadas (v0.6.1)
 
 ### Resumen
 - Core: `AbstractLifeManager`, `MemoryLifeManager` (100% cov), `JsonLifeManager` (100% cov)
@@ -44,29 +44,42 @@
 
 ---
 
-## ⏳ FASE 7 — Bot Telegram ← ACTIVA
+## 🔄 FASE 7 — Bot Telegram ← EN PROGRESO (v0.7.0)
 
 **Objetivo:** thdora accesible desde el móvil. Primer uso real del sistema.
 
-### Primer paso
-- [ ] Test de integración para `GET /summary/{date}`
+### F7a — Bot base ✅ COMPLETADO (27 marzo 2026)
+- [x] `src/bot/api_client.py` — cliente HTTP asíncrono completo
+- [x] `src/bot/handlers.py` — todos los comandos básicos
+- [x] `src/bot/main.py` — arranca, lee `.env`, comprueba API
+- [x] `/start`, `/citas`, `/habitos`, `/resumen` — funcionan
+- [x] `/nueva` y `/habito` — ConversationHandlers (flujos básicos)
+- [x] `deps.py` — singleton del manager (en desarrollo)
 
-### Fase 7a — Comandos explícitos (6 comandos)
-- [ ] Setup `python-telegram-bot` en `src/bot/`
-- [ ] `/hoy` — resumen del día
-- [ ] `/citas` — listar citas
-- [ ] `/cita` — crear cita
-- [ ] `/borrar_cita` — eliminar cita
-- [ ] `/habitos` — listar hábitos
-- [ ] `/habito` — registrar hábito
-- [ ] `TELEGRAM_TOKEN` en `.env`
+### F7b — Sistema mejorado 🔄 EN DESARROLLO (hoy noche)
 
-### Fase 7b — Lenguaje natural básico
-- [ ] Detección de intención por regex
-- [ ] "cita médica mañana a las 10" → `/cita`
-- [ ] "dormí 7 horas" → `/habito sueno 7h`
+Rediseño del sistema de interacción con mejoras importantes:
 
-🔍 Referencia thea-ia: [`src/theaia/adapters/telegram/`](https://github.com/alvarofernandezmota-tech/thea-ia/tree/main/src/theaia/adapters/telegram)
+**API — nuevos endpoints:**
+- [ ] `PUT /appointments/{date}/{index}` — editar cita
+- [ ] `DELETE /habits/{date}/{habit}` — borrar hábito
+- [ ] `PUT /habits/{date}/{habit}` — editar hábito
+
+**Bot — flujos mejorados:**
+- [ ] Fechas y horas **flexibles** con `dateparser` (`hoy`, `mañana`, `9am`, `27/03`)
+- [ ] `/nueva` con **5 pasos** (+ nombre/descripción de la cita)
+- [ ] `/citas` con **botones inline** por cada cita (🗑️ Borrar / ✏️ Editar)
+- [ ] `/habitos` con **botones inline** por cada hábito (🗑️ Borrar / ✏️ Editar / ➕ Sumar)
+- [ ] Hábitos **acumulables**: `+2L` suma al valor existente con detección de unidades
+- [ ] **Confirmación** antes de borrar
+- [ ] Eliminar `/borrar <id>` — reemplazado por botones desde la lista
+
+**Deps nuevas:**
+- [ ] `pip install python-dotenv dateparser` (ya en `pyproject.toml`)
+
+### F7c — Tests del bot (pendiente)
+- [ ] `tests/unit/test_api_client.py`
+- [ ] `tests/integration/test_bot_handlers.py`
 
 ---
 
@@ -80,38 +93,63 @@
 - [ ] Extraer NLP engine de thea-ia
 - [ ] `/pregunta <texto>` en el bot
 
-🔍 Referencia thea-ia: [`nlp_engine.py`](https://github.com/alvarofernandezmota-tech/thea-ia/blob/main/src/theaia/core/nlp_engine.py)
-
 ---
 
 ## ⏳ FASES 9–11
 
 - **Fase 9** — OpenClaw + agentes IA (orquestador de thea-ia)
-- **Fase 10** — CI/CD + Docker + Deploy
-- **Fase 11** — SQLAlchemy + Alembic (migración desde thea-ia)
+- **Fase 10** — CI/CD + Docker + Deploy (Compose: `api` + `bot` + `ollama`)
+- **Fase 11** — SQLAlchemy + Alembic (migración desde JSON a SQLite)
 
 ---
 
 ## ⏳ FASE 12 — Personal Data Platform — sync YAML → SQLite
 
-**Objetivo:** Convertir thdora en el motor del ecosistema de tracking personal de Álvaro.  
-**Dependencias:** Fase 11 (SQLAlchemy) + Fase 7 (Bot Telegram)  
+**Objetivo:** Convertir thdora en el motor del **ecosistema PDP** de Álvaro.  
+**Dependencias:** Fase 11 (SQLAlchemy) + Fase 7 (Bot)  
 **Docs completos:** [docs/PERSONAL-DATA-PLATFORM.md](docs/PERSONAL-DATA-PLATFORM.md)
 
-### Arquitectura
+### El ecosistema completo
+
 ```
-repo personal/ — YAML diarios (fuente de verdad humana)
-        ↓
-sync_tracking.py — lee YAMLs, valida schema, inserta en BD
-        ↓
-SQLite (thdora) — datos estructurados, consultas rápidas
-        ↓
-thdora API — nuevos endpoints /tracking/*
+repo personal/              ← YAML diarios (fuente de verdad humana)
+    └── YYYY-MM-DD.yaml        ← ~2 min cada noche
+            ↓
+    parse_tracking.py        ← valida schema + calcula nota
+            ↓
+    SQLite (thdora)          ← datos estructurados, consultas rápidas
+            ↓
+    thdora FastAPI           ← GET /tracking/semana/13
+            ↓
+    Bot Telegram             ← /stats /nota-hoy /racha
+            ↓
+    Ollama/Groq (Fase 8)     ← contexto personal privado
+```
+
+### YAML diario (fuente de verdad)
+
+```yaml
+fecha: 2026-03-27
+dormir_hora: "00:22"
+despertar_hora: "09:30"
+horas_sueno: 9.1
+estudio_m5_horas: 2.0
+proyecto_horas: 1.5
+aprendizaje_ia_horas: 1.0
+ejercicio: true
+ejercicio_minutos: 20
+thea_horas: 3.0
+tabaco: 1
+thc: 2
+cocaina: false
+dias_sin_cocaina: 23
+nota: 7.5
+notas: "Tarde productiva. Sistema YAML implementado."
 ```
 
 ### Tareas F12
 - [ ] `src/tracking/models.py` — modelo SQLAlchemy `DailyRecord`
-- [ ] `src/tracking/sync.py` — lee YAML via GitHub API o ruta local
+- [ ] `src/tracking/sync.py` — lee YAML vía GitHub API o ruta local
 - [ ] `src/tracking/parser.py` — valida y transforma YAML → `DailyRecord`
 - [ ] `GET /tracking/semana/{num}` — métricas automáticas de una semana
 - [ ] `GET /tracking/mes/{num}` — métricas de un mes
@@ -121,14 +159,13 @@ thdora API — nuevos endpoints /tracking/*
 
 ---
 
-## ⏳ FASE 13 — Bot tracking — /stats /habitos /nota-hoy + alertas
+## ⏳ FASE 13 — Bot tracking — /stats /nota-hoy /racha + alertas
 
-**Objetivo:** El bot Telegram responde preguntas de tracking y manda alertas proactivas.  
+**Objetivo:** El bot responde preguntas de tracking y manda alertas proactivas.  
 **Dependencias:** Fase 7 (Bot) + Fase 12 (PDP)
 
 ### Comandos nuevos
-- [ ] `/stats` — resumen semanal completo (notas, estudio, sueño, sustancias)
-- [ ] `/habitos` — estado de hábitos de la semana actual
+- [ ] `/stats` — resumen semanal (notas, estudio, sueño, sustancias)
 - [ ] `/nota-hoy` — calcula nota del día automáticamente
 - [ ] `/racha` — rachas activas (días sin cocaína, ejercicio consecutivo, etc.)
 
@@ -142,4 +179,4 @@ thdora API — nuevos endpoints /tracking/*
 
 ---
 
-_Actualizado: 27 marzo 2026 17:42 CET — Fases 12-13 Personal Data Platform añadidas_
+_Actualizado: 27 marzo 2026 21:12 CET — F7 al 60%, F7b en desarrollo, PDP alineado_
