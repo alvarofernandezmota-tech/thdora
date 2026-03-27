@@ -40,22 +40,13 @@ class ThdoraApiClient:
     """
     Cliente HTTP asíncrono para la API REST de THDORA.
 
-    Cada método lanza ``ApiError`` si la petición falla,
-    de modo que los handlers pueden capturar un solo tipo de excepción.
-
-    Attributes:
-        base_url (str): URL base de la API (sin trailing slash).
-
-    Example::
-
-        api = ThdoraApiClient()
-        await api.health()                                    # True / False
-        await api.get_appointments("2026-03-24")              # List[Dict]
-        await api.create_appointment("2026-03-24", "10:00", "médica", "notas")
-        await api.delete_appointment("uuid-str")
-        await api.get_habits("2026-03-24")                    # Dict[str, str]
-        await api.log_habit("2026-03-24", "sueno", "8h")
-        await api.get_summary("2026-03-24")                   # Dict
+    Rutas reales de la API:
+        GET    /appointments/{date}         → listar citas
+        POST   /appointments/{date}         → crear cita
+        DELETE /appointments/{date}/{index} → eliminar cita por índice
+        GET    /habits/{date}               → listar hábitos (List)
+        POST   /habits/{date}               → registrar hábito
+        GET    /summary/{date}              → resumen del día
     """
 
     def __init__(self, base_url: str = _API_BASE) -> None:
@@ -76,18 +67,7 @@ class ThdoraApiClient:
     # ── Appointments ───────────────────────────────────────────────────────────
 
     async def get_appointments(self, date_str: str) -> List[Dict[str, Any]]:
-        """
-        Devuelve las citas de un día.
-
-        Args:
-            date_str: Fecha en formato ``YYYY-MM-DD``.
-
-        Returns:
-            Lista de dicts con claves ``id``, ``time``, ``type``, ``notes``.
-
-        Raises:
-            ApiError: Si la petición falla.
-        """
+        """Devuelve las citas de un día como lista de dicts."""
         return await self._get(f"/appointments/{date_str}")
 
     async def create_appointment(
@@ -99,40 +79,23 @@ class ThdoraApiClient:
     ) -> Dict[str, Any]:
         """
         Crea una nueva cita.
-
-        Args:
-            date_str: Fecha en formato ``YYYY-MM-DD``.
-            time: Hora en formato ``HH:MM``.
-            apt_type: Tipo de cita (``médica``, ``personal``, ``trabajo``, ``otra``).
-            notes: Notas opcionales.
-
-        Returns:
-            Dict con la cita creada, incluyendo su ``id``.
-
-        Raises:
-            ApiError: Si la petición falla o la validación no pasa.
+        POST /appointments/{date} con body {time, type, notes}
         """
         return await self._post(
-            "/appointments",
-            json={"date": date_str, "time": time, "type": apt_type, "notes": notes},
+            f"/appointments/{date_str}",
+            json={"time": time, "type": apt_type, "notes": notes},
         )
 
-    async def delete_appointment(self, apt_id: str) -> bool:
+    async def delete_appointment(self, date_str: str, index: int) -> bool:
         """
-        Elimina una cita por su UUID.
-
-        Args:
-            apt_id: UUID de la cita (completo o prefijo de 8 chars).
-
-        Returns:
-            ``True`` si se eliminó, ``False`` si no se encontró.
-
-        Raises:
-            ApiError: Si hay un error de red.
+        Elimina una cita por su índice en el día.
+        DELETE /appointments/{date}/{index}
         """
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                r = await client.delete(f"{self.base_url}/appointments/{apt_id}")
+                r = await client.delete(
+                    f"{self.base_url}/appointments/{date_str}/{index}"
+                )
                 if r.status_code == 404:
                     return False
                 _raise_for_status(r)
@@ -144,52 +107,27 @@ class ThdoraApiClient:
 
     async def get_habits(self, date_str: str) -> Dict[str, str]:
         """
-        Devuelve los hábitos registrados de un día.
-
-        Args:
-            date_str: Fecha en formato ``YYYY-MM-DD``.
-
-        Returns:
-            Dict ``{hábito: valor}``.
-
-        Raises:
-            ApiError: Si la petición falla.
+        Devuelve los hábitos de un día como Dict {habit: value}.
+        La API devuelve List[{habit, value}], se convierte aquí.
         """
-        return await self._get(f"/habits/{date_str}")
+        raw: List[Dict[str, str]] = await self._get(f"/habits/{date_str}")
+        return {item["habit"]: item["value"] for item in raw}
 
     async def log_habit(self, date_str: str, habit: str, value: str) -> bool:
         """
-        Registra o actualiza el valor de un hábito.
-
-        Args:
-            date_str: Fecha en formato ``YYYY-MM-DD``.
-            habit: Nombre del hábito (ej: ``"sueno"``).
-            value: Valor del hábito (ej: ``"8h"``).
-
-        Returns:
-            ``True`` si se registró correctamente.
-
-        Raises:
-            ApiError: Si la petición falla.
+        Registra un hábito.
+        POST /habits/{date} con body {habit, value}
         """
-        await self._post("/habits", json={"date": date_str, "habit": habit, "value": value})
+        await self._post(
+            f"/habits/{date_str}",
+            json={"habit": habit, "value": value},
+        )
         return True
 
     # ── Summary ────────────────────────────────────────────────────────────────
 
     async def get_summary(self, date_str: str) -> Dict[str, Any]:
-        """
-        Devuelve el resumen completo del día: citas + hábitos.
-
-        Args:
-            date_str: Fecha en formato ``YYYY-MM-DD``.
-
-        Returns:
-            Dict con claves ``date``, ``appointments``, ``habits``.
-
-        Raises:
-            ApiError: Si la petición falla.
-        """
+        """Devuelve el resumen completo del día: citas + hábitos."""
         return await self._get(f"/summary/{date_str}")
 
     # ── Internals ──────────────────────────────────────────────────────────────
