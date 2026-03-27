@@ -1,7 +1,10 @@
 # src/bot/handlers.py
 from telegram import Update
 from telegram.ext import ContextTypes
-from src.bot.api_client import get_summary, get_appointments, create_appointment, log_habit
+from src.bot.api_client import (
+    get_summary, get_appointments, create_appointment,
+    log_habit, get_habits, delete_appointment
+)
 
 TIPOS_VALIDOS = {"médica", "personal", "trabajo", "otra"}
 TIPOS_TEXTO = "médica | personal | trabajo | otra"
@@ -12,8 +15,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         "👋 Hola! Soy THDORA.\n\n"
         "Comandos disponibles:\n"
         "/hoy — resumen del día\n"
-        "/citas — ver citas\n"
+        "/citas — ver citas de hoy\n"
         "/cita — nueva cita\n"
+        "/borrar_cita — eliminar cita\n"
+        "/habitos — ver hábitos de hoy\n"
         "/habito — registrar hábito\n"
         "/resumen — resumen completo"
     )
@@ -30,8 +35,8 @@ async def cmd_hoy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
         texto += "🗓 Citas:\n"
         if citas:
-            for c in citas:
-                texto += f"  • {c.get('time', '')} — {c.get('type', '')}\n"
+            for i, c in enumerate(citas):
+                texto += f"  [{i}] {c.get('time', '')} — {c.get('type', '')}\n"
                 if c.get('notes'):
                     texto += f"    💬 {c['notes']}\n"
         else:
@@ -53,13 +58,14 @@ async def cmd_citas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     try:
         citas = await get_appointments()
         if not citas:
-            await update.message.reply_text("📭 No hay citas registradas.")
+            await update.message.reply_text("📭 No hay citas hoy.")
             return
         texto = "📋 Citas de hoy:\n\n"
-        for c in citas:
-            texto += f"• {c.get('time', '')} — {c.get('type', '')}\n"
+        for i, c in enumerate(citas):
+            texto += f"[{i}] {c.get('time', '')} — {c.get('type', '')}\n"
             if c.get('notes'):
                 texto += f"  💬 {c['notes']}\n"
+        texto += "\nUsa /borrar_cita <índice> para eliminar"
         await update.message.reply_text(texto)
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
@@ -77,11 +83,9 @@ async def cmd_cita(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     hora = args[0]
     tipo = args[1].lower()
     notas = " ".join(args[2:]) if len(args) > 2 else ""
-
     if tipo not in TIPOS_VALIDOS:
         await update.message.reply_text(
-            f"❌ Tipo '{tipo}' no válido.\n"
-            f"Tipos permitidos: {TIPOS_TEXTO}"
+            f"❌ Tipo '{tipo}' no válido.\nTipos permitidos: {TIPOS_TEXTO}"
         )
         return
     try:
@@ -94,12 +98,44 @@ async def cmd_cita(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await update.message.reply_text(f"❌ Error: {e}")
 
 
+async def cmd_borrar_cita(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    args = context.args
+    if not args:
+        await update.message.reply_text(
+            "🗑 Uso: /borrar_cita <índice>\n"
+            "Usa /citas para ver los índices\n"
+            "Ej: /borrar_cita 0"
+        )
+        return
+    try:
+        index = int(args[0])
+        await delete_appointment(index)
+        await update.message.reply_text(f"✅ Cita [{index}] eliminada.")
+    except ValueError:
+        await update.message.reply_text("❌ El índice debe ser un número. Ej: /borrar_cita 0")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
+async def cmd_habitos(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    try:
+        habitos = await get_habits()
+        if not habitos:
+            await update.message.reply_text("📭 No hay hábitos registrados hoy.")
+            return
+        texto = "💪 Hábitos de hoy:\n\n"
+        for h in habitos:
+            texto += f"• {h.get('habit', '')} = {h.get('value', '')}\n"
+        await update.message.reply_text(texto)
+    except Exception as e:
+        await update.message.reply_text(f"❌ Error: {e}")
+
+
 async def cmd_habito(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     args = context.args
     if not args or len(args) < 2:
         await update.message.reply_text(
-            "Uso: /habito nombre valor\n"
-            "Ej: /habito agua 2"
+            "Uso: /habito nombre valor\nEj: /habito agua 2"
         )
         return
     try:

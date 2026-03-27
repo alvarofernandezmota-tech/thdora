@@ -3,7 +3,8 @@ import os
 from dotenv import load_dotenv
 from telegram.ext import Application, CommandHandler
 from src.bot.handlers import (
-    cmd_start, cmd_hoy, cmd_citas, cmd_cita, cmd_habito, cmd_resumen
+    cmd_start, cmd_hoy, cmd_citas, cmd_cita, cmd_borrar_cita,
+    cmd_habitos, cmd_habito, cmd_resumen
 )
 
 load_dotenv()
@@ -17,6 +18,8 @@ def main() -> None:
     app.add_handler(CommandHandler("hoy", cmd_hoy))
     app.add_handler(CommandHandler("citas", cmd_citas))
     app.add_handler(CommandHandler("cita", cmd_cita))
+    app.add_handler(CommandHandler("borrar_cita", cmd_borrar_cita))
+    app.add_handler(CommandHandler("habitos", cmd_habitos))
     app.add_handler(CommandHandler("habito", cmd_habito))
     app.add_handler(CommandHandler("resumen", cmd_resumen))
 

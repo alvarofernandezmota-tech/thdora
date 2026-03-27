@@ -30,6 +30,21 @@ async def create_appointment(time: str, type_: str, notes: str = "") -> dict:
         return r.json()
 
 
+async def delete_appointment(index: int) -> None:
+    today = date.today().isoformat()
+    async with httpx.AsyncClient() as client:
+        r = await client.delete(f"{BASE_URL}/appointments/{today}/{index}")
+        r.raise_for_status()
+
+
+async def get_habits() -> list:
+    today = date.today().isoformat()
+    async with httpx.AsyncClient() as client:
+        r = await client.get(f"{BASE_URL}/habits/{today}")
+        r.raise_for_status()
+        return r.json()
+
+
 async def log_habit(habit: str, value: str) -> dict:
     today = date.today().isoformat()
     data = {"habit": habit, "value": value}
