@@ -1,3 +1,4 @@
+# src/bot/api_client.py
 import httpx
 from datetime import date
 
@@ -20,16 +21,19 @@ async def get_appointments() -> list:
         return r.json()
 
 
-async def create_appointment(data: dict) -> dict:
-    today = data.get("date", date.today().isoformat())
+async def create_appointment(time: str, type_: str, notes: str = "") -> dict:
+    today = date.today().isoformat()
+    data = {"time": time, "type": type_, "notes": notes}
     async with httpx.AsyncClient() as client:
         r = await client.post(f"{BASE_URL}/appointments/{today}", json=data)
         r.raise_for_status()
         return r.json()
 
 
-async def log_habit(data: dict) -> dict:
+async def log_habit(habit: str, value: str) -> dict:
+    today = date.today().isoformat()
+    data = {"habit": habit, "value": value}
     async with httpx.AsyncClient() as client:
-        r = await client.post(f"{BASE_URL}/habits", json=data)
+        r = await client.post(f"{BASE_URL}/habits/{today}", json=data)
         r.raise_for_status()
         return r.json()

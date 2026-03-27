@@ -28,7 +28,9 @@ async def cmd_hoy(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         texto += "🗓 Citas:\n"
         if citas:
             for c in citas:
-                texto += f"  • {c}\n"
+                texto += f"  • {c.get('time', '')} — {c.get('type', '')}\n"
+                if c.get('notes'):
+                    texto += f"    💬 {c['notes']}\n"
         else:
             texto += "  Sin citas hoy\n"
 
@@ -50,39 +52,45 @@ async def cmd_citas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         if not citas:
             await update.message.reply_text("📭 No hay citas registradas.")
             return
-        texto = "\n".join([f"• {c}" for c in citas])
-        await update.message.reply_text(f"📋 Citas:\n{texto}")
+        texto = "📋 Citas de hoy:\n\n"
+        for c in citas:
+            texto += f"• {c.get('time', '')} — {c.get('type', '')}\n"
+            if c.get('notes'):
+                texto += f"  💬 {c['notes']}\n"
+        await update.message.reply_text(texto)
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
 
 
 async def cmd_cita(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     args = context.args
-    if not args:
+    if not args or len(args) < 2:
         await update.message.reply_text(
-            "📝 Uso: /cita HH:MM descripción\n"
-            "Ej: /cita 10:30 Médico"
+            "📝 Uso: /cita HH:MM tipo [notas]\n"
+            "Ej: /cita 10:30 Médico revisión anual"
         )
         return
     try:
         hora = args[0]
-        descripcion = " ".join(args[1:]) if len(args) > 1 else "Sin descripción"
-        data = {"time": hora, "description": descripcion}
-        result = await create_appointment(data)
-        await update.message.reply_text(f"✅ Cita creada: {hora} — {descripcion}")
+        tipo = args[1]
+        notas = " ".join(args[2:]) if len(args) > 2 else ""
+        await create_appointment(hora, tipo, notas)
+        await update.message.reply_text(f"✅ Cita creada:\n⏰ {hora} — {tipo}\n💬 {notas}" if notas else f"✅ Cita creada:\n⏰ {hora} — {tipo}")
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
 
 
 async def cmd_habito(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     args = context.args
-    if not args:
-        await update.message.reply_text("Uso: /habito nombre valor\nEj: /habito agua 2")
+    if not args or len(args) < 2:
+        await update.message.reply_text(
+            "Uso: /habito nombre valor\n"
+            "Ej: /habito agua 2"
+        )
         return
     try:
-        data = {"nombre": args[0], "valor": args[1] if len(args) > 1 else "1"}
-        result = await log_habit(data)
-        await update.message.reply_text(f"✅ Hábito registrado: {result}")
+        await log_habit(args[0], args[1])
+        await update.message.reply_text(f"✅ Hábito registrado: {args[0]} = {args[1]}")
     except Exception as e:
         await update.message.reply_text(f"❌ Error: {e}")
 
