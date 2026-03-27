@@ -7,6 +7,44 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 
 ---
 
+## [0.7.0] — 2026-03-27
+
+### Añadido
+- `src/bot/api_client.py` — cliente HTTP asíncrono completo con clase `ThdoraApiClient`
+  - Métodos: `health`, `get_appointments`, `create_appointment`, `delete_appointment`, `get_habits`, `log_habit`, `get_summary`
+  - Manejo de errores con `ApiError`, timeouts configurables, logging
+- `src/bot/handlers.py` — handlers completos para todos los comandos del bot
+  - `/start`, `/citas`, `/nueva` (ConversationHandler 4 pasos), `/borrar`
+  - `/habitos`, `/habito` (ConversationHandler 2 pasos), `/resumen`, `/cancelar`
+  - Teclados inline para tipo de cita y hábitos comunes
+- `src/bot/main.py` — entrypoint con `load_dotenv()`, comprobación de API al arrancar
+
+### Corregido
+- `api_client.py` — rutas adaptadas a la API real:
+  - `create_appointment` → `POST /appointments/{date}` (era `POST /appointments`)
+  - `log_habit` → `POST /habits/{date}` (era `POST /habits`)
+  - `delete_appointment` → `DELETE /appointments/{date}/{index}`
+  - `get_habits` → convierte `List[{habit,value}]` a `Dict` automáticamente
+- `main.py` — añadido `load_dotenv()` para leer `.env` sin `export` manual
+
+### Estado actual del bot
+- ✅ Funciona: `/start`, `/citas`, `/resumen`, `/habitos` (lectura)
+- ✅ Funciona: arranque automático con token del `.env`
+- ⚠️ Pendiente: flujos `/nueva` y `/habito` — mejorar con:
+  - Fechas y horas flexibles con `dateparser`
+  - Nombre en el flujo `/nueva` (actualmente falta el paso)
+  - Botones inline en `/citas` y `/habitos` para borrar/editar directamente
+  - Hábitos acumulables (`+2L` suma al valor existente)
+  - Eliminar `/borrar <id>` — reemplazar por botones desde la lista
+
+### Pendiente (Fase 7)
+- Reescribir `handlers.py` con flujos mejorados
+- Añadir `PUT /appointments/{date}/{index}` y `PUT/DELETE /habits/{date}/{habit}` a los routers
+- Instalar `dateparser` y añadir a `pyproject.toml`
+- Docker Compose con servicios `api` + `bot`
+
+---
+
 ## [0.6.1] — 2026-03-25
 
 ### Añadido
@@ -97,4 +135,4 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 
 ---
 
-_Última actualización: 25 marzo 2026 — 10:45 CET_
+_Última actualización: 27 marzo 2026 — 20:57 CET_
