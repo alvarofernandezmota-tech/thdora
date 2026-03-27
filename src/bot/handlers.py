@@ -590,14 +590,14 @@ async def _save_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     try:
         result = await api.create_appointment(d, t, nm, tp, notes)
         idx = result.get("index", "?")
-        idx_line = f"  # idx: {idx}"  # sin backslash en f-string
+        notes_str = notes or "—"
         await update.message.reply_text(
             f"\u2705 *Cita creada*\n\n"
             f"  \ud83d\udcc5 {d}  \ud83d\udd70 {t}\n"
             f"  \ud83d\udcdd {nm}\n"
             f"  \ud83d\udccb {tp}\n"
-            f"  \ud83d\udcac {notes or '\u2014'}\n"
-            f"  idx: `{idx}`",
+            f"  \ud83d\udcac {notes_str}\n"
+            f"  idx: {idx}",
             parse_mode="Markdown",
         )
     except ApiError:
