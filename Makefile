@@ -28,7 +28,7 @@ run-api:
 	uvicorn src.api.main:app --reload --port 8000
 
 run-bot:
-	python src/core/bot/thdora_bot.py
+	python -m src.bot.main
 
 run-demo:
 	python src/core/demo.py
