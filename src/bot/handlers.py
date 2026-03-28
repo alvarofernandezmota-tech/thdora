@@ -1,12 +1,10 @@
 """
-Handlers del bot Telegram de THDORA — v3.1 (F9.3 Mejoras de navegación).
+Handlers del bot Telegram de THDORA — v3.2 (F9.4 Horas clicables en citas).
 
-Mantiene F9.2 intacto y añade:
-    - Botón 🏠 Menú en la barra ◀️ Hoy ▶️
-    - Botón ← Volver al día tras borrar/editar/crear
-    - Vista semana con /semana — 7 días clicables
-    - /start con botones inline de acceso rápido
-    - Botón para pasar de citas ↔ hábitos del mismo día
+Mantiene F9.3 intacto y añade:
+    - Horas de citas como botones inline clicables (⏰ HH:MM)
+    - Vista detalle de una cita individual (cb_cita_detail)
+    - Teclado _kb_cita_detail con editar/borrar/volver
 """
 
 import logging
@@ -309,6 +307,21 @@ def _kb_conflict_apt(date_str: str, time: str) -> InlineKeyboardMarkup:
     ]])
 
 
+# ── F9.4: teclado detalle de cita individual ──────────────────────────
+
+def _kb_cita_detail(date_str: str, index: int) -> InlineKeyboardMarkup:
+    """Teclado de la vista detalle de una cita: editar, borrar y volver."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✏️ Editar",  callback_data=f"ae_{date_str}_{index}"),
+            InlineKeyboardButton("🗑️ Borrar", callback_data=f"ad_{date_str}_{index}"),
+        ],
+        [
+            InlineKeyboardButton("← Volver al día", callback_data=f"citas_nav_{date_str}"),
+        ],
+    ])
+
+
 # ════════════════════════════════════════════════════════════════════════
 # /start — menú principal con botones
 # ════════════════════════════════════════════════════════════════════════
@@ -359,7 +372,7 @@ async def cb_quick_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 # ════════════════════════════════════════════════════════════════════════
-# /citas con navegación ◀️▶️
+# /citas con navegación ◀️▶️ + horas clicables (F9.4)
 # ════════════════════════════════════════════════════════════════════════
 
 async def cmd_citas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -386,19 +399,29 @@ async def _show_citas(msg, date_str: str) -> None:
         )
         return
 
+    # Cabecera con barra de navegación
     await msg.reply_text(
         f"📅 *Citas del {label}:*",
         parse_mode="Markdown",
         reply_markup=nav,
     )
+
+    # Cada cita con su hora como botón clicable (F9.4)
     for apt in apts:
         idx    = apt.get("index", 0)
         nombre = apt.get("name", "") or apt.get("type", "")
         notas  = f"\n📝 _{apt['notes']}_" if apt.get("notes") else ""
         await msg.reply_text(
-            f"📅 *{apt['time']}* — {nombre} \[{apt['type']}\]{notas}",
+            f"⏰ *{apt['time']}* — {nombre} \[{apt['type']}\]{notas}",
             parse_mode="Markdown",
-            reply_markup=_kb_apt_actions(date_str, idx),
+            reply_markup=InlineKeyboardMarkup([[
+                InlineKeyboardButton(
+                    f"⏰ {apt['time']}",
+                    callback_data=f"cita_detail_{date_str}_{idx}"
+                ),
+                InlineKeyboardButton("✏️", callback_data=f"ae_{date_str}_{idx}"),
+                InlineKeyboardButton("🗑️", callback_data=f"ad_{date_str}_{idx}"),
+            ]]),
         )
 
 
@@ -407,6 +430,48 @@ async def cb_citas_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     await query.answer()
     date_str = query.data.replace("citas_nav_", "")
     await _show_citas(query.message, date_str)
+
+
+# ── F9.4: callback detalle de cita al pulsar ⏰ HH:MM ─────────────────
+
+async def cb_cita_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Muestra el detalle completo de una cita individual."""
+    query = update.callback_query
+    await query.answer()
+    # formato: cita_detail_YYYY-MM-DD_IDX
+    parts    = query.data.split("_", 3)  # ['cita', 'detail', 'YYYY-MM-DD', 'IDX']
+    date_str = parts[2]
+    idx      = int(parts[3])
+
+    try:
+        apts = await api.get_appointments(date_str)
+    except ApiError:
+        await query.message.reply_text("⚠️ Error al obtener la cita.")
+        return
+
+    apt = next((a for a in apts if a.get("index") == idx), None)
+    if not apt:
+        await query.message.reply_text(
+            "⚠️ Cita no encontrada\.",
+            parse_mode="Markdown",
+            reply_markup=_kb_back(date_str, "citas"),
+        )
+        return
+
+    nombre = apt.get("name", "") or apt.get("type", "—")
+    notas  = apt.get("notes") or "—"
+    label  = _date_label(date_str)
+
+    await query.message.reply_text(
+        f"📅 *Detalle de cita*\n\n"
+        f"  🗓 *Fecha:* {label}\n"
+        f"  ⏰ *Hora:* {apt['time']}\n"
+        f"  📝 *Nombre:* {nombre}\n"
+        f"  🏷 *Tipo:* {apt['type']}\n"
+        f"  💬 *Notas:* {notas}",
+        parse_mode="Markdown",
+        reply_markup=_kb_cita_detail(date_str, idx),
+    )
 
 
 # ════════════════════════════════════════════════════════════════════════
