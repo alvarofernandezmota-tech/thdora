@@ -6,6 +6,24 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 
 ---
 
+## [0.8.1] — 2026-03-28
+
+### Mantenimiento — Auditoría + Limpieza repo
+- Eliminado archivo basura `api_client, handlers y main"` (53KB pegado por error en raíz)
+- Eliminado `.env~` (fichero vacío mal versionado)
+- `docs/sessions/2026-03-28-session-auditoria.md` — sesión de auditoría documentada
+- Verificado estado real del repo: F9.1→F9.4 ✅ completas, F9.5 🔜 Next
+- Rama `feat/delete-appointment` identificada como obsoleta (superada por SQLiteLifeManager)
+
+### Estado verificado
+- `src/bot/handlers.py` v2.1 — 60KB, operativo
+- `src/bot/api_client.py` — 10KB, operativo
+- `src/db/` + `SQLiteLifeManager` — F9 completa y en producción
+- `src/api/` routers migrados — todos usando SQLite
+- `docs/PERSONAL-DATA-PLATFORM.md` — roadmap alineado con estado real
+
+---
+
 ## [0.8.0] — 2026-03-27 (noche)
 
 ### Añadido — F9: Persistencia SQLite
@@ -109,4 +127,4 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 
 ---
 
-_Última actualización: 27 marzo 2026 — 22:21 CET_
+_Última actualización: 28 marzo 2026 — 16:25 CET_
