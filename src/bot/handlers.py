@@ -1,13 +1,13 @@
 """
-Handlers del bot Telegram de THDORA — v3.3 (F9.5-c1)
+Handlers del bot Telegram de THDORA — v3.4 (F9.5-c2)
 
-Cambios sobre v3.2:
-    - Fix TypeError en _show_semana: nav_kb.inline_keyboard puede devolver tuplas
-    - Botón central de navegación muestra fecha real ("Sáb 28 mar") en vez de "📅 Hoy"
-    - /start con saludo contextual 🌅🌆🌙 según hora del día
-    - Aviso en /start si hay citas hoy
-    - ➕ Nueva cita directo desde vista citas (callback quick_nueva_DATE)
-    - ✏️ Hábito directo desde vista hábitos (callback quick_habito_DATE)
+Cambios sobre v3.3:
+    - Eliminar HABITOS_COMUNES hardcodeados — el usuario escribe el nombre libremente
+    - ➕ Nuevo hábito directo desde vista hábitos del día (quick_habito_DATE)
+    - Flujo /habito: fecha prefijada → nombre libre → valor (igual que /nueva)
+    - ✏️ Editar hábito: ahora permite cambiar también el NOMBRE (nuevo estado EDIT_HAB_NOMBRE)
+    - Mismo patrón visual que citas: pasos numerados, confirmación final con resumen
+    - Si el hábito tiene /config → botones rápidos de valor; si no → campo libre
 """
 
 import logging
@@ -40,12 +40,11 @@ api = ThdoraApiClient()
 NUEVA_DATE, NUEVA_TIME, NUEVA_NOMBRE, NUEVA_TYPE, NUEVA_NOTES, NUEVA_CONFLICT = range(6)
 HABITO_NOMBRE, HABITO_VALUE, HABITO_CONFLICT = range(10, 13)
 EDIT_APT_TIME, EDIT_APT_NOMBRE, EDIT_APT_TYPE, EDIT_APT_NOTES = range(20, 24)
-EDIT_HAB_VALUE = 30
+EDIT_HAB_NOMBRE, EDIT_HAB_VALUE = range(30, 32)   # C2: añadido EDIT_HAB_NOMBRE
 CFG_NOMBRE, CFG_TYPE, CFG_UNIT, CFG_QUICK = range(40, 44)
 
 # ── Constantes ────────────────────────────────────────────────────────
 TIPOS_CITA = ["médica", "personal", "trabajo", "otra"]
-HABITOS_COMUNES = ["sueño", "THC", "tabaco", "ejercicio", "agua", "humor", "alimentacion"]
 HABIT_TYPE_EMOJIS = {"numeric": "🔢", "time": "⏱️", "boolean": "✅", "text": "📝"}
 _RE_TIME   = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 _RE_ACUM   = re.compile(r"^\+([\d\.]+)(.*)$")
@@ -176,15 +175,13 @@ def _nav_keyboard(date_str: str, prefix: str) -> InlineKeyboardMarkup:
     d      = datetime.strptime(date_str, "%Y-%m-%d").date()
     prev_d = str(d - timedelta(days=1))
     next_d = str(d + timedelta(days=1))
-    # Botón central = fecha real del día visible (no "Hoy" fijo)
     center_label = _date_short(date_str)
     other  = "habitos" if prefix == "citas" else "citas"
     other_emoji = "📊" if prefix == "citas" else "📅"
-    # Botón rápido según vista
     if prefix == "citas":
         quick_btn = InlineKeyboardButton("➕ Nueva", callback_data=f"quick_nueva_{date_str}")
     else:
-        quick_btn = InlineKeyboardButton("✏️ Hábito", callback_data=f"quick_habito_{date_str}")
+        quick_btn = InlineKeyboardButton("➕ Nuevo", callback_data=f"quick_habito_{date_str}")
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("◀️",           callback_data=f"{prefix}_nav_{prev_d}"),
@@ -203,7 +200,6 @@ def _nav_keyboard(date_str: str, prefix: str) -> InlineKeyboardMarkup:
 
 
 def _kb_back(date_str: str, prefix: str = "citas") -> InlineKeyboardMarkup:
-    """Botones de retorno tras una acción."""
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("← Volver al día", callback_data=f"{prefix}_nav_{date_str}"),
@@ -246,7 +242,7 @@ def _kb_start() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("➕ Nueva cita",   callback_data="quick_nueva"),
-            InlineKeyboardButton("✏️ Hábito",       callback_data="quick_habito"),
+            InlineKeyboardButton("➕ Nuevo hábito", callback_data="quick_habito"),
         ],
         [
             InlineKeyboardButton("⚙️ Config",       callback_data="quick_config"),
@@ -258,12 +254,6 @@ def _kb_tipos() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
         [[InlineKeyboardButton(t.capitalize(), callback_data=f"tipo_{t}")] for t in TIPOS_CITA]
     )
-
-
-def _kb_habitos() -> InlineKeyboardMarkup:
-    buttons = [[InlineKeyboardButton(h, callback_data=f"hab_{h}")] for h in HABITOS_COMUNES]
-    buttons.append([InlineKeyboardButton("✏️ Otro…", callback_data="hab___otro")])
-    return InlineKeyboardMarkup(buttons)
 
 
 def _kb_hab_value(cfg: Optional[dict]) -> Optional[InlineKeyboardMarkup]:
@@ -334,7 +324,6 @@ def _kb_conflict_apt(date_str: str, time: str) -> InlineKeyboardMarkup:
 
 
 def _kb_cita_detail(date_str: str, index: int) -> InlineKeyboardMarkup:
-    """Teclado de la vista detalle de una cita: editar, borrar y volver."""
     return InlineKeyboardMarkup([
         [
             InlineKeyboardButton("✏️ Editar",  callback_data=f"ae_{date_str}_{index}"),
@@ -354,15 +343,12 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     today = str(date.today())
     greeting = _greeting()
     date_short = _date_short(today)
-
-    # Aviso citas hoy
     try:
         apts_hoy = await api.get_appointments(today)
         n = len(apts_hoy)
         citas_txt = f"\n⏰ Tienes *{n} cita{'s' if n != 1 else ''}* hoy" if n else ""
     except Exception:
         citas_txt = ""
-
     await update.message.reply_text(
         f"{greeting}, soy *THDORA* — {date_short}{citas_txt}\n"
         f"_Tu asistente personal de gestión de vida_",
@@ -396,25 +382,23 @@ async def cb_quick_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
     data = query.data
 
-    # ➕ Nueva cita — desde /start (sin fecha) o desde vista día (con fecha)
+    # ➕ Nueva cita
     if data == "quick_nueva" or data.startswith("quick_nueva_"):
         context.user_data.clear()
         if data.startswith("quick_nueva_"):
-            # viene con fecha prefijada: quick_nueva_YYYY-MM-DD
             fecha = data.replace("quick_nueva_", "")
             context.user_data["nueva_date"] = fecha
             await query.message.reply_text(
                 f"📅 *Nueva cita para {_date_short(fecha)}*\n\n🕰 *Paso 1/4* — ¿A qué hora? `HH:MM`",
                 parse_mode="Markdown",
             )
-            # Saltamos directamente al paso de hora
-            return  # El ConversationHandler no está activo aquí — lo lanzamos vía comando /nueva
+            return
         await query.message.reply_text(
             "📅 *Nueva cita — paso 1/5*\n\n¿Para qué fecha?\n`hoy`, `mañana`, `27/03`…",
             parse_mode="Markdown",
         )
 
-    # ✏️ Hábito — desde /start (sin fecha) o desde vista día (con fecha)
+    # ➕ Nuevo hábito — C2: sin lista predefinida, directo a nombre libre
     elif data == "quick_habito" or data.startswith("quick_habito_"):
         context.user_data.clear()
         if data.startswith("quick_habito_"):
@@ -422,10 +406,10 @@ async def cb_quick_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             context.user_data["habito_date"] = fecha
         else:
             context.user_data["habito_date"] = str(date.today())
+        fecha_label = _date_short(context.user_data["habito_date"])
         await query.message.reply_text(
-            "✏️ *Registrar hábito — paso 1/2*\n\n¿Qué hábito registras?",
+            f"📊 *Nuevo hábito para {fecha_label}*\n\n✏️ *Paso 1/2* — ¿Cómo se llama el hábito?",
             parse_mode="Markdown",
-            reply_markup=_kb_habitos(),
         )
 
     elif data == "quick_config":
@@ -433,7 +417,7 @@ async def cb_quick_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 # ════════════════════════════════════════════════════════════════════════
-# /citas con navegación ◀️▶️ + horas clicables (F9.4)
+# /citas con navegación ◀️▶️
 # ════════════════════════════════════════════════════════════════════════
 
 async def cmd_citas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -578,7 +562,7 @@ async def cb_habitos_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 
 # ════════════════════════════════════════════════════════════════════════
-# /semana — FIX: nav_kb.inline_keyboard puede devolver tuplas → forzar listas
+# /semana
 # ════════════════════════════════════════════════════════════════════════
 
 async def cmd_semana(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -595,7 +579,6 @@ async def _show_semana(msg, monday_str: str) -> None:
 
     lines = [f"📋 *Semana {monday.day} {months[monday.month-1]} — {sunday.day} {months[sunday.month-1]} {sunday.year}*\n"]
     btn_days = []
-
     total_apts   = 0
     days_habits  = 0
 
@@ -618,12 +601,10 @@ async def _show_semana(msg, monday_str: str) -> None:
             f"{dow} {d.day}", callback_data=f"citas_nav_{d_str}"
         ))
 
-    # Resumen encima (insertar en línea 1, después del título)
     resumen = f"📅 {total_apts} citas  📊 {days_habits} días con hábitos"
     lines.insert(1, resumen)
 
     nav_kb = _kb_week_nav(monday_str)
-    # FIX: forzar cada fila a lista (puede venir como tupla)
     nav_rows = [list(row) for row in nav_kb.inline_keyboard]
     full_kb  = InlineKeyboardMarkup([btn_days[:4], btn_days[4:]] + nav_rows)
     await msg.reply_text("\n".join(lines), parse_mode="Markdown", reply_markup=full_kb)
@@ -882,13 +863,30 @@ async def cb_hab_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def cb_hab_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """C2: ahora pregunta primero el nuevo NOMBRE, luego el valor."""
     query = update.callback_query
     await query.answer()
     _, date_str, habit = query.data.split("_", 2)
     context.user_data["edit_hab_date"]   = date_str
     context.user_data["edit_hab_nombre"] = habit
+    await query.edit_message_text(
+        f"✏️ *Editar hábito '{habit}'*\n\n"
+        f"*Paso 1/2* — Nuevo nombre o /skip para mantener *'{habit}'*:",
+        parse_mode="Markdown",
+    )
+    return EDIT_HAB_NOMBRE
+
+
+async def cb_hab_edit_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """C2: recibe el nuevo nombre del hábito."""
+    text = update.message.text.strip()
+    if text.lower() != "/skip" and text:
+        context.user_data["edit_hab_nombre_nuevo"] = text
+    # Ahora pedir el valor
+    habit = context.user_data.get("edit_hab_nombre", "")
+    nuevo_nombre = context.user_data.get("edit_hab_nombre_nuevo", habit)
     try:
-        cfg = await api.get_habit_config(habit)
+        cfg = await api.get_habit_config(nuevo_nombre)
     except Exception:
         cfg = None
     kb   = _kb_hab_value(cfg)
@@ -897,11 +895,14 @@ async def cb_hab_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         htype = cfg.get("habit_type", "text")
         unit  = cfg.get("unit") or ""
         hint  = f" \\({HABIT_TYPE_EMOJIS.get(htype, '')} {htype}{' · ' + unit if unit else ''}\\)"
-    await query.edit_message_text(
-        f"✏️ *Editar hábito '{habit}'*{hint}\n\nNuevo valor:",
-        parse_mode="Markdown",
-        reply_markup=kb,
-    )
+    prompt = f"✅ Nombre: *{nuevo_nombre}*{hint}\n\n*Paso 2/2* — Nuevo valor \\(/skip para mantener actual\\):"
+    if kb:
+        await update.message.reply_text(prompt, parse_mode="Markdown", reply_markup=kb)
+    else:
+        await update.message.reply_text(
+            prompt + "\n\\(ej: `8h`, `30min`, `2L`\\)",
+            parse_mode="Markdown",
+        )
     return EDIT_HAB_VALUE
 
 
@@ -916,16 +917,40 @@ async def cb_hab_edit_value_inline(update: Update, context: ContextTypes.DEFAULT
 
 
 async def cb_hab_edit_value_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    return await _do_edit_habit(update.message, context, update.message.text.strip())
+    text = update.message.text.strip()
+    if text.lower() == "/skip":
+        return await _do_edit_habit(update.message, context, None)
+    return await _do_edit_habit(update.message, context, text)
 
 
-async def _do_edit_habit(msg, context, value: str) -> int:
-    date_str = context.user_data.get("edit_hab_date", "")
-    habit    = context.user_data.get("edit_hab_nombre", "")
+async def _do_edit_habit(msg, context, value: Optional[str]) -> int:
+    """C2: actualiza nombre y/o valor del hábito."""
+    date_str      = context.user_data.get("edit_hab_date", "")
+    nombre_orig   = context.user_data.get("edit_hab_nombre", "")
+    nombre_nuevo  = context.user_data.get("edit_hab_nombre_nuevo", nombre_orig)
     try:
-        await api.update_habit(date_str, habit, value)
+        # Si cambió el nombre: borrar el viejo y crear con nuevo nombre
+        if nombre_nuevo != nombre_orig:
+            habits   = await api.get_habits(date_str)
+            val_orig = habits.get(nombre_orig)
+            final_val = value if value else val_orig
+            await api.delete_habit(date_str, nombre_orig)
+            await api.log_habit(date_str, nombre_nuevo, final_val or "")
+        else:
+            if value:
+                await api.update_habit(date_str, nombre_orig, value)
+            final_val = value or "sin cambios"
+
+        cambios = []
+        if nombre_nuevo != nombre_orig:
+            cambios.append(f"  📝 Nombre: *{nombre_orig}* → *{nombre_nuevo}*")
+        if value:
+            cambios.append(f"  📊 Valor: `{final_val}`")
+        if not cambios:
+            cambios.append("  _Sin cambios_")
+
         await msg.reply_text(
-            f"✅ *{habit}* actualizado a `{value}`\\.",
+            f"✅ *Hábito actualizado*\n\n" + "\n".join(cambios),
             parse_mode="Markdown",
             reply_markup=_kb_back(date_str, "habitos"),
         )
@@ -972,29 +997,18 @@ async def cb_hab_add_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 # ════════════════════════════════════════════════════════════════════════
-# /habito — ConversationHandler con UI adaptativa
+# /habito — ConversationHandler C2 (nombre libre, sin lista predefinida)
 # ════════════════════════════════════════════════════════════════════════
 
 async def habito_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
     context.user_data["habito_date"] = str(date.today())
+    fecha_label = _date_short(str(date.today()))
     await update.message.reply_text(
-        "✏️ *Registrar hábito — paso 1/2*\n\n¿Qué hábito registras hoy?",
+        f"📊 *Nuevo hábito para {fecha_label}*\n\n✏️ *Paso 1/2* — ¿Cómo se llama el hábito?",
         parse_mode="Markdown",
-        reply_markup=_kb_habitos(),
     )
     return HABITO_NOMBRE
-
-
-async def habito_recv_nombre_inline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query  = update.callback_query
-    await query.answer()
-    nombre = query.data.replace("hab_", "")
-    if nombre == "__otro":
-        await query.edit_message_text("✏️ Escribe el nombre del hábito:")
-        return HABITO_NOMBRE
-    context.user_data["habito_nombre"] = nombre
-    return await _ask_habito_value(query.message, context, nombre)
 
 
 async def habito_recv_nombre_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -1299,7 +1313,6 @@ def build_habito_handler() -> ConversationHandler:
         entry_points=[CommandHandler("habito", habito_start)],
         states={
             HABITO_NOMBRE: [
-                CallbackQueryHandler(habito_recv_nombre_inline, pattern=r"^hab_"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, habito_recv_nombre_text),
             ],
             HABITO_VALUE: [
@@ -1339,11 +1352,17 @@ def build_edit_apt_handler() -> ConversationHandler:
 
 
 def build_edit_hab_handler() -> ConversationHandler:
+    """C2: ahora incluye EDIT_HAB_NOMBRE antes de EDIT_HAB_VALUE."""
     return ConversationHandler(
         entry_points=[CallbackQueryHandler(cb_hab_edit_start, pattern=r"^he_")],
         states={
+            EDIT_HAB_NOMBRE: [
+                CommandHandler("skip", lambda u, c: cb_hab_edit_nombre(u, c)),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, cb_hab_edit_nombre),
+            ],
             EDIT_HAB_VALUE: [
                 CallbackQueryHandler(cb_hab_edit_value_inline, pattern=r"^hval_"),
+                CommandHandler("skip", lambda u, c: cb_hab_edit_value_text(u, c)),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, cb_hab_edit_value_text),
             ],
         },
