@@ -6,192 +6,194 @@
 
 ---
 
-## 🎯 Decisión clave de la sesión
+## 🎯 Visión definitiva
 
-> **THDORA es la única fuente de verdad.**  
-> Todo lo que hasta ahora vivía en YAMLs manuales, Markdown y tracking personal  
-> pasa a vivir aquí — accesible desde el bot, desde la API REST y desde VS Code.
+> **THDORA = fábrica de objetos personales a través de menús intuitivos.**  
+> No es solo una agenda — es el espejo de tu vida.  
+> El usuario nunca escribe comandos — solo pulsa botones.
 
-```
-FastAPI (backend)
-    │
-    ├── 📅 Citas         →  data/appointments/YYYY-MM-DD.yaml
-    ├── 📊 Hábitos       →  data/habits/YYYY-MM-DD.yaml
-    ├── 📈 Tracking      →  data/tracking/YYYY-MM-DD.yaml
-    └── 📋 Diarios       →  docs/diarios/YYYY-MM-DD.md
-         │
-         ├── Bot Telegram   →  móvil (Álvaro)
-         ├── API REST        →  Claude / Perplexity / scripts
-         └── YAML / MD       →  VS Code (lectura directa)
-```
-
-**Cada dato entra una sola vez** — desde el bot, la API o VS Code — y está disponible en los tres sitios.
+### Evolución futura
+- **Fase actual:** 100% botones inline
+- **Siguiente:** Comprensión de texto natural (NLP)
+- **Futuro:** Audio usuario → máquina + máquina → usuario
 
 ---
 
-## 📋 Módulos definidos
+## 📦 Módulos — Fábrica de objetos
 
-### 1. 📅 Agenda (ya existe — ampliar)
-- Citas con selección de hora por franjas (🌅 🌆 🌙)
-- Citas multi-día: cada día con su propio horario o el mismo
-- Vista día, semana, mes
-
-### 2. 📊 Hábitos (ya existe — ampliar)
-- Hábitos multi-día con toggle por día (ej: domingo libre)
-- Registro guiado rápido
-- Vista semanal de hábitos (tabla)
-- Hábito del día con valor diferente por día
-
-### 3. 📈 Tracking personal (nuevo módulo)
-- Migración del tracking YAML manual → API
-- Campos: sueño, ejercicio, THC, tabaco, agua, humor, alimentación, estudio, proyecto
-- Formulario guiado diario (un campo tras otro)
-- Dashboard semanal — tabla visual de progreso
-- Histórico — tendencias, racha de días, mejor semana
-- Recordatorio automático si no se ha registrado
-- Sistema de puntuación diaria (fórmula ya definida en PERSONAL-DATA-PLATFORM.md)
+| Módulo | Objeto | Acciones |
+|--------|--------|----------|
+| 📅 Citas | `Appointment` | Crear, ver, editar, borrar, repetir multi-día |
+| 📊 Hábitos | `HabitLog` | Registrar, editar, acumular, multi-día |
+| 📈 Tracking | `DailyRecord` | Rellenar diario, ver dashboard, racha |
+| 🕐 Timeline | `TimelineEntry` | Añadir entrada horaria, ver día |
+| ⚙️ Config | `HabitConfig` | Crear tipo, editar, borrar |
 
 ---
 
-## 🖥️ Diseño de menús propuesto
+## 🖥️ Diseño de menús 1 a 1
 
 ### `/start` — Menú principal
 ```
-👋 Hola, soy THDORA — Sáb 28 mar
-Tu asistente personal de vida
+🌆 Buenas tardes, soy THDORA — Sáb 28 mar
+⏰ Tienes 2 citas hoy
 
-[📅 Citas]      [📊 Hábitos]
-[📋 Semana]     [📝 Resumen]
-[➕ Nueva cita] [✏️ Hábito]
-[📈 Tracking]   [⚙️ Config]
+[📅 Citas]       [📊 Hábitos]
+[📋 Semana]      [📝 Resumen]
+[➕ Nueva cita]  [✏️ Hábito]
+[📈 Tracking]    [⚙️ Config]
 ```
+- Saludo contextual según hora (🌅 🌆 🌙)
+- Aviso si hay citas hoy
 
-### Vista Citas — barra de navegación
+### Vista Citas
 ```
+📅 Citas — Sáb 28 mar
+
+⏰ 10:00 — Médico [médica]
+⏰ 17:00 — Gym [personal]
+
 [◀️]  [Sáb 28 mar]  [▶️]
-[➕ Nueva]  [📊 Hábitos]
+[➕ Nueva]    [📊 Hábitos]
 [📋 Semana]  [🏠 Menú]
 ```
-- El botón central muestra la FECHA REAL del día visible (no "Hoy" fijo)
-- `➕ Nueva` abre el flujo de nueva cita directamente (sin /nueva)
 
-### Vista Hábitos — barra de navegación
+### Crear cita — franjas horarias
 ```
+1️⃣ Franja:
+[🌅 Mañana 6-14]  [🌆 Tarde 14-22]  [🌙 Noche 22-6]
+
+2️⃣ Hora (ej: Mañana):
+[06:00][07:00][08:00][09:00]
+[10:00][11:00][12:00][13:00]
+[🕐 Ver cuartos]  [✏️ Exacta]
+
+3️⃣ Cuartos (opcional):
+[10:00][10:15][10:30][10:45]
+[✏️ Escribir exacta]
+
+4️⃣ Nombre → texto libre
+5️⃣ Tipo → [Médica][Personal][Trabajo][Otra]
+6️⃣ Notas → texto libre o /skip
+✅ Creada → [← Volver al día] [🏠 Menú]
+```
+
+### Cita multi-día
+```
+Selecciona días:
+[Lun 30 ✅] [Mar 31 ☐] [Mié 1 ✅]
+[Jue 2 ☐]  [Vie 3 ☐]  [Sáb 4 ✅]  [Dom 5 ☐]
+
+[⏰ Mismo horario para todos]
+[🕐 Horario diferente por día]
+[✅ Crear en 3 días seleccionados]
+```
+
+### Vista Hábitos
+```
+📊 Hábitos — Sáb 28 mar
+
+• ejercicio: 30min  [✏️][🗑️][➕]
+• sueño: 8h         [✏️][🗑️][➕]
+
 [◀️]  [Sáb 28 mar]  [▶️]
-[✏️ Hábito]  [📅 Citas]
-[📋 Semana]  [🏠 Menú]
+[✏️ Hábito]   [📅 Citas]
+[📋 Semana]   [🏠 Menú]
+```
+
+### Hábito multi-día
+```
+[Lun 30 ✅] [Mar 31 ✅] [Mié 1 ✅]
+[Jue 2 ✅]  [Vie 3 ✅]  [Sáb 4 ✅]  [Dom 5 ☐]  ← domingo libre
+
+[📊 Mismo valor para todos]
+[✏️ Valor diferente por día]
+[✅ Registrar en 6 días]
 ```
 
 ### Vista Semana
 ```
-[◀️ Semana ant.]  [Semana sig. ▶️]
-[📅 Esta semana]  [🏠 Menú]
-+ toggle multi-día para cita/hábito repetido
-```
-
----
-
-## ⏰ Selección de hora por franjas (F9.5)
-
-Al crear una cita, en vez de escribir la hora:
-
-```
-1. Elegir franja:
-   [🌅 Mañana 6-14]  [🌆 Tarde 14-22]  [🌙 Noche 22-6]
-
-2. Elegir hora en punto de la franja:
-   [06:00] [07:00] [08:00] [09:00]
-   [10:00] [11:00] [12:00] [13:00]
-
-3. Opcional — ver cuartos:
-   [🕐 Ver :00 :15 :30 :45]
-
-4. Fallback siempre disponible:
-   [✏️ Escribir hora exacta]
-```
-
----
-
-## 📅 Cita multi-día (F9.5)
-
-```
-Selecciona los días:
-[Lun 30 ✅] [Mar 31 ☐] [Mié 1 ✅]
-[Jue 2 ☐]  [Vie 3 ☐]  [Sáb 4 ✅]  [Dom 5 ☐]
-
-Opciones de horario:
-[⏰ Mismo horario para todos]
-[🕐 Horario diferente por día]
-
-[✅ Crear en 3 días seleccionados]
-```
-
----
-
-## 📊 Hábito multi-día (F9.5)
-
-```
-Selecciona los días:
-[Lun 30 ✅] [Mar 31 ✅] [Mié 1 ✅]
-[Jue 2 ✅]  [Vie 3 ✅]  [Sáb 4 ✅]  [Dom 5 ☐]  ← domingo libre
-
-Opciones de valor:
-[📊 Mismo valor para todos]
-[✏️ Valor diferente por día]
-
-[✅ Registrar en 6 días seleccionados]
-```
-
----
-
-## 📈 Vista semanal unificada (idea)
-
-Una vista `/semana` que muestre tanto citas como hábitos juntos:
-
-```
 📋 Semana 30 mar — 5 abr
+📅 8 citas  📊 5 días con hábitos  📈 nota media: 7.2
 
 Lun 30  📅2  📊ejercicio✅  sueño:7h
 Mar 31  📅1  📊—
-Mié 1   📅3  📊ejercicio✅  thc:1
+Mié 1   📅3  📊ejercicio✅
 Jue 2   —    📊sueño:6h
 Vie 3   📅1  📊ejercicio✅
 Sáb 4   —    —
 Dom 5   —    —
+
+[Lun 30][Mar 31][Mié 1][Jue 2]
+[Vie 3][Sáb 4][Dom 5]
+[◀️ Semana ant.]  [Semana sig. ▶️]
+[📅 Esta semana]  [🏠 Menú]
+```
+
+### Vista Tracking
+```
+📈 Tracking — Sáb 28 mar
+
+✅ sueño: 8h
+✅ ejercicio: 30min
+❌ estudio: —
+❌ proyecto: —
+✅ THC: 2
+❌ tabaco: —
+❌ humor: —
+❌ agua: —
+
+[✏️ Rellenar vacíos]  [📊 Ver semana]
+[🏠 Menú]
 ```
 
 ---
 
-## 🗺️ Roadmap actualizado
+## ⚙️ Config de hábitos — totalmente flexible
 
-| Feature | Descripción | Estado |
-|---------|-------------|--------|
-| F9.1 | Bot base + API + navegación | ✅ Done |
-| F9.2 | ConversationHandlers + edición | ✅ Done |
-| F9.3 | UI unificada — Menú, volver, cambio vistas | ✅ Done |
-| F9.4 | Horas clicables + vista detalle cita | ✅ Done |
-| **F9.5** | **Franjas horarias + cita multi-día + hábito multi-día + fecha real en nav** | 🔜 Next |
-| **F9.6** | **Módulo Tracking — API + bot + formulario guiado** | 🔜 |
-| **F9.7** | **Vista semanal unificada (citas + hábitos + tracking)** | 🔜 |
-| **F9.8** | **Vista mes — calendario visual** | 🔜 |
-| **F9.9** | **Dashboard tracking — tendencias + racha + nota diaria** | 🔜 |
-| F10 | Alertas automáticas (scheduler) | 🔜 |
-| F11 | Migración YAML personal → API | 🔜 |
+Los hábitos son configurables por el usuario:
 
----
+| Tipo | Descripción | Ejemplo |
+|------|-------------|---------|
+| `boolean` | Sí/No | ejercicio ✅/❌ |
+| `numeric` | Número entero o decimal | tabaco: 3 |
+| `time` | Duración | sueño: 8h |
+| `text` | Texto libre | humor: bien |
+| `scale` | Escala 1-10 | humor: 8 |
 
-## 🐛 Bug conocido pendiente
+Cada hábito puede tener:
+- **Unidad** (h, min, L, mg...)
+- **Botones rápidos** (ej: `6h,7h,8h,9h`)
+- **Valor por defecto**
+- **Días activos** (ej: L-V solo, sin fines de semana)
 
-```python
-# handlers.py línea ~562 — _show_semana()
-# ❌ nav_kb.inline_keyboard devuelve tuplas, no listas
-full_kb = InlineKeyboardMarkup([btn_days[:4], btn_days[4:]] + nav_kb.inline_keyboard)
-
-# ✅ Fix:
-full_kb = InlineKeyboardMarkup([btn_days[:4], btn_days[4:]] + [list(row) for row in nav_kb.inline_keyboard])
+### Onboarding — primer uso
 ```
-→ Se corrige en el commit de F9.5
+👋 Configura tu tracking personal
+
+Elige hábitos de ejemplo o crea los tuyos:
+
+[😴 Sueño]      [🏋️ Ejercicio]
+[📚 Estudio]    [💻 Proyecto]
+[💧 Agua]       [😄 Humor]
+[➕ Añadir el mío]
+[✅ Listo, empezar]
+```
 
 ---
 
-_Sesión documentada: 28 marzo 2026 ~15:04 CET_
+## 🛣️ Roadmap F9.5 — lo que se codifica ahora
+
+1. **Fix bug semana** — `TypeError: can only concatenate list (not tuple)`
+2. **Fecha real en nav** — botón central muestra `Sáb 28 mar` real
+3. **Saludo contextual** — 🌅/🌆/🌙 según hora + aviso citas hoy
+4. **Franjas horarias** — Mañana/Tarde/Noche → hora en punto → cuartos → exacta
+5. **➕ Nueva desde vista citas** — sin usar /nueva
+6. **✏️ Hábito desde vista hábitos** — directo
+7. **Cita multi-día** — toggle semanal + mismo/diferente horario
+8. **Hábito multi-día** — toggle semanal + mismo/diferente valor
+9. **Semana con resumen** — nº citas + días hábitos + nota media
+
+---
+
+_Documentado: 28 marzo 2026 ~15:18 CET_
