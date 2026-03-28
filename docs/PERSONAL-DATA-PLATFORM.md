@@ -1,8 +1,7 @@
 # 🏗️ Personal Data Platform — Documentación Completa
 
 **Creado:** 27/03/2026 — Sesión Perplexity + Álvaro  
-**Actualizado:** 28/03/2026 — Visión plataforma unificada  
-**Estado:** F9.4 ✅ done | F9.5 🔜 next | Tracking módulo diseñado  
+**Actualizado:** 28/03/2026 21:43 CET  
 **Repos implicados:** [`personal`](https://github.com/alvarofernandezmota-tech/personal) + [`thdora`](https://github.com/alvarofernandezmota-tech/thdora)
 
 ---
@@ -15,9 +14,9 @@ Todo lo que hasta ahora vivía en YAMLs manuales, Markdown y tracking personal p
 ```
 FastAPI (backend)
     │
-    ├── 📅 Citas         →  data/appointments/YYYY-MM-DD.yaml
-    ├── 📊 Hábitos       →  data/habits/YYYY-MM-DD.yaml
-    ├── 📈 Tracking      →  data/tracking/YYYY-MM-DD.yaml
+    ├── 📅 Citas         →  SQLite (data/thdora.db)
+    ├── 📊 Hábitos       →  SQLite (data/thdora.db)
+    ├── 📈 Tracking      →  SQLite (futuro F10)
     └── 📋 Diarios       →  docs/diarios/YYYY-MM-DD.md
          │
          ├── Bot Telegram   →  móvil (Álvaro)
@@ -25,107 +24,78 @@ FastAPI (backend)
          └── YAML / MD       →  VS Code (lectura directa)
 ```
 
-**Cada dato entra una sola vez** — desde el bot, la API o VS Code — y está disponible en los tres sitios.
-
----
-
-## 📊 Flujo completo
-
-```
-┌─────────────────────────────┐
-│  Bot Telegram               │  ← entrada principal móvil
-│  /citas /habitos /tracking  │
-└─────────┬──────────────────┘
-           │
-           ▼
-┌─────────────────────────────┐
-│  FastAPI (thdora)           │  ← única API
-│  /appointments /habits      │
-│  /tracking /summary         │
-└─────────┬──────────────────┘
-           │
-           ▼
-┌─────────────────────────────┐
-│  YAML (fuente de verdad)    │  ← legible en VS Code
-│  data/YYYY-MM-DD.yaml       │
-└─────────┬──────────────────┘
-           │
-           ▼
-┌─────────────────────────────┐
-│  SQLite (futuro F11+)       │  ← consultas históricas rápidas
-│  tabla: daily_records       │
-└─────────────────────────────┘
-```
-
----
-
-## 💾 Estructura de datos
-
-### YAML tracking diario
-
-```yaml
-fecha: 2026-03-28
-dormir_hora: "00:22"
-despertar_hora: "09:30"
-horas_sueno: 9.1
-estudio_m5_horas: 2.0
-proyecto_horas: 1.5
-aprendizaje_ia_horas: 1.0
-ejercicio: true
-ejercicio_minutos: 20
-thea_horas: 3.0
-tabaco: 1
-thc: 2
-cocaina: false
-dias_sin_cocaina: 23
-nota: 7.5
-notas: "Tarde productiva. Sistema YAML implementado."
-```
-
----
-
-## 🎯 Sistema de puntuación diaria
-
-| Hábito | Puntos | Condición |
-|--------|--------|----------|
-| Despertar ≤08:00 | +1.5 | despertar_hora ≤ "08:00" |
-| Dormir ≤23:00 | +1.5 | dormir_hora ≤ "23:00" |
-| Estudio M5 ≥2h | +2.0 | estudio_m5_horas ≥ 2 |
-| Estudio M5 ≥1h | +1.0 | estudio_m5_horas ≥ 1 |
-| Proyecto ≥1h | +1.0 | proyecto_horas ≥ 1 |
-| Ejercicio | +1.5 | ejercicio = true |
-| Thea ≥2h | +0.5 | thea_horas ≥ 2 |
-| Tabaco = 0 | +1.0 | tabaco = 0 |
-| THC = 0 | +0.5 | thc = 0 |
-| Cocaína = NO | +0.5 | cocaina = false |
-| **MÁXIMO** | **10.5** | → normaliza a 10 |
-
 ---
 
 ## 🗺️ Roadmap de implementación
 
 | Feature | Descripción | Estado |
 |---------|-------------|--------|
-| F9.1 | Bot base + API + navegación | ✅ Done |
-| F9.2 | ConversationHandlers + edición | ✅ Done |
+| F9.1 | Bot base + API + SQLite | ✅ Done |
+| F9.2 | Fixes ConversationHandlers | ✅ Done |
 | F9.3 | UI unificada — Menú, volver, cambio vistas | ✅ Done |
 | F9.4 | Horas clicables + vista detalle cita | ✅ Done |
-| **F9.5** | **Franjas horarias + cita multi-día + hábito multi-día + fecha real en nav + fix bug semana** | 🔜 Next |
-| **F9.6** | **Módulo Tracking — API endpoints + bot formulario guiado** | 🔜 |
-| **F9.7** | **Vista semanal unificada (citas + hábitos + tracking juntos)** | 🔜 |
-| **F9.8** | **Vista mes — calendario visual** | 🔜 |
-| **F9.9** | **Dashboard tracking — tendencias + racha + nota diaria** | 🔜 |
-| F10 | Alertas automáticas (scheduler) | 🔜 |
-| F11 | Migración YAML personal → API (sync.py) | 🔜 |
+| F9.5 | UX avanzada — fecha real nav + saludo + hábito libre | ✅ Done |
+| **F9.6** | **Refactor handlers.py en módulos** | 🔜 Next |
+| **F9.7** | **Docker + despliegue 24/7** | 🔜 |
+| **F9.8** | **Multi-usuario (user_id)** | 🔜 |
+| **F10** | **Módulo Tracking personal** | 🔜 |
+| **F11** | **Notificaciones APScheduler** | 🔜 |
+| **F12** | **IA conversacional (Groq/OpenAI/Claude)** | 🔜 |
+| **F13** | **Gamificación RPG** | 🔜 |
+| **F14** | **Telegram Mini App (React)** | 🔜 |
+| **F15** | **PWA instalable** | 🔜 |
+| **F16** | **React Native (si escala)** | 🔜 |
+
+---
+
+## 💾 Estructura de datos actual
+
+### SQLite — tablas activas
+```
+data/thdora.db
+├── appointments  → id, date, time, name, type, notes
+├── habits        → id, date, name, value
+└── habit_config  → id, name, habit_type, unit, quick_vals
+```
+
+### YAML tracking diario (F10 — pendiente)
+```yaml
+fecha: 2026-03-28
+dormir_hora: "00:22"
+despertar_hora: "09:30"
+horas_sueno: 9.1
+estudio_horas: 2.0
+proyecto_horas: 1.5
+ejercicio: true
+ejercicio_minutos: 20
+nota: 7.5
+notas: "Tarde productiva."
+```
+
+---
+
+## 🎯 Sistema de puntuación diaria (F10)
+
+| Hábito | Puntos | Condición |
+|--------|--------|----------|
+| Despertar ≤08:00 | +1.5 | despertar_hora ≤ "08:00" |
+| Dormir ≤23:00 | +1.5 | dormir_hora ≤ "23:00" |
+| Estudio ≥2h | +2.0 | estudio_horas ≥ 2 |
+| Proyecto ≥1h | +1.0 | proyecto_horas ≥ 1 |
+| Ejercicio | +1.5 | ejercicio = true |
+| Tabaco = 0 | +1.0 | tabaco = 0 |
+| THC = 0 | +0.5 | thc = 0 |
+| **MÁXIMO** | **10.5** | → normaliza a 10 |
 
 ---
 
 ## 🔗 Referencias
 
-- **Spec sesión 28-mar:** [`docs/sessions/2026-03-28-vision-plataforma.md`](docs/sessions/2026-03-28-vision-plataforma.md)
-- **Schema YAML:** [`personal/00_sistema/schemas/daily-schema.yaml`](https://github.com/alvarofernandezmota-tech/personal/blob/main/00_sistema/schemas/daily-schema.yaml)
-- **Script análisis:** [`personal/03_analisis/parse_tracking.py`](https://github.com/alvarofernandezmota-tech/personal/blob/main/03_analisis/parse_tracking.py)
+- **ROADMAP:** [`ROADMAP.md`](../ROADMAP.md)
+- **CHANGELOG:** [`CHANGELOG.md`](../CHANGELOG.md)
+- **Sesión 28-mar auditoría:** [`sessions/2026-03-28-session-auditoria.md`](sessions/2026-03-28-session-auditoria.md)
+- **Sesión 28-mar visión:** [`sessions/2026-03-28-vision-plataforma.md`](sessions/2026-03-28-vision-plataforma.md)
 
 ---
 
-_Última actualización: 28 marzo 2026 ~15:04 CET_
+_Última actualización: 28 marzo 2026 — 21:43 CET_
