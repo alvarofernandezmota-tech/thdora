@@ -1,239 +1,252 @@
 # 🐍 Clases, Atributos y Métodos — Guía Begoña
 
 > Este documento es el siguiente paso después de los ejercicios.
-> Aquí aprendes qué son las clases, los atributos y los métodos
-> **usando código real de THDORA** como ejemplo.
+> Cada ejemplo de código es **real** — está copiado exactamente del
+> proyecto THDORA. Puedes abrir el archivo y ver la misma línea.
 
 ---
 
-## 🧠 ¿Qué es una clase?
+## ¿Qué es una clase?
 
 Una **clase** es una plantilla para crear objetos.
+Define qué datos tiene un objeto (atributos) y qué puede hacer (métodos).
 
-Piensa en una clase como el molde de una galleta:
-- El molde define la forma (← esto es la clase)
-- Cada galleta que haces con ese molde es un objeto (← esto es la instancia)
-
-```python
-# Clase simple — la plantilla
-class Persona:
-    pass
-
-# Crear objetos (instancias) a partir de la clase
-bego  = Persona()
-alvaro = Persona()
-```
-
-`bego` y `alvaro` son dos objetos distintos creados con la misma plantilla.
-
----
-
-## 📦 Atributos — los datos del objeto
-
-Los **atributos** son las variables que viven dentro de un objeto.
-Se definen en el método especial `__init__` (el constructor).
+Piensa en ello así:
+- El molde de galleta = la clase
+- Cada galleta = un objeto (instancia)
 
 ```python
-class Persona:
-    def __init__(self, nombre, edad):   # constructor
-        self.nombre = nombre            # atributo
-        self.edad   = edad              # atributo
-
-bego = Persona("Begoña", 25)
-print(bego.nombre)   # → Begoña
-print(bego.edad)     # → 25
-```
-
-`self` siempre es el primero — es la forma en que el objeto se refiere a sí mismo.
-
-### Cómo se ve en THDORA — clase `Appointment`
-
-En [`src/db/models.py`](../src/db/models.py) está la clase `Appointment`.
-Cada atributo es una columna de la base de datos:
-
-```python
-class Appointment(Base):
-    """Una cita del usuario."""
-    __tablename__ = "appointments"   # nombre de la tabla en SQLite
-
-    # ── ATRIBUTOS ─────────────────────────────────────────
-    id:    int = columna(entero, clave_primaria=True)   # ID único
-    date:  str = columna(texto, obligatorio=True)       # "2026-04-09"
-    time:  str = columna(texto, obligatorio=True)       # "10:00"
-    name:  str = columna(texto, obligatorio=True)       # "Médico"
-    type:  str = columna(texto, por_defecto="otra")     # tipo de cita
-    notes: str = columna(texto, opcional=True)          # notas extra
-    index: int = columna(entero, por_defecto=0)         # número del día
-```
-
-Cuando creas una cita en el bot, THDORA hace esto por dentro:
-```python
-cita = Appointment(
-    date  = "2026-04-09",
-    time  = "10:00",
-    name  = "Médico",
-    type  = "salud",
-    notes = "llevar analítica"
-)
-# cita es un objeto de la clase Appointment
-# cita.date   → "2026-04-09"
-# cita.name   → "Médico"
-```
-
-📂 **Archivo real:** [`src/db/models.py`](../src/db/models.py)
-
----
-
-## ⚙️ Métodos — las funciones del objeto
-
-Los **métodos** son funciones que pertenecen a una clase.
-Siempre tienen `self` como primer parámetro.
-
-```python
+# Esto es una clase simple:
 class Persona:
     def __init__(self, nombre, edad):
-        self.nombre = nombre
-        self.edad   = edad
+        self.nombre = nombre   # atributo
+        self.edad   = edad     # atributo
 
-    # ── MÉTODOS ──────────────────────────────
-    def saludar(self):
-        print(f"¡Hola! Me llamo {self.nombre}.")
+# Crear dos objetos (instancias) distintos:
+bego   = Persona("Begoña", 25)
+alvaro = Persona("Álvaro", 27)
 
-    def es_mayor(self):
-        return self.edad >= 18
-
-bego = Persona("Begoña", 25)
-bego.saludar()          # → ¡Hola! Me llamo Begoña.
-print(bego.es_mayor())  # → True
+print(bego.nombre)    # → Begoña
+print(alvaro.nombre)  # → Álvaro
 ```
-
-### Cómo se ve en THDORA — método `to_dict()`
-
-Cada clase de `models.py` tiene un método `to_dict()` que convierte el objeto en un diccionario.
-Así la API puede devolverlo como JSON:
-
-```python
-class Appointment(Base):
-    # ... atributos ...
-
-    # ── MÉTODO ─────────────────────────────────
-    def to_dict(self) -> dict:
-        """Convierte la cita en un diccionario."""
-        return {
-            "id":    self.id,
-            "date":  self.date,
-            "time":  self.time,
-            "name":  self.name,
-            "type":  self.type,
-            "notes": self.notes,
-            "index": self.index,
-        }
-
-# Uso:
-cita = Appointment(date="2026-04-09", time="10:00", name="Médico", type="salud")
-print(cita.to_dict())
-# → {"id": 1, "date": "2026-04-09", "time": "10:00", "name": "Médico", ...}
-```
-
-📂 **Archivo real:** [`src/db/models.py`](../src/db/models.py)
 
 ---
 
-## 📋 Las tres clases de models.py
-
-En THDORA hay tres clases de datos. Cada una es una tabla de la base de datos:
-
-### `Appointment` — Cita
+## Los tres conceptos clave
 
 ```
-Clase: Appointment
-├── Atributos
-│   ├── id      → número único de la cita
-│   ├── date    → "2026-04-09"
-│   ├── time    → "10:00"
-│   ├── name    → "Médico"
-│   ├── type    → "salud"
-│   ├── notes   → "llevar analítica"
-│   └── index   → 1 (primera cita del día)
-└── Métodos
-    └── to_dict() → devuelve diccionario
+┌───────────────────────────────────────┐
+│  class MemoryLifeManager:         │  ← CLASE
+├───────────────────────────────────────┤
+│  self.appointments = {}           │  ← ATRIBUTO (datos que guarda)
+│  self.habits       = {}           │  ← ATRIBUTO
+├───────────────────────────────────────┤
+│  def create_appointment(...):     │  ← MÉTODO (cosas que sabe hacer)
+│  def get_appointments(...):       │  ← MÉTODO
+│  def log_habit(...):              │  ← MÉTODO
+└───────────────────────────────────────┘
 ```
 
-### `Habit` — Hábito del día
-
-```
-Clase: Habit
-├── Atributos
-│   ├── id     → número único
-│   ├── date   → "2026-04-09"
-│   ├── habit  → "sueno"
-│   └── value  → "8h"
-└── Métodos
-    └── to_dict() → devuelve diccionario
-```
-
-### `HabitConfig` — Configuración de cada hábito
-
-```
-Clase: HabitConfig
-├── Atributos
-│   ├── id          → número único
-│   ├── name        → "sueno"
-│   ├── habit_type  → "time" (numeric | time | boolean | text)
-│   ├── unit        → "h" (horas)
-│   ├── min_val     → 0.0
-│   ├── max_val     → 24.0
-│   ├── quick_vals  → "6h,7h,8h,9h" (botones rápidos)
-│   └── xp_rule     → "gte:7" (da XP si duermes 7h+)
-└── Métodos
-    └── to_dict() → devuelve diccionario con quick_vals como lista
-```
-
-📂 **Archivo real:** [`src/db/models.py`](../src/db/models.py)
+📂 Archivo real: [`src/core/impl/memory_lifemanager.py`](../src/core/impl/memory_lifemanager.py)
 
 ---
 
-## 📐 Herencia — una clase que hereda de otra
+## Parte 1 — El constructor `__init__` y los atributos
 
-La herencia permite que una clase hija **reutilice** el código de una clase madre
-y lo extienda o cambie.
+El método especial `__init__` se ejecuta automáticamente cuando creas el objeto.
+Aquí dentro se definen los atributos con `self.`.
+
+### Código real de `MemoryLifeManager` — líneas 38–39
 
 ```python
-# Clase madre
-class Animal:
-    def __init__(self, nombre):
-        self.nombre = nombre
+# ▶ src/core/impl/memory_lifemanager.py
 
-    def hablar(self):
-        print("...")
+class MemoryLifeManager(AbstractLifeManager):
+    """
+    Gestor de vida personal con almacenamiento en memoria.
 
-# Clase hija — hereda de Animal
-class Perro(Animal):
-    def hablar(self):           # sobreescribe el método
-        print("Guau!")
+    Attributes:
+        appointments (Dict[str, List[Dict]]): Citas indexadas por fecha.
+        habits (Dict[str, Dict[str, str]]): Hábitos indexados por fecha.
+    """
 
-class Gato(Animal):
-    def hablar(self):           # sobreescribe el método
-        print("Miau!")
-
-perro = Perro("Rex")
-perro.hablar()   # → Guau!
-print(perro.nombre)  # → Rex  (heredado de Animal)
+    def __init__(self) -> None:
+        self.appointments: Dict[str, List[Dict]] = {}   # ← atributo: diccionario vacío
+        self.habits: Dict[str, Dict[str, str]] = {}     # ← atributo: diccionario vacío
 ```
 
-### Cómo se ve en THDORA — `AbstractLifeManager`
+**Qué pasa al crear el objeto:**
+```python
+mgr = MemoryLifeManager()   # ← se ejecuta __init__
+# Ahora mgr.appointments = {}
+# Ahora mgr.habits       = {}
+```
 
-En THDORA la clase madre define el **contrato** (qué tiene que poder hacer).
-Las clases hijas deciden **cómo** hacerlo:
+`Dict[str, List[Dict]]` es una anotación de tipo: dice que `appointments` es
+un diccionario donde la clave es un string (la fecha) y el valor es una lista de diccionarios.
+No cambia cómo funciona, sólo documenta qué tipo de dato espera.
+
+---
+
+## Parte 2 — Métodos con lógica real
+
+Los métodos usan `self` para acceder a los atributos del propio objeto.
+
+### Método `create_appointment` — líneas 43–74 (real)
 
 ```python
-# src/core/interfaces/abstract_lifemanager.py
+# ▶ src/core/impl/memory_lifemanager.py
+
+def create_appointment(self, date: date, time: str, type: str, notes: str = "") -> UUID:
+    """
+    Crea una nueva cita y la almacena en memoria.
+    """
+    # 1. Valida que la hora tenga formato correcto (09:30, 23:00...)
+    if not _TIME_RE.match(time):
+        raise ValueError(
+            f"Formato de hora inválido: '{time}'. Se espera HH:MM."
+        )
+
+    # 2. Valida que el tipo sea uno de los permitidos
+    if type not in VALID_TYPES:
+        raise ValueError(
+            f"Tipo de cita inválido: '{type}'. "
+            f"Valores permitidos: {sorted(VALID_TYPES)}"
+        )
+
+    # 3. Genera un ID único para la cita
+    apt_id = uuid4()
+    date_str = str(date)   # convierte date(2026,4,9) → "2026-04-09"
+
+    # 4. Si es el primer día, crea la lista vacía
+    if date_str not in self.appointments:     # ← accede al ATRIBUTO
+        self.appointments[date_str] = []      # ← modifica el ATRIBUTO
+
+    # 5. Añade la cita a la lista del día
+    self.appointments[date_str].append({      # ← usa el ATRIBUTO
+        "id": str(apt_id),
+        "time": time,
+        "type": type,
+        "notes": notes,
+    })
+
+    return apt_id   # devuelve el ID para que el bot lo pueda usar
+```
+
+**Cómo se usa desde fuera:**
+```python
+from datetime import date
+
+mgr = MemoryLifeManager()
+
+cita_id = mgr.create_appointment(
+    date(2026, 4, 9),   # fecha
+    "10:00",            # hora
+    "médica",           # tipo (debe ser de VALID_TYPES)
+    "llevar analítica" # notas
+)
+
+print(cita_id)               # → UUID como 3f7a1b2c-...
+print(mgr.appointments)      # → {"2026-04-09": [{"id":..., "time": "10:00", ...}]}
+```
+
+---
+
+### Método `get_appointments` — línea 76 (real)
+
+Este método es corto — sólo lee del atributo y devuelve la lista:
+
+```python
+# ▶ src/core/impl/memory_lifemanager.py
+
+def get_appointments(self, date: date) -> List[Dict]:
+    return self.appointments.get(str(date), [])   # si no existe, devuelve []
+```
+
+**Cómo se usa:**
+```python
+citas = mgr.get_appointments(date(2026, 4, 9))
+
+for cita in citas:   # ← bucle del Ejercicio 04
+    print(f"{cita['time']} — {cita['type']}")
+# → 10:00 — médica
+```
+
+---
+
+### Método `log_habit` — líneas 97–101 (real)
+
+```python
+# ▶ src/core/impl/memory_lifemanager.py
+
+def log_habit(self, date: date, habit: str, value: str) -> bool:
+    date_str = str(date)
+    if date_str not in self.habits:       # si no existe el día...
+        self.habits[date_str] = {}        # crea el diccionario vacío
+    self.habits[date_str][habit] = value  # guarda el valor del hábito
+    return True
+```
+
+**Cómo se usa:**
+```python
+mgr.log_habit(date(2026, 4, 9), "sueno", "8h")
+mgr.log_habit(date(2026, 4, 9), "humor", "8")
+mgr.log_habit(date(2026, 4, 9), "THC",   "0")
+
+print(mgr.habits)
+# → {"2026-04-09": {"sueno": "8h", "humor": "8", "THC": "0"}}
+```
+
+---
+
+### Método `get_day_summary` — líneas 107–111 (real)
+
+Este método llama a **otros métodos** del mismo objeto usando `self`:
+
+```python
+# ▶ src/core/impl/memory_lifemanager.py
+
+def get_day_summary(self, date: date) -> Dict:
+    return {
+        "date":         str(date),
+        "appointments": self.get_appointments(date),  # ← llama a otro método
+        "habits":       self.get_habits(date),        # ← llama a otro método
+    }
+```
+
+**Cómo se usa:**
+```python
+resumen = mgr.get_day_summary(date(2026, 4, 9))
+print(resumen["date"])          # → "2026-04-09"
+print(resumen["appointments"])  # → [{...}]
+print(resumen["habits"])        # → {"sueno": "8h", ...}
+```
+
+---
+
+## Parte 3 — Herencia: una clase que hereda de otra
+
+`MemoryLifeManager` tiene `(AbstractLifeManager)` en su definición.
+Eso significa que **hereda** de la clase madre.
+
+### La clase madre — `AbstractLifeManager` (el contrato)
+
+Está en [`src/core/interfaces/abstract_lifemanager.py`](../src/core/interfaces/abstract_lifemanager.py).
+No guarda datos. Sólo **dice qué métodos deben existir** con `@abstractmethod`:
+
+```python
+# ▶ src/core/interfaces/abstract_lifemanager.py
+
 from abc import ABC, abstractmethod
 
-class AbstractLifeManager(ABC):     # ABC = clase abstracta, no se puede instanciar sola
+class AbstractLifeManager(ABC):    # ABC = no se puede instanciar sola
 
-    @abstractmethod                 # obliga a las hijas a implementar esto
-    def create_appointment(self, date, time, name, type, notes=""):
+    @abstractmethod                # ← obliga a las hijas a implementar esto
+    def create_appointment(self, date, time, type, notes=""):
+        """
+        Crea una nueva cita en el sistema.
+        Toda implementación DEBE tener este método.
+        """
         pass
 
     @abstractmethod
@@ -243,136 +256,147 @@ class AbstractLifeManager(ABC):     # ABC = clase abstracta, no se puede instanc
     @abstractmethod
     def log_habit(self, date, habit, value):
         pass
+
+    @abstractmethod
+    def get_habits(self, date):
+        pass
+
+    @abstractmethod
+    def get_day_summary(self, date):
+        pass
 ```
 
-Y las tres implementaciones heredan de ella:
+Si intentas crear `AbstractLifeManager()` directamente, Python lanza un error.
+Está diseñada sólo para ser heredada.
+
+### La relación entre las clases
+
+```
+AbstractLifeManager   ← clase madre (contrato: qué debe poder hacerse)
+        │
+        ├─── MemoryLifeManager    ← guarda en diccionarios (RAM)
+        ├─── JsonLifeManager      ← guarda en archivo .json  (pendiente)
+        └─── SqliteLifeManager    ← guarda en SQLite (producción)
+```
+
+Las tres hijas tienen los mismos métodos pero los implementan de forma distinta.
+El bot no sabe cuál está usando — sólo llama a `mgr.create_appointment(...)` y
+funciona igual con cualquiera.
+
+---
+
+## Parte 4 — Clase `Appointment` en models.py
+
+Además del LifeManager, THDORA tiene clases que representan las tablas de la base de datos.
+Están en [`src/db/models.py`](../src/db/models.py).
 
 ```python
-# src/core/impl/memory_lifemanager.py  ← más fácil de leer
-class MemoryLifeManager(AbstractLifeManager):
-    def __init__(self):
-        self._appointments = {}   # diccionario en memoria
-        self._habits = {}
+# ▶ src/db/models.py
 
-    def create_appointment(self, date, time, name, type, notes=""):
-        # guarda en el diccionario de memoria
-        if date not in self._appointments:
-            self._appointments[date] = []
-        self._appointments[date].append({
-            "time": time, "name": name, "type": type, "notes": notes
-        })
+class Appointment(Base):
+    """Cita del usuario."""
 
-    def get_appointments(self, date):
-        return self._appointments.get(date, [])
+    __tablename__ = "appointments"   # nombre de la tabla en SQLite
 
-# src/core/impl/sqlite_lifemanager.py  ← la real, guarda en base de datos
-class SqliteLifeManager(AbstractLifeManager):
-    def __init__(self, db_url):
-        self.session_factory = crear_sesion(db_url)
+    # ATRIBUTOS = columnas de la tabla
+    id:    int = mapped_column(Integer, primary_key=True, autoincrement=True)
+    date:  str = mapped_column(String(10), nullable=False, index=True)  # "2026-04-09"
+    time:  str = mapped_column(String(5),  nullable=False)              # "10:00"
+    name:  str = mapped_column(String(200),nullable=False, default="")
+    type:  str = mapped_column(String(50), nullable=False, default="otra")
+    notes: str = mapped_column(Text, nullable=True)
+    index: int = mapped_column(Integer,    nullable=False, default=0)
 
-    def create_appointment(self, date, time, name, type, notes=""):
-        # guarda en SQLite
-        with self.session_factory() as session:
-            cita = Appointment(date=date, time=time, name=name, type=type, notes=notes)
-            session.add(cita)
-            session.commit()
-```
-
-Las dos cumplen el mismo contrato — tienen los mismos métodos —
-pero cada una los implementa de forma distinta.
-
-📂 **Archivos:**
-- [`src/core/interfaces/abstract_lifemanager.py`](../src/core/interfaces/abstract_lifemanager.py)
-- [`src/core/impl/memory_lifemanager.py`](../src/core/impl/memory_lifemanager.py) ← **empieza por esta**
-- [`src/core/impl/sqlite_lifemanager.py`](../src/core/impl/sqlite_lifemanager.py)
-
----
-
-## 🔍 Resumen visual — Clase, Atributo, Método
-
-```
-            CLASS
-         ┌────────────────────────────┐
-         │   class Appointment:       │
-         ├────────────────────────────┤
-ATRIBUTOS│   id, date, time, name...   │ ← datos
-         ├────────────────────────────┤
-MÉTODOS  │   def to_dict(self): ...   │ ← acciones
-         └────────────────────────────┘
-
-INSTANCIA (objeto creado):
-   cita = Appointment(date="2026-04-09", time="10:00", name="Médico")
-   cita.name       ← accede a un atributo
-   cita.to_dict()  ← llama a un método
-```
-
----
-
-## 📊 El orden para aprender estas clases en THDORA
-
-1. **[`src/db/models.py`](../src/db/models.py)**
-   Clases simples con atributos y `to_dict()`. El mejor punto de entrada.
-   Ver `Appointment` primero, luego `Habit`, luego `HabitConfig`.
-
-2. **[`src/core/impl/memory_lifemanager.py`](../src/core/impl/memory_lifemanager.py)**
-   Clase que usa diccionarios en memoria. Sin base de datos, fácil de leer.
-   Aquí se ve `__init__` con `self._appointments = {}` y métodos que lo usan.
-
-3. **[`src/core/interfaces/abstract_lifemanager.py`](../src/core/interfaces/abstract_lifemanager.py)**
-   La clase abstracta: qué es `ABC`, qué hace `@abstractmethod`.
-   Aquí se ve qué significa "contrato" en Python.
-
-4. **[`src/core/impl/sqlite_lifemanager.py`](../src/core/impl/sqlite_lifemanager.py)**
-   La implementación real. Usa `Appointment` y `Habit` de `models.py`.
-   Aquí se conectan las capas.
-
-5. **[`src/bot/api_client.py`](../src/bot/api_client.py)**
-   Clase que habla con la API. Ejemplo de clase con métodos `async`.
-
----
-
-## 🧩 Para practicar después
-
-Después de ver estas clases, puedes crear una versión simple tú sola:
-
-```python
-# Crea una clase Tarea con:
-#   Atributos: titulo, completada (bool), prioridad (1-3)
-#   Métodos:
-#     completar()  → pone completada = True
-#     to_dict()    → devuelve diccionario
-#     __str__()    → devuelve texto para print()
-
-class Tarea:
-    def __init__(self, titulo, prioridad=2):
-        self.titulo     = ___
-        self.completada = ___      # empieza en False
-        self.prioridad  = ___
-
-    def completar(self):
-        self.completada = ___
-
-    def to_dict(self):
+    # MÉTODO: convierte el objeto a diccionario
+    def to_dict(self) -> dict:
         return {
-            "titulo":     ___,
-            "completada": ___,
-            "prioridad":  ___,
+            "id":    self.id,
+            "date":  self.date,
+            "time":  self.time,
+            "name":  self.name,
+            "type":  self.type,
+            "notes": self.notes,
+            "index": self.index,
         }
-
-    def __str__(self):
-        estado = "✅" if self.completada else "⏳"
-        return f"{estado} [{self.prioridad}] {self.titulo}"
-
-
-# Prueba:
-t1 = Tarea("Estudiar Python", prioridad=1)
-t2 = Tarea("Hacer ejercicio")
-
-print(t1)            # → ⏳ [1] Estudiar Python
-t1.completar()
-print(t1)            # → ✅ [1] Estudiar Python
-print(t1.to_dict())  # → {"titulo": "Estudiar Python", "completada": True, "prioridad": 1}
 ```
+
+**Diferencia con `MemoryLifeManager`:**
+- `MemoryLifeManager` → clase con lógica (sabe hacer cosas)
+- `Appointment` → clase de datos (representa una fila de la base de datos)
+
+Las dos son clases. Sólo tienen propósitos distintos.
+
+---
+
+## Flujo completo — cómo encajan las clases
+
+Cuando escribes `/nueva` en Telegram y creas la cita "Médico 10:00":
+
+```
+Tú escribes "/nueva" en Telegram
+    ↓
+handlers.py → cmd_nueva()            ← función (Ejercicio 05)
+    ↓ pregunta: fecha, hora, tipo...
+handlers.py → recibir_tipo()         ← condiciones if/elif (Ejercicio 03)
+    ↓ llama a la API
+api_client.py → create_appointment() ← método de clase ApiClient
+    ↓ POST /appointments/2026-04-09
+appointments.py (router FastAPI)      ← recibe la petición HTTP
+    ↓
+SqliteLifeManager.create_appointment()
+    → crea objeto Appointment(date=..., time=..., name=...) ← CLASE
+    → session.add(cita)  ← guarda en SQLite
+    → return cita.id
+    ↓
+"✅ Cita guardada para el 2026-04-09" ← respuesta al usuario
+```
+
+---
+
+## Para practicar tú sola — ejercicio
+
+Usa `MemoryLifeManager` como si fueras el bot:
+
+```python
+# Ejecuta esto en tu terminal o en un archivo .py
+from datetime import date
+from src.core.impl.memory_lifemanager import MemoryLifeManager
+
+# 1. Crear el gestor
+mgr = MemoryLifeManager()
+print(mgr.appointments)   # → {}  (vacío)
+
+# 2. Crear una cita
+mgr.create_appointment(date(2026, 4, 9), "10:00", "médica", "llevar analítica")
+mgr.create_appointment(date(2026, 4, 9), "17:00", "personal")
+print(mgr.appointments)   # → {"2026-04-09": [{...}, {...}]}
+
+# 3. Leer las citas del día
+citas = mgr.get_appointments(date(2026, 4, 9))
+for cita in citas:
+    print(f"{cita['time']} — {cita['type']}")
+
+# 4. Registrar hábitos
+mgr.log_habit(date(2026, 4, 9), "sueno", "8h")
+mgr.log_habit(date(2026, 4, 9), "humor", "9")
+
+# 5. Ver el resumen del día
+resumen = mgr.get_day_summary(date(2026, 4, 9))
+print(resumen)
+```
+
+> 💡 Pista: `VALID_TYPES` acepta ``"médica"``, ``"personal"``, ``"trabajo"``, ``"otra"``
+
+---
+
+## Archivos del proyecto para abrir durante la clase
+
+| Orden | Archivo | Por qué empezar aquí |
+|-------|---------|----------------------|
+| 1º | [`src/db/models.py`](../src/db/models.py) | Clases de datos simples — atributos y `to_dict()` |
+| 2º | [`src/core/impl/memory_lifemanager.py`](../src/core/impl/memory_lifemanager.py) | Clase con lógica real, sin base de datos, fácil de leer |
+| 3º | [`src/core/interfaces/abstract_lifemanager.py`](../src/core/interfaces/abstract_lifemanager.py) | La clase abstracta: herencia y contratos |
+| 4º | [`src/core/impl/sqlite_lifemanager.py`](../src/core/impl/sqlite_lifemanager.py) | La implementación de producción: mismos métodos, SQLite real |
 
 ---
 
