@@ -6,6 +6,51 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 
 ---
 
+## [0.10.0] — 2026-04-12
+
+### Refactor — F9.6: handlers.py monolítico → módulos (✅ completado)
+
+**`src/bot/handlers.py` (60KB, ~1500 líneas) eliminado y dividido en:**
+
+| Módulo | Contenido |
+|--------|----------|
+| `src/bot/utils/dates.py` | `_parse_date_flex`, `_parse_date_arg`, `_date_label`, `_date_short`, `_greeting`, `_monday` |
+| `src/bot/utils/accum.py` | `_accumulate_value`, `_clean_acum_context` |
+| `src/bot/keyboards.py` | Todos los `_kb_*`, `_nav_keyboard`, constantes `TIPOS_CITA`, `FRANJAS`, `HABIT_TYPE_EMOJIS` |
+| `src/bot/handlers/menu.py` | `cmd_start`, `cb_menu_home`, `cb_quick_dispatch` |
+| `src/bot/handlers/citas.py` | `cmd_citas`, nav, detail, borrar/editar, `/nueva` + **FRANJAS HORARIAS** |
+| `src/bot/handlers/habitos.py` | `cmd_habitos`, nav, `/habito`, borrar/editar/sumar |
+| `src/bot/handlers/semana.py` | `cmd_semana`, `cb_semana_nav` |
+| `src/bot/handlers/config.py` | `cmd_config`, `build_config_handler` |
+| `src/bot/handlers/common.py` | `cmd_cancelar`, `cb_cancel_action`, `cmd_resumen`, `error_handler` |
+| `src/bot/handlers/__init__.py` | Re-exporta todo — `main.py` sin cambios |
+
+### Añadido — F9.5 (pendiente): Franjas horarias en /nueva (✅ implementado)
+
+Flujo `/nueva` rediseñado con selección progresiva de hora:
+
+```
+Paso 1 → Fecha (texto libre: hoy, mañana, 27/03…)
+Paso 2 → Franja: [🌅 Mañana 6-14] [🌆 Tarde 14-22] [🌙 Noche 22-6] [✏️ Exacta]
+Paso 3 → Hora en punto: botones [06:00][07:00]…[13:00] + [🕐 Ver cuartos][✏️ Exacta]
+Paso 4 → Cuartos (opcional): [HH:00][HH:15][HH:30][HH:45] + [✏️ Exacta]
+Paso 5 → Nombre (texto libre)
+Paso 6 → Tipo [Médica][Personal][Trabajo][Otra]
+Paso 7 → Notas o /skip
+```
+
+Estados nuevos en `ConversationHandler`:
+- `NUEVA_FRANJA` — elección de franja con botones
+- `NUEVA_HORA_PUNTO` — hora en punto de la franja
+- `NUEVA_HORA_CUARTO` — cuartos opcionales
+- `NUEVA_TIME` — escritura manual HH:MM (siempre disponible)
+- Al cambiar hora por conflicto → vuelve a `NUEVA_FRANJA` (no a texto libre)
+
+### main.py
+- Sin cambios — los imports siguen funcionando igual vía `src.bot.handlers.__init__`
+
+---
+
 ## [0.9.0] — 2026-03-28
 
 ### Añadido — F9.5: UX avanzada bot (handlers v3.4)
@@ -33,12 +78,9 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 - Cambio de vista Citas ↔ Hábitos desde la barra de navegación
 - Botón 📋 Semana desde citas y hábitos
 
-### Versión handlers
-- v3.0 (F9.3) → v3.3 (F9.4) → **v3.4** (F9.5-c2) — archivo único `src/bot/handlers.py`
-
 ### ⚠️ Pendiente de prueba en vivo
-> F9.3, F9.4 y F9.5 están implementadas y en `main` pero **no han sido probadas en entorno real**.
-> La sesión de prueba está programada para la próxima sesión (F9.6 previa).
+> F9.3, F9.4 y F9.5 están implementadas en `main` pero **no han sido probadas en entorno real**.
+> Primera prueba prevista para la próxima sesión presencial.
 
 ---
 
@@ -49,7 +91,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 - Eliminado `.env~` (fichero vacío mal versionado)
 - `docs/sessions/2026-03-28-session-auditoria.md` — sesión de auditoría documentada
 - Verificado estado real del repo: F9.1→F9.4 ✅ completas, F9.5 🔜 Next
-- Rama `feat/delete-appointment` identificada como obsoleta (superada por SQLiteLifeManager)
+- Rama `feat/delete-appointment` identificada como obsoleta
 
 ---
 
@@ -62,40 +104,25 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 - `src/core/impl/sqlite_lifemanager.py` — `SQLiteLifeManager` completo
 - `src/api/deps.py` — singleton `SQLiteLifeManager` vía `lru_cache`
 - `data/.gitkeep` — carpeta donde vive `thdora.db`
-- `docs/modules/db.md` — documentación completa del módulo DB
-- `pyproject.toml` — v0.8.0, `sqlalchemy>=2.0.0` en deps
 
 ### Añadido — F9.1: Routers migrados a SQLite
 - `src/api/routers/appointments.py` — reescrito completo con SQLite
 - `src/api/routers/habits.py` — reescrito completo con SQLite
 - `src/api/routers/summary.py` — reescrito con `GET /summary/week/{date}`
 
-### Añadido — F7 fixes (handlers v2.1)
-- Fix bug tipo `/nueva`
-- Fix contexto acum suelto: `_clean_acum_context()`
-- Helper `_skip_to()` y `_skip_to_type()`
-
 ---
 
 ## [0.7.1] — 2026-03-27
-
 ### Añadido
-- `src/api/deps.py` — singleton `get_manager()`
 - Endpoint `PUT /appointments/{date}/{index}` — editar cita
 - Endpoints `DELETE/PUT /habits/{date}/{habit}` — borrar/editar hábito
-- `src/bot/api_client.py` — `update_appointment`, `delete_habit`, `update_habit`
-- `src/bot/handlers.py` v2: flujo `/nueva` 5 pasos, fechas flexibles, inline buttons, acumulación `+N`
-
----
+- `src/bot/handlers.py` v2: flujo `/nueva` 5 pasos, fechas flexibles, inline buttons
 
 ## [0.7.0] — 2026-03-27
-
 ### Añadido
 - `src/bot/api_client.py` — cliente HTTP asíncrono `ThdoraApiClient`
 - `src/bot/handlers.py` v1
 - `src/bot/main.py` — entrypoint con health check
-
----
 
 ## [0.6.1] — 2026-03-25
 ### Añadido
@@ -105,7 +132,6 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 ### Limpieza
 - Eliminados 8 ficheros zombie de `src/core/` y `src/api/` raíz
 - Coverage total subió de 45% a 87%
-- Tests reorganizados en `unit/` + `integration/` + `e2e/`
 
 ## [0.5.0] — 2026-03-24 (noche)
 ### Añadido
@@ -131,4 +157,4 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 
 ---
 
-_Última actualización: 28 marzo 2026 — 22:38 CET_
+_Última actualización: 12 abril 2026 — 21:04 CEST_
