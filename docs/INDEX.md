@@ -1,81 +1,49 @@
-# 📖 THDORA — Índice de documentación
+# 🗂️ THDORA — Índice de documentación
 
-> **Navegación:** [README](../README.md) · [CHANGELOG](../CHANGELOG.md) · [ROADMAP](../ROADMAP.md)
+> **Navegación rápida:** [README](../README.md) · [CHANGELOG](../CHANGELOG.md) · [ROADMAP](../ROADMAP.md)
 
-**Versión:** v0.8.0 — **Última actualización:** 27 marzo 2026
+---
+
+## 📓 Diarios de desarrollo
+
+| Fecha | Resumen |
+|-------|---------|
+| [2026-04-12](diarios/2026-04-12.md) | **F9.6** refactor handlers modular + **72 tests bot** + **F9.7 Docker** — v0.11.0 |
+| [2026-03-28](diarios/2026-03-28.md) | Auditoría repo, limpieza, F9.5 UX avanzada |
+| [2026-03-27](diarios/2026-03-27.md) | F9 SQLite, routers, bot v2 |
+| [2026-03-25](diarios/2026-03-25.md) | GET /summary, limpieza zombie files |
+| [2026-03-24](diarios/2026-03-24.md) | ADRs, arquitectura, core, 61 tests |
+| [2026-03-23](diarios/2026-03-23.md) | Inicio del proyecto, estructura base |
 
 ---
 
 ## 🏗️ Arquitectura
 
-| Documento | Descripción |
-|-----------|-------------|
-| [ARCHITECTURE.md](architecture/ARCHITECTURE.md) | Visión general del sistema |
-| [ADR-001](architecture/ADR-001-abstract-lifemanager.md) | AbstractLifeManager |
-| [ADR-002](architecture/ADR-002-json-storage.md) | Almacenamiento JSON |
-| [ADR-003](architecture/ADR-003-fastapi.md) | FastAPI como API REST |
-| [ADR-004](architecture/ADR-004-telegram-bot.md) | Bot Telegram |
+- [docs/architecture/](architecture/) — ADR-001 al ADR-004
+- [docs/ECOSISTEMA.md](ECOSISTEMA.md) — visión del ecosistema THDORA
+- [docs/ECOSYSTEM.md](ECOSYSTEM.md) — versión en inglés
+- [docs/PERSONAL-DATA-PLATFORM.md](PERSONAL-DATA-PLATFORM.md) — plataforma de datos personales
+
+## 🔧 Setup y guías
+
+- [docs/setup/](setup/) — instalación y configuración
+- [docs/GIT_GUIDE.md](GIT_GUIDE.md) — convenciones git + commits
+- [docs/modules/](modules/) — documentación por módulo
+
+## 🔍 Auditoria
+
+- [docs/auditoria/](auditoria/) — sesiones de auditoría
+- [docs/sessions/](sessions/) — sesiones de trabajo
 
 ---
 
-## 🧩 Módulos
+## 📊 Estado del proyecto
 
-| Módulo | Ruta | Descripción |
-|--------|------|-------------|
-| API | `src/api/` | FastAPI: 14 endpoints CRUD + semana + rango + stats |
-| Bot | `src/bot/` | Telegram: 7 comandos + inline buttons |
-| Core | `src/core/` | Abstracción + SQLiteLifeManager + JsonLifeManager |
-| DB | `src/db/` | SQLAlchemy ORM + modelos + engine |
-| AI | `src/ai/` | Pendiente F11 |
+```
+v0.11.0 — 12 abril 2026
+✅ F1–F9.7 completadas
+⚠️  Pendiente prueba en vivo (checklist en diario 2026-04-12)
+🔜 F9.8 Multi-usuario — BLOQUEADA hasta prueba en vivo
+```
 
-### Documentación por módulo
-
-- [Módulo DB](modules/db.md) — SQLite, modelos, SQLiteLifeManager
-- [Módulo Bot](modules/bot.md) — handlers, comandos, ConversationHandlers
-
----
-
-## 🗒️ Diarios de sesión
-
-| Fecha | Resumen |
-|-------|---------|
-| [2026-03-27](diarios/2026-03-27.md) | F7 bot v2, F9 SQLite, F9.1 routers, fixes |
-| [2026-03-24](diarios/2026-03-24.md) | F1–F6: base, core, API REST |
-
----
-
-## 🔎 Auditorías
-
-| Repo | Documento |
-|------|-----------|
-| thea-ia | [auditoría](auditoria/thea-ia.md) |
-
----
-
-## 🎮 Plan RPG (F10)
-
-### XP por hábito
-
-| Hábito | Condición | XP |
-|--------|-----------|----|
-| sueño | ≥ 7h | +20 |
-| ejercicio | registrado | +30 |
-| estudio | registrado | +40 |
-| agua | ≥ 2L | +15 |
-| humor | ≥ 7 | +10 |
-| sustancias | = 0 | +50 |
-| racha 7d | completa | +200 bonus |
-
-### Niveles
-
-| XP | Nivel |
-|----|-------|
-| 0 | 🦣 Novato |
-| 500 | 📘 Aprendiz |
-| 1500 | ⚔️ Guerrero |
-| 3500 | 🌟 Maestro |
-| 7500 | 🔥 Leyenda |
-
----
-
-_Última actualización: 27 marzo 2026 — 22:21 CET_
+_Última actualización: 12 abril 2026_
