@@ -1,0 +1,73 @@
+# ──────────────────────────────────────────────────────────────────────────
+# THDORA — docker-compose.yml
+#
+# Uso:
+#   cp docker/.env.docker.example .env        # primera vez
+#   docker compose up -d                       # arrancar
+#   docker compose logs -f                     # ver logs
+#   docker compose down                        # parar
+#   docker compose exec api sqlite3 /app/data/thdora.db  # consola DB
+#
+# Volumen `thdora_data` persiste la base de datos SQLite entre reinicios.
+# ──────────────────────────────────────────────────────────────────────────
+
+services:
+
+  # ─────────────────────────────────────────────────────────────────
+  api:
+    build: .
+    image: thdora:latest
+    container_name: thdora-api
+    command: /entrypoint-api.sh
+    restart: always
+    ports:
+      - "8000:8000"          # expone la API al host (opcional en producción)
+    volumes:
+      - thdora_data:/app/data
+    env_file:
+      - .env
+    environment:
+      - THDORA_DB_PATH=/app/data/thdora.db
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # ─────────────────────────────────────────────────────────────────
+  bot:
+    build: .
+    image: thdora:latest
+    container_name: thdora-bot
+    command: /entrypoint-bot.sh
+    restart: always
+    depends_on:
+      api:
+        condition: service_healthy
+    volumes:
+      - thdora_data:/app/data
+    env_file:
+      - .env
+    environment:
+      - THDORA_API_URL=http://api:8000
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  thdora_data:
+    driver: local
+    # Para persistencia en host en lugar de volumen Docker:
+    # driver_opts:
+    #   type: none
+    #   o: bind
+    #   device: ./data

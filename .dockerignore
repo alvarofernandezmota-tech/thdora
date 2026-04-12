@@ -1,0 +1,43 @@
+# ─ Python cache ─────────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# ─ Entorno virtual ───────────────────────────────────────────────────────
+.venv/
+venv/
+env/
+
+# ─ Tests y documentación (no van en la imagen) ────────────────────
+tests/
+docs/
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+coverage.xml
+*.coverage
+
+# ─ Secretos y datos locales ────────────────────────────────────────
+.env
+.env.*
+!docker/.env.docker.example
+data/*.db
+data/*.db-journal
+datos/
+
+# ─ Git y CI ────────────────────────────────────────────────────────────
+.git/
+.github/
+*.md
+!README.md
+
+# ─ IDE ───────────────────────────────────────────────────────────────────
+.idea/
+.vscode/
+*.swp
