@@ -6,21 +6,23 @@ Estructura del ConversationHandler:
     └─ Rama Hábitos:
         CFG_NOMBRE     → nombre del hábito a configurar (texto)
         CFG_TYPE       → tipo: numeric / time / boolean / text (botones)
-        CFG_UNIT       → unidad (texto o /skip)
-        CFG_QUICK      → botones rápidos separados por comas (texto o /skip)
+        CFG_UNIT       → unidad (texto o skip)
+        CFG_QUICK      → botones rápidos separados por comas (texto o skip)
         CFG_DEL_CONF   → confirmación antes de borrar una config
     └─ Rama Notificaciones:
         NOTIF_MENU        → menú con toggles + botones de hora/offsets
         NOTIF_SET_TIME    → teclado de horas para resumen o evening log
+                            Botón ❌ Cancelar → vuelve a NOTIF_MENU sin guardar
         NOTIF_SET_OFFSETS → teclado de minutos antes de cita
+                            Botón ❌ Cancelar → vuelve a NOTIF_MENU sin guardar
 
 Nota scheduler:
-    Al cambiar hora de notificación o toggles, se reprograman los jobs
-    diarios del usuario llamando a schedule_user_jobs().
+    Solo se reprograman los jobs diarios cuando el usuario confirma
+    una nueva hora (notif_recv_time). Los toggles on/off NO reprograman
+    para evitar jobs duplicados.
 
 Nota /skip:
-    Se acepta '/skip' (con barra) y 'skip' (sin barra) indistintamente
-    en los pasos CFG_UNIT y CFG_QUICK.
+    Se acepta '/skip' (con barra) y 'skip' (sin barra) en CFG_UNIT y CFG_QUICK.
 """
 
 import logging
@@ -49,25 +51,20 @@ logger = logging.getLogger(__name__)
 api    = ThdoraApiClient()
 
 # ── Estados ────────────────────────────────────────────────
-# Rama Hábitos: 40–44
 CFG_MENU, CFG_NOMBRE, CFG_TYPE, CFG_UNIT, CFG_QUICK = range(40, 45)
-# Confirmación borrar config hábito: 48
-CFG_DEL_CONF = 48
-# Rama Notificaciones: 45–47
 NOTIF_MENU, NOTIF_SET_TIME, NOTIF_SET_OFFSETS = range(45, 48)
+CFG_DEL_CONF = 48
 
 
 def _is_skip(text: str) -> bool:
-    """Acepta '/skip' y 'skip' (con y sin barra) como señal de omitir."""
+    """Acepta '/skip' y 'skip' (con y sin barra)."""
     return text.lower().strip().lstrip("/") == "skip"
 
 
-# ── Entrada /config ────────────────────────────────────────────
+# ── Entrada /config ──────────────────────────────────────────
 
 async def cmd_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Muestra el menú raíz de configuración.
-    Entry point para /config y para el botón quick_config del menú.
-    """
+    """Entry point de /config y del botón quick_config del menú."""
     msg = update.message or (update.callback_query and update.callback_query.message)
     if update.callback_query:
         await update.callback_query.answer()
@@ -83,13 +80,10 @@ async def cfg_menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     """Ramifica según la elección del menú raíz."""
     query = update.callback_query
     await query.answer()
-
     if query.data == "cfg_habitos":
         return await _show_hab_configs(query)
-
     if query.data == "cfg_notif":
         return await _show_notif_menu(query, context)
-
     if query.data == "cfg_back_menu":
         await query.edit_message_text(
             "⚙️ *Configuración*\n\n¿Qué quieres configurar?",
@@ -97,7 +91,6 @@ async def cfg_menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             reply_markup=_kb_config_menu(),
         )
         return CFG_MENU
-
     return CFG_MENU
 
 
@@ -107,9 +100,7 @@ async def _show_hab_configs(query) -> int:
         configs = await api.get_all_habit_configs()
     except Exception:
         configs = []
-
-    lines = []
-    buttons = []
+    lines, buttons = [], []
     if configs:
         lines.append("⚙️ *Hábitos configurados:*\n")
         for c in configs:
@@ -122,7 +113,6 @@ async def _show_hab_configs(query) -> int:
             ])
     else:
         lines.append("⚙️ No hay ningún hábito configurado todavía\\.")
-
     buttons.append([InlineKeyboardButton("← Volver", callback_data="cfg_back_menu")])
     await query.edit_message_text(
         "\n".join(lines) + "\n\n➕ Escribe el nombre del hábito a configurar:",
@@ -132,10 +122,9 @@ async def _show_hab_configs(query) -> int:
     return CFG_NOMBRE
 
 
-# ── Borrar config de hábito ──────────────────────────────────────
+# ── Borrar config de hábito ──────────────────────────────────
 
 async def cfg_del_hab(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Pide confirmación antes de borrar la config de un hábito."""
     query = update.callback_query
     await query.answer()
     nombre = query.data[len("cfgdel_"):]
@@ -152,7 +141,6 @@ async def cfg_del_hab(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 
 async def cfg_del_hab_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Ejecuta el borrado de la config del hábito."""
     query = update.callback_query
     await query.answer()
     nombre = context.user_data.get("cfg_del_nombre", "")
@@ -171,7 +159,7 @@ async def cfg_del_hab_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE
     return CFG_MENU
 
 
-# ── Rama Hábitos ──────────────────────────────────────────────
+# ── Rama Hábitos ────────────────────────────────────────────
 
 async def cfg_recv_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     nombre = update.message.text.strip()
@@ -199,7 +187,6 @@ async def cfg_recv_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     habit_type = query.data.replace("cfgt_", "")
     context.user_data["cfg_type"] = habit_type
     if habit_type == "boolean":
-        # Boolean no necesita unidad ni botones rápidos
         await _save_habit_config(query.message, context, None, None)
         return ConversationHandler.END
     await query.edit_message_text(
@@ -213,8 +200,7 @@ async def cfg_recv_unit(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     text = update.message.text.strip()
     context.user_data["cfg_unit"] = None if _is_skip(text) else text
     await update.message.reply_text(
-        "🚀 Botones rápidos: valores separados por comas \\(ej: `6h,7h,8h`\\)\n"
-        "O escribe `skip` para omitir:",
+        "🚀 Botones rápidos: valores separados por comas \\(ej: `6h,7h,8h`\\)\nO escribe `skip` para omitir:",
         parse_mode="Markdown",
     )
     return CFG_QUICK
@@ -244,10 +230,9 @@ async def _save_habit_config(msg, context, unit, quick_vals) -> None:
     context.user_data.clear()
 
 
-# ── Rama Notificaciones ──────────────────────────────────────────
+# ── Rama Notificaciones ────────────────────────────────────────
 
 async def _show_notif_menu(query, context) -> int:
-    """Carga la config actual y muestra el menú de notificaciones."""
     user_id = str(query.from_user.id)
     try:
         cfg = await api.get_user_config(user_id)
@@ -263,19 +248,20 @@ async def _show_notif_menu(query, context) -> int:
 
 
 async def notif_menu_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Gestiona todas las acciones del menú de notificaciones."""
+    """Gestiona toggles y navegación del menú de notificaciones.
+    NOTA: los toggles solo guardan en la API, NO reprograman el scheduler.
+    Los jobs solo se reprograman cuando el usuario cambia la hora real.
+    """
     query   = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
     cfg     = context.user_data.get("notif_cfg", {})
     data    = query.data
 
-    # ── Toggles ──────────────────────────────────────────
     if data == "notif_toggle_summary":
         new_val = not cfg.get("daily_summary_enabled", True)
         cfg = await api.update_user_config(user_id, daily_summary_enabled=new_val)
         context.user_data["notif_cfg"] = cfg
-        _reschedule_user_jobs(query, user_id, cfg)
         await query.edit_message_reply_markup(_kb_notif_menu(cfg))
         return NOTIF_MENU
 
@@ -290,15 +276,14 @@ async def notif_menu_action(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         new_val = not cfg.get("evening_log_enabled", True)
         cfg = await api.update_user_config(user_id, evening_log_enabled=new_val)
         context.user_data["notif_cfg"] = cfg
-        _reschedule_user_jobs(query, user_id, cfg)
         await query.edit_message_reply_markup(_kb_notif_menu(cfg))
         return NOTIF_MENU
 
-    # ── Configurar hora ────────────────────────────────────
     if data == "notif_set_summary_time":
         context.user_data["notif_set_which"] = "summary"
         await query.edit_message_text(
-            "⏰ ¿A qué hora quieres el resumen diario?",
+            "⏰ ¿A qué hora quieres el *resumen diario*?",
+            parse_mode="Markdown",
             reply_markup=_kb_notif_hora(),
         )
         return NOTIF_SET_TIME
@@ -306,7 +291,8 @@ async def notif_menu_action(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     if data == "notif_set_evening_time":
         context.user_data["notif_set_which"] = "evening"
         await query.edit_message_text(
-            "⏰ ¿A qué hora quieres el evening log?",
+            "⏰ ¿A qué hora quieres el *evening log*?",
+            parse_mode="Markdown",
             reply_markup=_kb_notif_hora(),
         )
         return NOTIF_SET_TIME
@@ -318,7 +304,6 @@ async def notif_menu_action(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return NOTIF_SET_OFFSETS
 
-    # ── Volver ─────────────────────────────────────────────
     if data == "cfg_back_menu":
         await query.edit_message_text(
             "⚙️ *Configuración*\n\n¿Qué quieres configurar?",
@@ -330,21 +315,36 @@ async def notif_menu_action(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return NOTIF_MENU
 
 
+async def notif_cancel_to_menu(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Maneja el botón ❌ Cancelar de los teclados _kb_notif_hora y _kb_notif_offsets.
+    callback_data='cfg_notif' → recarga el menú de notificaciones sin guardar nada.
+    """
+    query = update.callback_query
+    await query.answer()
+    return await _show_notif_menu(query, context)
+
+
 async def notif_recv_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe la hora elegida y reprograma el job diario correspondiente."""
+    """Guarda la hora elegida y reprograma el job diario correspondiente."""
     query   = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
-    hora    = query.data.replace("notif_hora_", "")  # "08:00"
+    hora    = query.data.replace("notif_hora_", "")   # "08:00"
     which   = context.user_data.get("notif_set_which", "summary")
     if which == "summary":
         cfg = await api.update_user_config(user_id, daily_summary_time=hora)
     else:
         cfg = await api.update_user_config(user_id, evening_log_time=hora)
     context.user_data["notif_cfg"] = cfg
-    _reschedule_user_jobs(query, user_id, cfg)
+    # Reprogramar jobs solo cuando cambia la hora real
+    try:
+        schedule_user_jobs(query.get_bot(), user_id, cfg)
+    except Exception as e:
+        logger.warning("No se pudieron reprogramar jobs para %s: %s", user_id, e)
+    tipo_str = "resumen diario" if which == "summary" else "evening log"
     await query.edit_message_text(
-        f"✅ Guardado: *{hora}*\n\n🔔 *Notificaciones*",
+        f"✅ *{tipo_str}* a las *{hora}*\n\n🔔 *Notificaciones*",
         parse_mode="Markdown",
         reply_markup=_kb_notif_menu(cfg),
     )
@@ -352,7 +352,7 @@ async def notif_recv_time(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def notif_recv_offsets(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe la selección de minutos antes de cita."""
+    """Guarda los minutos antes de cita elegidos."""
     query   = update.callback_query
     await query.answer()
     user_id = str(query.from_user.id)
@@ -369,17 +369,7 @@ async def notif_recv_offsets(update: Update, context: ContextTypes.DEFAULT_TYPE)
     return NOTIF_MENU
 
 
-def _reschedule_user_jobs(query, user_id: str, cfg: dict) -> None:
-    """Reprograma los jobs diarios del usuario con la nueva config.
-    Se llama tras cualquier cambio de hora o toggle de notificación diaria.
-    """
-    try:
-        schedule_user_jobs(query.get_bot(), user_id, cfg)
-    except Exception as e:
-        logger.warning("No se pudieron reprogramar jobs para %s: %s", user_id, e)
-
-
-# ── Cancelar ────────────────────────────────────────────────
+# ── Cancelar flujo completo ─────────────────────────────────────
 
 async def _cmd_cancelar_cfg(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
@@ -393,18 +383,18 @@ async def _cmd_cancelar_cfg(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return ConversationHandler.END
 
 
-# ── ConversationHandler ─────────────────────────────────────────
+# ── ConversationHandler ────────────────────────────────────────
 
 def build_config_handler() -> ConversationHandler:
     """
     ConversationHandler de configuración.
 
     Entry points:
-        /config           → cmd_config
-        ^quick_config$    → cmd_config (botón ⚙️ del menú principal)
+        /config        → cmd_config
+        ^quick_config$ → cmd_config (botón ⚙️ del menú principal)
 
-    IMPORTANTE: quick_config NO debe registrarse como handler global en
-    main.py, ya que es entry_point aquí y habría conflicto de capturas.
+    IMPORTANTE: quick_config NO debe registrarse como handler global
+    en main.py porque es entry_point aquí — habría conflicto de captura.
     """
     return ConversationHandler(
         entry_points=[
@@ -413,11 +403,11 @@ def build_config_handler() -> ConversationHandler:
         ],
         states={
             CFG_MENU: [
-                CallbackQueryHandler(cfg_menu_choice,  pattern=r"^(cfg_habitos|cfg_notif|cfg_back_menu)$"),
+                CallbackQueryHandler(cfg_menu_choice, pattern=r"^(cfg_habitos|cfg_notif|cfg_back_menu)$"),
             ],
             CFG_NOMBRE: [
-                CallbackQueryHandler(cfg_del_hab,      pattern=r"^cfgdel_"),
-                CallbackQueryHandler(cfg_menu_choice,  pattern=r"^cfg_back_menu$"),
+                CallbackQueryHandler(cfg_del_hab,     pattern=r"^cfgdel_"),
+                CallbackQueryHandler(cfg_menu_choice, pattern=r"^cfg_back_menu$"),
                 MessageHandler(filters.TEXT & ~filters.COMMAND, cfg_recv_nombre),
             ],
             CFG_DEL_CONF: [
@@ -425,7 +415,7 @@ def build_config_handler() -> ConversationHandler:
                 CallbackQueryHandler(cfg_menu_choice,     pattern=r"^cfg_habitos$"),
             ],
             CFG_TYPE: [
-                CallbackQueryHandler(cfg_recv_type,    pattern=r"^cfgt_"),
+                CallbackQueryHandler(cfg_recv_type, pattern=r"^cfgt_"),
             ],
             CFG_UNIT: [
                 CommandHandler("skip", cfg_recv_unit),
@@ -436,13 +426,20 @@ def build_config_handler() -> ConversationHandler:
                 MessageHandler(filters.TEXT & ~filters.COMMAND, cfg_recv_quick),
             ],
             NOTIF_MENU: [
-                CallbackQueryHandler(notif_menu_action, pattern=r"^notif_toggle_|^notif_set_|^cfg_back_menu$"),
+                CallbackQueryHandler(
+                    notif_menu_action,
+                    pattern=r"^(notif_toggle_|notif_set_|cfg_back_menu)"
+                ),
             ],
             NOTIF_SET_TIME: [
-                CallbackQueryHandler(notif_recv_time,    pattern=r"^notif_hora_"),
+                # Botón ❌ Cancelar del teclado de horas → vuelve al menú sin guardar
+                CallbackQueryHandler(notif_cancel_to_menu, pattern=r"^cfg_notif$"),
+                CallbackQueryHandler(notif_recv_time,      pattern=r"^notif_hora_"),
             ],
             NOTIF_SET_OFFSETS: [
-                CallbackQueryHandler(notif_recv_offsets, pattern=r"^notif_offsets_"),
+                # Botón ❌ Cancelar del teclado de offsets → vuelve al menú sin guardar
+                CallbackQueryHandler(notif_cancel_to_menu, pattern=r"^cfg_notif$"),
+                CallbackQueryHandler(notif_recv_offsets,   pattern=r"^notif_offsets_"),
             ],
         },
         fallbacks=[CommandHandler("cancelar", _cmd_cancelar_cfg)],
