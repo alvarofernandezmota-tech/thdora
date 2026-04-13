@@ -13,7 +13,7 @@ Convertir THDORA de una agenda **pasiva** (el usuario pregunta) a un asistente *
 
 ---
 
-## Funcionalidades incluidas
+## ✅ Funcionalidades v1 — a implementar ahora
 
 ### 1. Resumen diario
 - A una hora configurable (default `08:00`) el bot manda las citas del día
@@ -30,42 +30,115 @@ Convertir THDORA de una agenda **pasiva** (el usuario pregunta) a un asistente *
 - Configurable como preferencia predeterminada
 - Si se pulsa `Cancelar cita` → borra la cita y confirma
 
-### 4. Resumen nocturno de hábitos (extensión futura)
+### 4. Resumen nocturno de hábitos
 - A una hora configurable (default `22:00`) recuerda registrar los hábitos del día
 - Muestra los hábitos que aún no tienen registro hoy
 - Activable/desactivable de forma independiente
 
 ---
 
-## Tabla `user_config`
+## 🔜 Extensiones futuras — apuntadas para más adelante
+
+### v1.1 — Poco trabajo, alto impacto
+
+#### Snooze en el aviso
+- Botón `[⏰ +15min]` en el mensaje del recordatorio
+- Pospone el aviso 15 minutos sin cancelarlo
+- Campo en `user_config`: `snooze_enabled: bool (default=True)`
+
+#### Silencio nocturno
+- No molestar entre dos horas configurables (ej: 23:00 → 07:00)
+- Si un aviso cae en franja de silencio → se pospone a la hora de fin
+- Campos en `user_config`:
+  - `quiet_hours_enabled: bool (default=True)`
+  - `quiet_start: str (default="23:00")`
+  - `quiet_end: str (default="07:00")`
+
+#### Cita inminente
+- Si se crea una cita con menos de 2h de margen → aviso inmediato
+- Mensaje: `⚡ Cita inminente en 45 min · 10:30 · Médico`
+- Campo en `user_config`: `notif_imminent_enabled: bool (default=True)`
+
+### v1.2 — Más trabajo, muy útil
+
+#### Resumen semanal
+- Cada lunes a una hora configurable (default `08:00`): citas de la semana que empieza
+- Formato: lista compacta lunes→domingo con las citas de cada día
+- Campo en `user_config`:
+  - `weekly_summary_enabled: bool (default=True)`
+  - `weekly_summary_time: str (default="08:00")`
+
+#### Recordatorio por hábito específico
+- Por cada hábito configurado, opción de poner una hora fija de recordatorio
+- Ej: *"¿Has tomado agua hoy?"* a las 14:00
+- Se guarda en `habit_config` como campo adicional: `reminder_time: str (nullable)`
+
+#### Notificación de racha de hábitos 🔥
+- *"¡7 días seguidos registrando sueño! 🔥"*
+- Se dispara al registrar un hábito si mantiene racha de N días
+- Se conecta con F15 Gamificación (mismo sistema de rachas)
+- Campo en `user_config`: `streak_notif_enabled: bool (default=True)`
+
+### v2.0 — Requieren otras features
+
+#### Notificación IA contextual (requiere F13 IA)
+- *"Tienes médico mañana a las 10:00, ¿quieres preparar algo?"*
+- El modelo analiza las citas próximas y genera sugerencias
+
+#### Notificaciones push nativas (requiere F16 PWA / F17 React Native)
+- Push fuera de Telegram, directamente al móvil
+- Funciona aunque el usuario no tenga Telegram abierto
+
+---
+
+## Tabla `user_config` — versión completa (v1 + campos futuros pre-documentados)
 
 ```python
 class UserConfig(Base):
     __tablename__ = "user_config"
 
-    id: int                      # PK autoincrement
-    user_id: str                 # Telegram user_id — preparado para multi-usuario
+    id: int                          # PK autoincrement
+    user_id: str                     # Telegram user_id — preparado para multi-usuario
 
-    # ── Resumen diario ──────────────────────────────────────
-    daily_summary_enabled: bool  # default=True
-    daily_summary_time: str      # default="08:00"   formato HH:MM
+    # ── Resumen diario ──────────────────────────────────────────────
+    daily_summary_enabled: bool      # default=True
+    daily_summary_time: str          # default="08:00"    HH:MM
 
-    # ── Avisos de cita ────────────────────────────────────
-    notif_enabled: bool          # default=True
-    notif_offsets: str           # default="60,30,15"  minutos, separados por coma
+    # ── Avisos de cita ──────────────────────────────────────────────
+    notif_enabled: bool              # default=True
+    notif_offsets: str               # default="60,30,15"  minutos separados por coma
+    notif_ask_confirm: bool          # default=False
 
-    # ── Confirmación de asistencia ──────────────────────────
-    notif_ask_confirm: bool      # default=False
+    # ── Resumen nocturno de hábitos ─────────────────────────────────
+    evening_log_enabled: bool        # default=True
+    evening_log_time: str            # default="22:00"    HH:MM
 
-    # ── Resumen nocturno de hábitos ───────────────────────
-    evening_log_enabled: bool    # default=True
-    evening_log_time: str        # default="22:00"   formato HH:MM
+    # ── Zona horaria ────────────────────────────────────────────────
+    timezone: str                    # default="Europe/Madrid"
 
-    # ── Zona horaria ──────────────────────────────────────
-    timezone: str                # default="Europe/Madrid"
+    # ── v1.1: Snooze ────────────────────────────────────────────────
+    # snooze_enabled: bool           # default=True  🔜
+
+    # ── v1.1: Silencio nocturno ─────────────────────────────────────
+    # quiet_hours_enabled: bool      # default=True  🔜
+    # quiet_start: str               # default="23:00"  🔜
+    # quiet_end: str                 # default="07:00"  🔜
+
+    # ── v1.1: Cita inminente ────────────────────────────────────────
+    # notif_imminent_enabled: bool   # default=True  🔜
+
+    # ── v1.2: Resumen semanal ───────────────────────────────────────
+    # weekly_summary_enabled: bool   # default=True  🔜
+    # weekly_summary_time: str       # default="08:00"  🔜
+
+    # ── v1.2: Racha de hábitos ──────────────────────────────────────
+    # streak_notif_enabled: bool     # default=True  🔜
 ```
 
-### Valores predeterminados
+> Los campos comentados están pre-documentados pero **no se crean en la DB todavía**.
+> Se añaden en su versión correspondiente con una migración simple (`ALTER TABLE`).
+
+### Valores predeterminados v1
 
 | Campo | Default | Razón |
 |-------|---------|-------|
@@ -120,7 +193,7 @@ Scheduler corre en paralelo (asyncio)
     │
     ▼
 ┌─────────────────────────────────────┐
-│  ⚙️ ¿Qué quieres configurar?     │
+│  ⚙️ ¿Qué quieres configurar?        │
 │  [💪 Hábitos]  [🔔 Notificaciones]  │  ← CFG_MENU
 └─────────────────────────────────────┘
     │                    │
@@ -139,11 +212,11 @@ Confirmar asist.  ❌ desactivado
 Resumen hábitos   ✅ 22:00
 
 [🕐 Cambiar hora resumen]      ← abre NOTIF_HORA_SUMMARY
-[🔔 / 🔕 Toggle resumen]         ← toggle instantáneo
+[🔔 / 🔕 Toggle resumen]       ← toggle instantáneo
 [⏱️ Cambiar avisos cita]       ← abre NOTIF_OFFSETS
 [❓ Toggle confirmación]       ← toggle instantáneo
 [🌙 Cambiar hora hábitos]      ← abre NOTIF_HORA_EVENING
-[🌙 / ❌ Toggle resumen hábitos] ← toggle instantáneo
+[🌙 / ❌ Toggle hábitos]       ← toggle instantáneo
 [🏠 Menú]
 ─────────────────────────────────────────
 
@@ -194,7 +267,7 @@ NOTIF_OFFSETS        — pantalla toggles 60/30/15min + añadir
 
 3 citas hoy · Buena suerte 💪
 ```
-*Si no hay citas:* `Hoy tienes el día libre ✨`
+*Sin citas:* `Hoy tienes el día libre ✨`
 
 ### Aviso de cita — sin confirmación
 
@@ -232,15 +305,41 @@ Aún no has registrado hoy:
 
 [💪 Registrar ahora]
 ```
-*Si todo registrado:* `✅ Todos los hábitos registrados hoy. ¡Gran día!`
+*Todo registrado:* `✅ Todos los hábitos registrados hoy. ¡Gran día!`
+
+### (Futuro) Snooze
+
+```
+🔔 Recordatorio · en 30 min
+─────────────────────────
+📅 Hoy lunes 13 abr · 10:30
+🏥 Médico
+
+[✅ Voy]  [⏰ +15min]  [🗑️ Cancelar]
+```
+
+### (Futuro) Cita inminente
+
+```
+⚡ Cita inminente · en 45 min
+─────────────────────────
+🕙 10:30 · Médico · Dr. García
+```
+
+### (Futuro) Racha de hábito
+
+```
+🔥 ¡7 días seguidos registrando Sueño!
+Sigue así 💪
+```
 
 ---
 
-## Orden de implementación
+## Orden de implementación v1
 
 | # | Fichero | Cambio |
 |---|---------|--------|
-| 1 | `src/db/models.py` | + clase `UserConfig` con todos los campos y defaults |
+| 1 | `src/db/models.py` | + clase `UserConfig` con campos v1 |
 | 2 | `src/core/impl/sqlite_lifemanager.py` | + `get_user_config(user_id)`, `upsert_user_config(...)` |
 | 3 | `src/api/routers/user_config.py` | nuevo — `GET` + `PUT /user_config/{user_id}` |
 | 4 | `src/api/main.py` | registrar router `user_config` |
@@ -248,16 +347,18 @@ Aún no has registrado hoy:
 | 6 | `src/bot/keyboards.py` | + `_kb_config_menu()`, `_kb_notif_menu(cfg)`, `_kb_notif_hora()`, `_kb_notif_offsets(cfg)` |
 | 7 | `src/bot/handlers/config.py` | rediseño con `CFG_MENU` raíz + rama notificaciones |
 | 8 | `src/bot/scheduler.py` | **nuevo** — APScheduler: job diario + evening log + jobs por cita |
-| 9 | `src/bot/handlers/citas.py` | al crear/editar/borrar cita → reprogramar jobs del scheduler |
+| 9 | `src/bot/handlers/citas.py` | al crear/editar/borrar cita → reprogramar jobs scheduler |
 | 10 | `src/bot/main.py` | + `start_scheduler(app)` al arrancar |
 
 ---
 
 ## Impacto en ROADMAP
 
-Esta feature cierra **F12 — Notificaciones proactivas** del roadmap.
-Prepara el terreno para **F11 Multi-usuario** (el campo `user_id` ya está en `UserConfig`).
+- Cierra **F12 — Notificaciones proactivas**
+- El campo `user_id` en `UserConfig` prepara **F11 Multi-usuario**
+- Las rachas de hábitos se conectan con **F15 Gamificación**
 
 ---
 
-_Diseño cerrado: 13 abril 2026 — 21:13 CEST_
+_Diseño v1 cerrado: 13 abril 2026 — 21:17 CEST_
+_Extensiones futuras documentadas: snooze, silencio nocturno, cita inminente, resumen semanal, recordatorio por hábito, racha, IA, push nativa_
