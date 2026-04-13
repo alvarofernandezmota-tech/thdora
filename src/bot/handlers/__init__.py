@@ -1,6 +1,10 @@
 """
 Paquete handlers del bot THDORA.
 Exporta todo lo necesario para main.py sin cambios en el entrypoint.
+
+Nota: cb_quick_config ya NO se exporta aquí.
+  quick_config es entry_point de build_config_handler() en config.py
+  y NO debe registrarse como handler global en main.py.
 """
 
 # Factories de ConversationHandler
@@ -33,7 +37,6 @@ from src.bot.handlers.config import (
 from src.bot.handlers.menu import (
     cmd_start,
     cb_menu_home,
-    cb_quick_config,
 )
 from src.bot.handlers.common import (
     cmd_cancelar,
@@ -68,7 +71,6 @@ __all__ = [
     # Menú
     "cmd_start",
     "cb_menu_home",
-    "cb_quick_config",
     # Comunes
     "cmd_cancelar",
     "cb_cancel_action",

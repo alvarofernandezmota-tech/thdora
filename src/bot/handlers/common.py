@@ -37,6 +37,7 @@ def _fmt_habits(habits: dict, date_str: str) -> str:
 
 
 async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Muestra el resumen del día: citas + hábitos."""
     date_str = _parse_date_arg(context.args[0] if context.args else None)
     try:
         summary = await api.get_summary(date_str)
@@ -61,6 +62,7 @@ async def cmd_resumen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def cmd_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Cancela cualquier flujo activo y vuelve al menú."""
     context.user_data.clear()
     await update.message.reply_text(
         "❌ Operación cancelada\\.",
@@ -73,10 +75,23 @@ async def cmd_cancelar(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
 
 
 async def cb_cancel_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Botón cancelar en mensajes inline — borra el mensaje."""
     query = update.callback_query
     await query.answer("Cancelado")
     await query.delete_message()
 
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Captura errores no controlados, los loguea e informa al usuario."""
     logger.error("Error no controlado en update %s: %s", update, context.error, exc_info=True)
+    # Intentar notificar al usuario si hay update con mensaje o query
+    if not isinstance(update, Update):
+        return
+    text = "⚠️ Algo ha ido mal. Inténtalo de nuevo o usa /cancelar."
+    try:
+        if update.callback_query:
+            await update.callback_query.answer(text, show_alert=True)
+        elif update.message:
+            await update.message.reply_text(text)
+    except Exception:
+        pass  # Si falla el envío no hay nada más que hacer
