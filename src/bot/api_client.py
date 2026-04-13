@@ -32,6 +32,10 @@ Métodos disponibles::
     await api.upsert_habit_config(name, habit_type, ...)           → Dict
     await api.delete_habit_config(name)                            → bool
 
+    # UserConfig (F12)
+    await api.get_user_config(user_id)                             → Dict
+    await api.update_user_config(user_id, ...)                     → Dict
+
     # Resumen
     await api.get_summary("2026-03-27")                            → Dict
 
@@ -51,7 +55,7 @@ _API_BASE = os.getenv("THDORA_API_URL", "http://localhost:8000")
 _TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0)
 
 
-# ── Excepción pública ─────────────────────────────────────────────────────────
+# ── Excepción pública ────────────────────────────────────────────────
 
 class ApiError(Exception):
     def __init__(self, message: str, status_code: int = 0) -> None:
@@ -69,13 +73,13 @@ def _raise_for_status(r: httpx.Response) -> None:
         raise ApiError(f"HTTP {r.status_code}: {detail}", status_code=r.status_code)
 
 
-# ── Cliente ───────────────────────────────────────────────────────────────
+# ── Cliente ────────────────────────────────────────────────────
 
 class ThdoraApiClient:
     def __init__(self, base_url: str = _API_BASE) -> None:
         self.base_url = base_url.rstrip("/")
 
-    # ── Salud ───────────────────────────────────────────────────────────
+    # ── Salud ────────────────────────────────────────────────
 
     async def health(self) -> bool:
         try:
@@ -85,7 +89,7 @@ class ThdoraApiClient:
         except httpx.RequestError:
             return False
 
-    # ── Citas ───────────────────────────────────────────────────────────
+    # ── Citas ────────────────────────────────────────────────
 
     async def get_appointments(self, date_str: str) -> List[Dict[str, Any]]:
         return await self._get(f"/appointments/{date_str}")
@@ -125,7 +129,6 @@ class ThdoraApiClient:
         """
         Comprueba si ya existe una cita a esa hora.
         Devuelve la cita existente (dict) o None si no hay conflicto.
-        No lanza ApiError si no encuentra (404).
         """
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -140,7 +143,7 @@ class ThdoraApiClient:
         except Exception:
             return None
 
-    # ── Hábitos ───────────────────────────────────────────────────────────
+    # ── Hábitos ────────────────────────────────────────────────
 
     async def get_habits(self, date_str: str) -> Dict[str, str]:
         raw: List[Dict[str, str]] = await self._get(f"/habits/{date_str}")
@@ -164,7 +167,7 @@ class ThdoraApiClient:
     async def update_habit(self, date_str: str, habit: str, value: str) -> Dict[str, str]:
         return await self._put(f"/habits/{date_str}/{habit}", json={"value": value})
 
-    # ── HabitConfig (F9.2) ────────────────────────────────────────────────────
+    # ── HabitConfig (F9.2) ──────────────────────────────────────────
 
     async def get_habit_config(self, name: str) -> Optional[Dict[str, Any]]:
         """Devuelve la config de un hábito o None si no existe."""
@@ -176,7 +179,6 @@ class ThdoraApiClient:
             raise
 
     async def get_all_habit_configs(self) -> List[Dict[str, Any]]:
-        """Lista la config de todos los hábitos."""
         return await self._get("/habit-config/")
 
     async def upsert_habit_config(
@@ -187,7 +189,6 @@ class ThdoraApiClient:
         quick_vals: Optional[List[str]] = None,
         xp_rule: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Crea o actualiza la configuración de un hábito."""
         return await self._post("/habit-config/", json={
             "name": name,
             "habit_type": habit_type,
@@ -199,7 +200,6 @@ class ThdoraApiClient:
         })
 
     async def delete_habit_config(self, name: str) -> bool:
-        """Borra la configuración de un hábito."""
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 r = await client.delete(f"{self.base_url}/habit-config/{name}")
@@ -210,12 +210,46 @@ class ThdoraApiClient:
         except httpx.RequestError as exc:
             raise ApiError(f"Error de red DELETE habit-config: {exc}") from exc
 
-    # ── Resumen ───────────────────────────────────────────────────────────
+    # ── UserConfig (F12) ──────────────────────────────────────────
+
+    async def get_user_config(self, user_id: str) -> Dict[str, Any]:
+        """
+        Devuelve la config del usuario.
+        Si no existe, la API la crea con defaults automáticamente.
+        Nunca lanza 404.
+        """
+        return await self._get(f"/user_config/{user_id}")
+
+    async def update_user_config(
+        self,
+        user_id: str,
+        daily_summary_enabled: Optional[bool] = None,
+        daily_summary_time: Optional[str] = None,
+        notif_enabled: Optional[bool] = None,
+        notif_offsets: Optional[List[str]] = None,
+        notif_ask_confirm: Optional[bool] = None,
+        evening_log_enabled: Optional[bool] = None,
+        evening_log_time: Optional[str] = None,
+        timezone: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Actualiza solo los campos enviados (semántica PATCH sobre PUT)."""
+        payload: Dict[str, Any] = {}
+        if daily_summary_enabled is not None: payload["daily_summary_enabled"] = daily_summary_enabled
+        if daily_summary_time is not None:    payload["daily_summary_time"]    = daily_summary_time
+        if notif_enabled is not None:         payload["notif_enabled"]         = notif_enabled
+        if notif_offsets is not None:         payload["notif_offsets"]         = notif_offsets
+        if notif_ask_confirm is not None:     payload["notif_ask_confirm"]     = notif_ask_confirm
+        if evening_log_enabled is not None:   payload["evening_log_enabled"]   = evening_log_enabled
+        if evening_log_time is not None:      payload["evening_log_time"]      = evening_log_time
+        if timezone is not None:              payload["timezone"]              = timezone
+        return await self._put(f"/user_config/{user_id}", json=payload)
+
+    # ── Resumen ────────────────────────────────────────────────
 
     async def get_summary(self, date_str: str) -> Dict[str, Any]:
         return await self._get(f"/summary/{date_str}")
 
-    # ── Internals ───────────────────────────────────────────────────────────
+    # ── Internals ───────────────────────────────────────────────
 
     async def _get(self, path: str) -> Any:
         try:
