@@ -143,12 +143,14 @@ async def _route_free_text(update, context) -> None:
 def main() -> None:
     token = _load_token()
     asyncio.run(_check_api())
-    app   = build_app(token)
+    app = build_app(token)
 
-    # ── Arrancar scheduler F12 ────────────────────────────────────────
-    scheduler = get_scheduler()
-    scheduler.start()
-    logger.info("⏰ Scheduler F12 iniciado")
+    async def _start_scheduler(application):
+        scheduler = get_scheduler()
+        scheduler.start()
+        logger.info("⏰ Scheduler F12 iniciado")
+
+    app.post_init = _start_scheduler
 
     logger.info("🤖 THDORA bot v4.0 arrancando (polling)…")
     app.run_polling(
