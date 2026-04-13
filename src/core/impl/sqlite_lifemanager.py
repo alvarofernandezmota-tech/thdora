@@ -10,12 +10,14 @@ Diferencias respecto a MemoryLifeManager / JsonLifeManager:
     - Thread-safe gracias al context manager de sesión
     - Soporta búsqueda por rango de fechas (para /agenda y /upcoming)
     - Soporta HabitConfig (tipos adaptativos F9.2)
+    - Soporta UserConfig (notificaciones proactivas F12)
 
 Uso::
 
     manager = SQLiteLifeManager()
     manager.create_appointment("2026-03-27", "10:00", "médica", "Dr. Smith")
     appointments = manager.get_appointments("2026-03-27")
+    cfg = manager.get_user_config("123456789")  # crea con defaults si no existe
 """
 
 from typing import Any
@@ -24,7 +26,7 @@ from sqlalchemy import and_
 
 from src.core.interfaces.abstract_lifemanager import AbstractLifeManager
 from src.db.base import get_session, init_db
-from src.db.models import Appointment, Habit, HabitConfig
+from src.db.models import Appointment, Habit, HabitConfig, UserConfig
 
 
 class SQLiteLifeManager(AbstractLifeManager):
@@ -33,7 +35,7 @@ class SQLiteLifeManager(AbstractLifeManager):
     def __init__(self) -> None:
         init_db()  # crea las tablas si no existen
 
-    # ── Citas ──────────────────────────────────────────────────────
+    # ── Citas ────────────────────────────────────────────────
 
     def get_appointments(self, date: str) -> list[dict]:
         """Devuelve todas las citas de un día ordenadas por hora."""
@@ -150,7 +152,7 @@ class SQLiteLifeManager(AbstractLifeManager):
             )
             return apt.to_dict() if apt else None
 
-    # ── Hábitos ──────────────────────────────────────────────────────
+    # ── Hábitos ────────────────────────────────────────────────
 
     def get_habits(self, date: str) -> dict[str, str]:
         """Devuelve los hábitos del día como dict {nombre: valor}."""
@@ -225,7 +227,7 @@ class SQLiteLifeManager(AbstractLifeManager):
                 result.setdefault(r.date, {})[r.habit] = r.value
             return result
 
-    # ── HabitConfig ───────────────────────────────────────────────────
+    # ── HabitConfig ──────────────────────────────────────────────
 
     def get_habit_config(self, name: str) -> dict | None:
         """Devuelve la config de un hábito por nombre, o None si no existe."""
@@ -290,7 +292,68 @@ class SQLiteLifeManager(AbstractLifeManager):
             session.delete(cfg)
             return True
 
-    # ── Resumen ───────────────────────────────────────────────────────
+    # ── UserConfig (F12) ─────────────────────────────────────────
+
+    def get_user_config(self, user_id: str) -> dict:
+        """
+        Devuelve la configuración del usuario.
+        Si no existe, la crea con los valores predeterminados (upsert automático).
+        Nunca devuelve None — el usuario siempre tiene configuración.
+        """
+        with get_session() as session:
+            cfg = session.query(UserConfig).filter(UserConfig.user_id == user_id).first()
+            if cfg:
+                return cfg.to_dict()
+            # Primera vez: crear con defaults
+            cfg = UserConfig(user_id=user_id)
+            session.add(cfg)
+            session.flush()
+            return cfg.to_dict()
+
+    def upsert_user_config(
+        self,
+        user_id: str,
+        daily_summary_enabled: bool | None = None,
+        daily_summary_time: str | None = None,
+        notif_enabled: bool | None = None,
+        notif_offsets: list[str] | None = None,
+        notif_ask_confirm: bool | None = None,
+        evening_log_enabled: bool | None = None,
+        evening_log_time: str | None = None,
+        timezone: str | None = None,
+    ) -> dict:
+        """
+        Actualiza la configuración del usuario. Solo modifica los campos no-None.
+        Si el usuario no tiene fila todavía, la crea con defaults primero.
+        notif_offsets recibe una lista ["60","30","15"] y se almacena como CSV.
+        """
+        with get_session() as session:
+            cfg = session.query(UserConfig).filter(UserConfig.user_id == user_id).first()
+            if not cfg:
+                cfg = UserConfig(user_id=user_id)
+                session.add(cfg)
+                session.flush()
+
+            if daily_summary_enabled is not None:
+                cfg.daily_summary_enabled = daily_summary_enabled
+            if daily_summary_time is not None:
+                cfg.daily_summary_time = daily_summary_time
+            if notif_enabled is not None:
+                cfg.notif_enabled = notif_enabled
+            if notif_offsets is not None:
+                cfg.notif_offsets = ",".join(notif_offsets)
+            if notif_ask_confirm is not None:
+                cfg.notif_ask_confirm = notif_ask_confirm
+            if evening_log_enabled is not None:
+                cfg.evening_log_enabled = evening_log_enabled
+            if evening_log_time is not None:
+                cfg.evening_log_time = evening_log_time
+            if timezone is not None:
+                cfg.timezone = timezone
+
+            return cfg.to_dict()
+
+    # ── Resumen ────────────────────────────────────────────────
 
     def get_summary(self, date: str) -> dict[str, Any]:
         """Devuelve resumen del día: citas + hábitos."""
@@ -304,7 +367,7 @@ class SQLiteLifeManager(AbstractLifeManager):
         """Alias de get_summary para cumplir con AbstractLifeManager."""
         return self.get_summary(date)
 
-    # ── Helpers ───────────────────────────────────────────────────────
+    # ── Helpers ────────────────────────────────────────────────
 
     @staticmethod
     def _valid_time(time: str) -> bool:
