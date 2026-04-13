@@ -1,5 +1,5 @@
 """
-Entrypoint del bot Telegram de THDORA — v3.2 (F9.4 Horas clicables en citas).
+Entrypoint del bot Telegram de THDORA — v3.2
 
 Variables de entorno::
     TELEGRAM_BOT_TOKEN   → token de @BotFather (obligatorio)
@@ -35,11 +35,11 @@ from src.bot.handlers import (
     cb_semana_nav,
     # Menú
     cb_menu_home,
-    cb_quick_dispatch,
+    cb_quick_config,
     # Citas
     cb_apt_delete,
     cb_apt_delete_confirm,
-    cb_cita_detail,          # F9.4 — hora clicable → detalle de cita
+    cb_cita_detail,
     # Hábitos
     cb_hab_delete,
     cb_hab_delete_confirm,
@@ -91,20 +91,20 @@ def _load_token() -> str:
 def build_app(token: str):
     app = ApplicationBuilder().token(token).build()
 
-    # ── 1. ConversationHandlers ────────────────────────────────────────────
-    app.add_handler(build_nueva_handler())     # /nueva
-    app.add_handler(build_habito_handler())    # /habito
+    # ── 1. ConversationHandlers ───────────────────────────────────────────────
+    app.add_handler(build_nueva_handler())     # /nueva + quick_nueva
+    app.add_handler(build_habito_handler())    # /habito + quick_habito
     app.add_handler(build_edit_apt_handler())  # ^ae_
     app.add_handler(build_edit_hab_handler())  # ^he_
     app.add_handler(build_config_handler())    # /config
 
-    # ── 2. CallbackQueryHandlers globales ──────────────────────────────
-    app.add_handler(CallbackQueryHandler(cb_menu_home,      pattern=r"^menu_home$"))
-    app.add_handler(CallbackQueryHandler(cb_quick_dispatch, pattern=r"^quick_"))
-    app.add_handler(CallbackQueryHandler(cb_citas_nav,      pattern=r"^citas_nav_"))
-    app.add_handler(CallbackQueryHandler(cb_habitos_nav,    pattern=r"^habitos_nav_"))
-    app.add_handler(CallbackQueryHandler(cb_semana_nav,     pattern=r"^semana_nav_"))
-    app.add_handler(CallbackQueryHandler(cb_cita_detail,    pattern=r"^cita_detail_"))  # F9.4
+    # ── 2. CallbackQueryHandlers globales ────────────────────────────────
+    app.add_handler(CallbackQueryHandler(cb_menu_home,          pattern=r"^menu_home$"))
+    app.add_handler(CallbackQueryHandler(cb_quick_config,       pattern=r"^quick_config$"))
+    app.add_handler(CallbackQueryHandler(cb_citas_nav,          pattern=r"^citas_nav_"))
+    app.add_handler(CallbackQueryHandler(cb_habitos_nav,        pattern=r"^habitos_nav_"))
+    app.add_handler(CallbackQueryHandler(cb_semana_nav,         pattern=r"^semana_nav_"))
+    app.add_handler(CallbackQueryHandler(cb_cita_detail,        pattern=r"^cita_detail_"))
     app.add_handler(CallbackQueryHandler(cb_apt_delete,         pattern=r"^ad_"))
     app.add_handler(CallbackQueryHandler(cb_apt_delete_confirm, pattern=r"^adc_"))
     app.add_handler(CallbackQueryHandler(cb_hab_delete,         pattern=r"^hd_"))
@@ -112,10 +112,10 @@ def build_app(token: str):
     app.add_handler(CallbackQueryHandler(cb_hab_add,            pattern=r"^ha_"))
     app.add_handler(CallbackQueryHandler(cb_cancel_action,      pattern=r"^cancel_action$"))
 
-    # ── 3. Texto libre (acumulación fuera de flujos) ──────────────────
+    # ── 3. Texto libre (acumulación fuera de flujos) ────────────────────
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _route_free_text))
 
-    # ── 4. Comandos ──────────────────────────────────────────────────
+    # ── 4. Comandos ─────────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("citas",    cmd_citas))
     app.add_handler(CommandHandler("habitos",  cmd_habitos))
@@ -123,7 +123,7 @@ def build_app(token: str):
     app.add_handler(CommandHandler("resumen",  cmd_resumen))
     app.add_handler(CommandHandler("cancelar", cmd_cancelar))
 
-    # ── 5. Error handler ────────────────────────────────────────────────
+    # ── 5. Error handler ─────────────────────────────────────────────────
     app.add_error_handler(error_handler)
 
     return app
