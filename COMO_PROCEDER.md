@@ -1,269 +1,106 @@
-# 🧭 THDORA — Cómo proceder
+# CÓMO PROCEDER — THDORA
 
-> Guía de trabajo para retomar el proyecto después de un descanso.
-> Estado al día, siguiente paso claro, sin buscar contexto.
->
-> **Navegación:** [README](README.md) · [ROADMAP](ROADMAP.md) · [Índice docs](docs/INDEX.md)
+Guía de trabajo para continuar el desarrollo de forma ordenada.
+Actualizado: 2026-04-14.
 
 ---
 
-## 📍 Estado actual — 13 abril 2026
+## Estado actual (v4.1.0)
 
-**Versión:** `v0.12.0`
+### ✅ Completado y funcionando
 
-### ✅ Implementado y listo para probar
+| Módulo | Estado | Notas |
+|---|---|---|
+| `main.py` | ✅ | Scheduler en `post_init`, sin conflicto `quick_config` |
+| `handlers/citas.py` | ✅ | Crear, editar (botones), borrar, detalle, recordatorios |
+| `handlers/habitos.py` | ✅ | Registrar, editar (botones), borrar, sumar, conflicto |
+| `handlers/config.py` | ✅ | Hábitos (CRUD config) + Notificaciones (hora, toggles, offsets) |
+| `handlers/menu.py` | ✅ | `/start` programa jobs diarios del scheduler |
+| `handlers/common.py` | ✅ | `/resumen`, `/cancelar`, error handler con aviso al usuario |
+| `handlers/semana.py` | ✅ | Vista semanal con navegación |
+| `keyboards.py` | ✅ | Todos los teclados inline centralizados |
+| `scheduler.py` | ✅ | daily_summary, evening_log, apt_reminder sin duplicados |
+| `api_client.py` | ✅ | Cliente HTTP para FastAPI |
 
-| Feature | Estado |
-|---------|--------|
-| CRUD citas + hábitos (SQLite) | ✅ probado en vivo |
-| Bot Telegram completo (`/start` `/citas` `/habitos` `/habito` `/nueva` `/semana` `/resumen` `/config` `/cancelar`) | ✅ probado en vivo |
-| Franjas horarias en `/nueva` | ✅ probado en vivo |
-| `/config → Hábitos` (tipos + botones rápidos) | ✅ probado en vivo |
-| **F12 Notificaciones proactivas** (APScheduler) | ✅ implementado, **pendiente probar** |
-| **F10 Docker** (`docker compose up -d`) | ✅ listo, **pendiente probar** |
+### 🔔 Warnings conocidos (no son errores)
 
-### ❌ Pendiente de implementar
-- F11 Multi-usuario
-- F13 IA conversacional
-- F14 Tracking personal
-- F15 Gamificación
+```
+PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked...
+```
+Esto es informativo de PTB v22+. No afecta al funcionamiento. Se puede suprimir
+añadiendo `per_message=True` a los ConversationHandlers que solo usan
+CallbackQueryHandlers, pero requiere validar que los estados no se mezclen
+entre mensajes distintos. **Tarea pendiente opcional**.
 
 ---
 
-## ⏭️ Siguiente paso — Probar F12 + F10
+## Reglas de trabajo
 
-No hay nada que implementar. El siguiente paso es **probar** lo que ya está escrito.
-Sigue el checklist de abajo.
+### Callbacks con fechas
+Los prefijos `ae_`, `ad_`, `adc_` usan `rsplit('_', 1)` para extraer
+`(date_str, index)`. Los prefijos `hd_`, `hdc_`, `he_`, `ha_` usan
+slice fijo `[:10]` / `[11:]`. **Nunca usar `split('_', 2)` con fechas.**
+
+### Scheduler
+- `schedule_user_jobs(bot, user_id, cfg)` es **idempotente**: hace
+  `remove_job` antes de `add_job`. Llamar siempre que cambie la hora.
+- Los toggles on/off **no reprograman** — solo cambian el campo en la API.
+- `schedule_apt_reminders` y `cancel_apt_reminders` se gestionan en `citas.py`.
+
+### ConversationHandlers — rangos de estados
+
+| Handler | Rango |
+|---|---|
+| `/nueva` (citas) | 0–8 |
+| `/habito` | 10–12 |
+| editar cita | 20–24 |
+| editar hábito | 30–32 |
+| `/config` hábitos | 40–44 |
+| `/config` notificaciones | 45–47 |
+| CFG_DEL_CONF | 48 |
+
+### quick_config
+`quick_config` es **entry_point** de `build_config_handler()`. **NO registrar**
+como handler global en `main.py` o habrá conflicto de captura.
 
 ---
 
-## 🧪 Checklist de pruebas — F12 Notificaciones
+## Próximos pasos sugeridos (por orden de impacto)
 
-### 0. Arrancar (modo local, WSL)
+### P1 — Tests
+- Añadir tests unitarios para `_parse_apt_callback` y `_parse_hab_callback`.
+- Tests de integración para los flujos principales con `pytest-asyncio`.
+- CI ya está configurado en `.github/workflows/`.
+
+### P2 — Persistencia del scheduler
+- Actualmente los jobs se pierden si el bot se reinicia (APScheduler en memoria).
+- Migrar a `APScheduler` con `SQLAlchemyJobStore` usando la misma DB de FastAPI.
+
+### P3 — `per_message=True` en ConversationHandlers
+- Evaluar cambiar a `per_message=True` en los handlers que solo usan
+  `CallbackQueryHandler` para eliminar los PTBUserWarnings.
+
+### P4 — Comando `/ayuda`
+- Listar todos los comandos disponibles con descripción breve.
+
+### P5 — Deploy
+- Dockerfile y docker-compose ya están listos.
+- Configurar variables en `.env` (ver `.env.example`).
+- `make docker-up` para arrancar todo en producción.
+
+---
+
+## Arranque rápido
 
 ```bash
-cd /home/alvaro/projects/thdora
-git pull
-source .venv/bin/activate
-pip install -r requirements.txt   # instala APScheduler si no está
-
-# Terminal 1
+# Terminal 1 — API
 make run-api
 
-# Terminal 2
+# Terminal 2 — Bot
 make run-bot
+
+# O todo en tmux
+tmux new-session -d -s thdora 'make run-api' \; split-window -h 'sleep 3 && make run-bot' \; attach
 ```
 
-En los logs del bot debes ver:
-```
-✅ API de THDORA disponible en http://localhost:8000
-⏰ Scheduler F12 iniciado
-🤖 THDORA bot v4.0 arrancando (polling)…
-```
-
-Si falta algo:
-- `⚠️ API no responde` → revisa que `make run-api` está corriendo
-- `ModuleNotFoundError: apscheduler` → `pip install apscheduler`
-
----
-
-### 1. Comprobar endpoint de config
-
-```bash
-# Sustituye TU_ID por tu Telegram user_id
-# (¿cómo saberlo? envía /start al bot y mira los logs, o usa @userinfobot)
-curl http://localhost:8000/user_config/TU_ID
-```
-
-Esperas:
-```json
-{
-  "user_id": "TU_ID",
-  "daily_summary_enabled": true,
-  "daily_summary_time": "08:00",
-  "notif_enabled": true,
-  "notif_offsets": ["60", "30", "15"],
-  "evening_log_enabled": true,
-  "evening_log_time": "22:00"
-}
-```
-
----
-
-### 2. Probar /config → Notificaciones en Telegram
-
-1. Escribe `/config` en Telegram
-2. Aparece menú con **🧠 Hábitos** y **🔔 Notificaciones**
-3. Pulsa **Notificaciones** → verás estado actual con ✅/❌ por cada opción
-4. Activa/desactiva **Resumen diario** → el icono cambia al instante
-5. Pulsa **⏰ Hora resumen** → elige una hora cercana (2-3 min en el futuro)
-6. Pulsa **⏰ Minutos antes de cita** → elige `5 min`
-7. Pulsa **← Volver** → vuelves al menú raíz
-
----
-
-### 3. Probar aviso automático de cita
-
-```
-/nueva
-→ fecha: hoy
-→ franja: la que corresponda ahora
-→ hora: 3-5 min en el futuro
-→ nombre: Test aviso
-→ tipo: personal
-→ /skip notas
-```
-
-Espera X minutos → debes recibir:
-```
-🔔 Recordatorio
-En 5 min tienes:
-  ⏰ HH:MM — Test aviso
-```
-
----
-
-### 4. Probar cancel al borrar
-
-- Ve a `/citas hoy` → borra la cita • el aviso debe cancelarse (no llega)
-
----
-
-### 5. Probar resumen diario
-
-- Ve a **Notificaciones** → pon hora del resumen 2 min en el futuro → espera
-- Debes recibir mensaje con las citas del día
-
----
-
-### 6. Probar Docker (opcional, si quieres)
-
-```bash
-cd /home/alvaro/projects/thdora
-cp docker/.env.docker.example .env   # solo primera vez
-# editar .env y poner TELEGRAM_BOT_TOKEN=...
-
-make docker-build
-make docker-up
-make docker-logs     # ver que arranca bien
-make docker-down     # parar cuando termines
-```
-
-Si ves los mismos logs que en local → Docker funciona. Bot listo para 24/7.
-
----
-
-## 🛠️ Referencia rápida de comandos
-
-```bash
-# Local
-make run-api          # API en http://localhost:8000
-make run-bot          # Bot Telegram
-
-# Docker
-make docker-build     # construir imagen
-make docker-up        # arrancar en segundo plano
-make docker-down      # parar
-make docker-logs      # ver logs en vivo
-make docker-logs-api  # solo API
-make docker-logs-bot  # solo bot
-make docker-restart   # reiniciar sin reconstruir
-make docker-rebuild   # rebuild completo desde cero
-make docker-db        # consola SQLite dentro del contenedor
-
-# Tests
-make test             # todos
-make test-bot         # solo bot
-make test-cov         # con cobertura HTML
-```
-
----
-
-## 📁 Estructura completa del proyecto
-
-```
-thdora/
-├── src/
-│   ├── core/
-│   │   ├── abstract/          ← AbstractLifeManager
-│   │   └── impl/              ← SQLiteLifeManager
-│   ├── db/
-│   │   ├── models.py          ← Appointment, Habit, HabitConfig, UserConfig [F12]
-│   │   └── base.py
-│   ├── api/
-│   │   ├── main.py            ← FastAPI v0.12.0
-│   │   └── routers/
-│   │       ├── appointments.py
-│   │       ├── habits.py
-│   │       ├── habit_config.py
-│   │       ├── summary.py
-│   │       └── user_config.py     ← GET + PUT /user_config/{user_id} [F12]
-│   └── bot/
-│       ├── main.py            ← v4.0 + arranca scheduler [F12]
-│       ├── api_client.py      ← + get/update_user_config [F12]
-│       ├── keyboards.py       ← + _kb_config_menu, _kb_notif_* [F12]
-│       ├── scheduler.py       ← APScheduler jobs [F12 ★ nuevo]
-│       ├── utils/
-│       │   ├── dates.py
-│       │   └── accum.py
-│       └── handlers/
-│           ├── menu.py
-│           ├── citas.py           ← + hooks scheduler [F12]
-│           ├── habitos.py
-│           ├── semana.py
-│           ├── config.py          ← menú raíz + Notificaciones [F12]
-│           └── common.py
-├── data/
-│   └── thdora.db              ← SQLite (no versionado)
-├── docker/
-│   ├── entrypoint-api.sh
-│   ├── entrypoint-bot.sh
-│   └── .env.docker.example    ← copiar a .env para Docker
-├── docs/                  ← arquitectura, ADRs, flujos, API reference
-├── tests/
-├── Dockerfile
-├── docker-compose.yml
-├── COMO_PROCEDER.md       ← ⭐ empieza aquí cada sesión
-├── README.md
-├── ROADMAP.md
-├── CHANGELOG.md
-├── requirements.txt       ← incluye APScheduler [F10]
-├── pyproject.toml
-├── Makefile
-└── .env.example
-```
-
----
-
-## 📖 Documentación disponible
-
-| Doc | Para qué sirve |
-|-----|----------------|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Estructura y decisiones de diseño |
-| [docs/FLUJOS_DETALLADOS.md](docs/FLUJOS_DETALLADOS.md) | Estados, transiciones, casos borde de todos los flujos |
-| [docs/API_REFERENCE.md](docs/API_REFERENCE.md) | Todos los endpoints con ejemplos |
-| [docs/CONVENCIONES.md](docs/CONVENCIONES.md) | Patrones callback_data, convenciones de código |
-| [docs/F12_NOTIFICACIONES_DESIGN.md](docs/F12_NOTIFICACIONES_DESIGN.md) | Diseño completo de F12 |
-| [docs/INDEX.md](docs/INDEX.md) | Mapa completo de toda la documentación |
-
----
-
-## 📅 Convenciones callback_data
-
-```
-ad_  adc_        → borrar / confirmar cita
-ae_              → editar cita
-hd_  hdc_        → borrar / confirmar hábito
-he_              → editar hábito
-ha_              → sumar a hábito
-hval_            → valor rápido hábito
-hconf_           → resolver conflicto hábito
-cfg_             → config menú raíz
-notif_           → acciones notificaciones
-cfgt_            → tipo de hábito en config
-# Lista completa → docs/CONVENCIONES.md
-```
-
----
-
-_Última actualización: 13 abril 2026 — 22:45 CEST_
+Después de arrancar, mandar `/start` al bot para programar los jobs diarios.
