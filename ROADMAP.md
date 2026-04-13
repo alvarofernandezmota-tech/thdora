@@ -4,7 +4,7 @@
 
 ---
 
-## Estado actual — v0.10.0 (12 abril 2026)
+## Estado actual — v0.11.0 (13 abril 2026)
 
 ```
 Bot Telegram (9 comandos + 5 ConversationHandlers + inline buttons)
@@ -33,9 +33,9 @@ SQLite (data/thdora.db — persistencia real)
 - **Datos persistentes en SQLite** — sobreviven a reinicios
 - **Franjas horarias en /nueva** — 🌅 Mañana / 🌆 Tarde / 🌙 Noche + hora en punto + cuartos
 - **Código modular** — `src/bot/handlers/` package (6 módulos) + `keyboards.py` + `utils/`
-
-### ⚠️ Pendiente de prueba en vivo
-> F9.3 → F9.6 implementadas pero **no probadas en entorno real** todavía.
+- **➕ Nueva cita desde botón del menú** — arranca ConversationHandler directamente ✅
+- **➕ Nuevo hábito desde botón del menú** — arranca ConversationHandler directamente ✅
+- **Menú operativo al 100%** — probado en vivo ✅
 
 ---
 
@@ -72,41 +72,42 @@ SQLite (data/thdora.db — persistencia real)
 
 ```
 src/bot/
-├── main.py              ← sin cambios
-├── api_client.py        ← sin cambios
-├── keyboards.py         ← todos los _kb_* y _nav_keyboard
+├── main.py
+├── api_client.py
+├── keyboards.py
 ├── utils/
-│   ├── dates.py           ← helpers fecha
-│   └── accum.py           ← helpers acumulación
+│   ├── dates.py
+│   └── accum.py
 └── handlers/
-    ├── __init__.py        ← re-exporta todo
+    ├── __init__.py
     ├── menu.py
-    ├── citas.py           ← incluye franjas horarias
-    ├── habitos.py
+    ├── citas.py           ← franjas horarias + entry point botón
+    ├── habitos.py         ← entry point botón
     ├── semana.py
     ├── config.py
     └── common.py
 ```
 
+### F9.7 — Pruebas en vivo + fix entry points ✅ (13 abril 2026)
+
+> Todas las funciones del bot probadas en Telegram real.
+
+- [x] Flujo `/nueva` con franjas horarias — **funciona** ✅
+- [x] Navegación citas/hábitos con ◀️▶️ — **funciona** ✅
+- [x] Editar/borrar cita — **funciona** ✅
+- [x] Editar/borrar/sumar hábito — **funciona** ✅
+- [x] `/semana` — **funciona** ✅
+- [x] ➕ Nueva cita desde botón menú — **funciona** ✅ (fix entry point)
+- [x] ➕ Nuevo hábito desde botón menú — **funciona** ✅ (fix entry point)
+- [x] Crear hábito contra API (POST `/habits/`) — **201 Created** ✅
+- [x] Crear cita contra API (POST `/appointments/`) — **201 Created** ✅
+- [x] Borrar cita (DELETE `/appointments/`) — **204 No Content** ✅
+
 ---
 
-## 🔶 Próximo — v0.11.x
+## 🔶 Próximo — v0.12.x
 
-### PRUEBA EN VIVO 🔜 NEXT — prioridad 1
-
-> Probar F9.3 → F9.6 en bot real (Telegram) antes de seguir añadiendo features.
-
-- [ ] Arrancar API (`make run-api`)
-- [ ] Arrancar bot (`make run-bot`)
-- [ ] Probar flujo `/nueva` con franjas
-- [ ] Probar nav citas/hábitos
-- [ ] Probar editar/borrar/sumar
-- [ ] Probar `/semana`
-- [ ] Documentar bugs encontrados
-
----
-
-### F9.7 — Docker + despliegue 24/7 🔜
+### F10 — Docker + despliegue 24/7 🔜
 
 > **Objetivo:** THDORA corriendo siempre en un servidor, sin intervención manual
 
@@ -135,7 +136,7 @@ services:
 
 ---
 
-### F9.8 — Multi-usuario 🔜
+### F11 — Multi-usuario 🔜
 
 - [ ] Añadir `user_id` a todas las tablas SQLite
 - [ ] Middleware en API para `X-User-Id`
@@ -144,7 +145,25 @@ services:
 
 ---
 
-### F10 — Módulo Tracking personal 🔜
+### F12 — Notificaciones proactivas 🔜
+
+- [ ] `src/bot/scheduler.py` — APScheduler
+- [ ] Morning check-in (08:00): citas del día
+- [ ] Evening log (22:00): registra hábitos del día
+- [ ] Alerta −30min antes de cita
+
+---
+
+### F13 — IA conversacional 🔜
+
+- [ ] `src/core/ai/` — provider abstracto (Groq / OpenAI / Claude / Ollama)
+- [ ] `src/core/ai/intent_parser.py` — extrae intención + entidades
+- [ ] `/ia` — modo conversación libre
+- [ ] Soporte mensajes de voz (Whisper)
+
+---
+
+### F14 — Módulo Tracking personal 🔜
 
 > sueño, sustancias, estado, estudio, proyecto
 
@@ -156,38 +175,20 @@ services:
 
 ---
 
-### F11 — Notificaciones proactivas 🔜
-
-- [ ] `src/bot/scheduler.py` — APScheduler
-- [ ] Morning check-in (08:00): citas del día
-- [ ] Evening log (22:00): registra hábitos del día
-- [ ] Alerta −30min antes de cita
-
----
-
-### F12 — IA conversacional 🔜
-
-- [ ] `src/core/ai/` — provider abstracto (Groq / OpenAI / Claude / Ollama)
-- [ ] `src/core/ai/intent_parser.py` — extrae intención + entidades
-- [ ] `/ia` — modo conversación libre
-- [ ] Soporte mensajes de voz (Whisper)
-
----
-
-### F13 — Gamificación RPG 🔜
+### F15 — Gamificación RPG 🔜
 - XP por hábitos cumplidos
 - Niveles: 🐣 Novato → 👑 Leyenda
 - Rachas diarias + misiones
 
-### F14 — Telegram Mini App 🔜
+### F16 — Telegram Mini App 🔜
 - HTML5/React + `Telegram.WebApp` SDK
 - Conectar con API FastAPI existente
 
-### F15 — PWA 🔜
+### F17 — PWA 🔜
 - App instalable en móvil, offline-first
 
-### F16 — React Native 🔜
+### F18 — React Native 🔜
 
 ---
 
-_Última actualización: 12 abril 2026 — 21:04 CEST_
+_Última actualización: 13 abril 2026 — 20:43 CEST_

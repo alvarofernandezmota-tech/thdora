@@ -6,6 +6,37 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 
 ---
 
+## [0.11.0] — 2026-04-13
+
+### Probado en vivo — F9.7: Pruebas en entorno real + fix entry points menú ✅
+
+**Todas las funciones del bot probadas en Telegram real por primera vez.**
+
+#### Fix: entry points ConversationHandlers desde botones del menú
+
+| Archivo | Cambio |
+|---------|--------|
+| `src/bot/handlers/citas.py` | Añadido `nueva_start_desde_boton` como entry point para `quick_nueva_*` |
+| `src/bot/handlers/habitos.py` | Añadido `habito_start_desde_boton` como entry point para `quick_habito_*` |
+| `src/bot/handlers/menu.py` | Eliminado `cb_quick_dispatch` — cada ConversationHandler captura su propio callback |
+| `src/bot/handlers/__init__.py` | Reemplazado `cb_quick_dispatch` por `cb_quick_config` |
+| `src/bot/main.py` | Reemplazado `cb_quick_dispatch` → `cb_quick_config`, patrón `^quick_config$` |
+
+#### Resultados pruebas en vivo
+
+| Función | Resultado | API |
+|---------|-----------|-----|
+| ➕ Nueva cita desde botón menú | ✅ Funciona | `POST /appointments/ → 201` |
+| ➕ Nuevo hábito desde botón menú | ✅ Funciona | `POST /habits/ → 201` |
+| Flujo franjas horarias `/nueva` | ✅ Funciona | — |
+| Borrar cita | ✅ Funciona | `DELETE /appointments/ → 204` |
+| Editar cita | ✅ Funciona | — |
+| Editar/sumar hábito | ✅ Funciona | — |
+| Navegación ◀️▶️ citas/hábitos | ✅ Funciona | — |
+| `/semana` | ✅ Funciona | — |
+
+---
+
 ## [0.10.0] — 2026-04-12
 
 ### Refactor — F9.6: handlers.py monolítico → módulos (✅ completado)
@@ -25,7 +56,7 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 | `src/bot/handlers/common.py` | `cmd_cancelar`, `cb_cancel_action`, `cmd_resumen`, `error_handler` |
 | `src/bot/handlers/__init__.py` | Re-exporta todo — `main.py` sin cambios |
 
-### Añadido — F9.5 (pendiente): Franjas horarias en /nueva (✅ implementado)
+### Añadido — F9.5: Franjas horarias en /nueva
 
 Flujo `/nueva` rediseñado con selección progresiva de hora:
 
@@ -38,16 +69,6 @@ Paso 5 → Nombre (texto libre)
 Paso 6 → Tipo [Médica][Personal][Trabajo][Otra]
 Paso 7 → Notas o /skip
 ```
-
-Estados nuevos en `ConversationHandler`:
-- `NUEVA_FRANJA` — elección de franja con botones
-- `NUEVA_HORA_PUNTO` — hora en punto de la franja
-- `NUEVA_HORA_CUARTO` — cuartos opcionales
-- `NUEVA_TIME` — escritura manual HH:MM (siempre disponible)
-- Al cambiar hora por conflicto → vuelve a `NUEVA_FRANJA` (no a texto libre)
-
-### main.py
-- Sin cambios — los imports siguen funcionando igual vía `src.bot.handlers.__init__`
 
 ---
 
@@ -68,60 +89,37 @@ Estados nuevos en `ConversationHandler`:
 - Click en ⏰ hora de la cita → vista detalle completa
 - Vista detalle muestra: fecha, hora, nombre, tipo, notas
 - Botones Editar / Borrar / ← Volver directamente desde vista detalle
-- `cb_cita_detail` registrado en `main.py`
 
 ### Añadido — F9.3: UI unificada
 - Menú principal `/start` con botones inline
 - Navegación ◀️▶️ en vistas `/citas` y `/habitos`
 - Botón 🏠 Menú desde todas las vistas
-- Botón ← Volver al día desde cualquier acción
 - Cambio de vista Citas ↔ Hábitos desde la barra de navegación
 - Botón 📋 Semana desde citas y hábitos
-
-### ⚠️ Pendiente de prueba en vivo
-> F9.3, F9.4 y F9.5 están implementadas en `main` pero **no han sido probadas en entorno real**.
-> Primera prueba prevista para la próxima sesión presencial.
 
 ---
 
 ## [0.8.1] — 2026-03-28
-
 ### Mantenimiento — Auditoría + Limpieza repo
 - Eliminado archivo basura `api_client, handlers y main"` (53KB pegado por error en raíz)
 - Eliminado `.env~` (fichero vacío mal versionado)
-- `docs/sessions/2026-03-28-session-auditoria.md` — sesión de auditoría documentada
-- Verificado estado real del repo: F9.1→F9.4 ✅ completas, F9.5 🔜 Next
-- Rama `feat/delete-appointment` identificada como obsoleta
 
 ---
 
 ## [0.8.0] — 2026-03-27 (noche)
-
 ### Añadido — F9: Persistencia SQLite
-- `src/db/__init__.py` — módulo de persistencia
-- `src/db/base.py` — engine SQLAlchemy, `get_session()`, `init_db()`, `Base` declarativa
-- `src/db/models.py` — ORM: tablas `appointments` + `habits` con `to_dict()`
-- `src/core/impl/sqlite_lifemanager.py` — `SQLiteLifeManager` completo
-- `src/api/deps.py` — singleton `SQLiteLifeManager` vía `lru_cache`
-- `data/.gitkeep` — carpeta donde vive `thdora.db`
-
-### Añadido — F9.1: Routers migrados a SQLite
-- `src/api/routers/appointments.py` — reescrito completo con SQLite
-- `src/api/routers/habits.py` — reescrito completo con SQLite
-- `src/api/routers/summary.py` — reescrito con `GET /summary/week/{date}`
-
----
+- `src/db/` — engine SQLAlchemy, modelos ORM, `SQLiteLifeManager`
+- `data/thdora.db` — persistencia real
 
 ## [0.7.1] — 2026-03-27
 ### Añadido
-- Endpoint `PUT /appointments/{date}/{index}` — editar cita
-- Endpoints `DELETE/PUT /habits/{date}/{habit}` — borrar/editar hábito
+- Endpoint `PUT /appointments/{date}/{index}`
+- Endpoints `DELETE/PUT /habits/{date}/{habit}`
 - `src/bot/handlers.py` v2: flujo `/nueva` 5 pasos, fechas flexibles, inline buttons
 
 ## [0.7.0] — 2026-03-27
 ### Añadido
 - `src/bot/api_client.py` — cliente HTTP asíncrono `ThdoraApiClient`
-- `src/bot/handlers.py` v1
 - `src/bot/main.py` — entrypoint con health check
 
 ## [0.6.1] — 2026-03-25
@@ -130,14 +128,11 @@ Estados nuevos en `ConversationHandler`:
 
 ## [0.6.0] — 2026-03-25
 ### Limpieza
-- Eliminados 8 ficheros zombie de `src/core/` y `src/api/` raíz
-- Coverage total subió de 45% a 87%
+- Eliminados 8 ficheros zombie, coverage 45% → 87%
 
 ## [0.5.0] — 2026-03-24 (noche)
 ### Añadido
-- `MemoryLifeManager`, `JsonLifeManager`
-- Routers `appointments.py`, `habits.py`
-- 61 tests unitarios + integración
+- `MemoryLifeManager`, `JsonLifeManager`, 61 tests
 
 ## [0.4.0] — 2026-03-24
 ### Añadido
@@ -157,4 +152,4 @@ Estados nuevos en `ConversationHandler`:
 
 ---
 
-_Última actualización: 12 abril 2026 — 21:04 CEST_
+_Última actualización: 13 abril 2026 — 20:43 CEST_
