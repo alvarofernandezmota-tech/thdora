@@ -187,6 +187,26 @@ async def nueva_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
     return NUEVA_DATE
 
 
+async def nueva_start_desde_boton(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entry point desde botones ➕ Nueva del menú o vistas de día."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data.clear()
+    data = query.data
+    if data.startswith("quick_nueva_"):
+        fecha = data.replace("quick_nueva_", "")
+    else:
+        fecha = str(date.today())
+    context.user_data["nueva_date"] = fecha
+    await query.message.reply_text(
+        f"📅 *Nueva cita para {_date_short(fecha)}*\n\n"
+        f"🕐 *Paso 1/5* — ¿En qué franja del día?",
+        parse_mode="Markdown",
+        reply_markup=_kb_franjas(),
+    )
+    return NUEVA_FRANJA
+
+
 async def nueva_recv_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     date_str = _parse_date_flex(update.message.text.strip())
     if not date_str:
@@ -206,10 +226,9 @@ async def nueva_recv_date(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def nueva_recv_franja(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Paso 2 — el usuario elige franja o escritura exacta."""
     query = update.callback_query
     await query.answer()
-    data = query.data  # franja_manana / franja_tarde / franja_noche / franja_exacta
+    data = query.data
 
     if data == "franja_exacta":
         await query.edit_message_text(
@@ -218,13 +237,13 @@ async def nueva_recv_franja(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         )
         return NUEVA_TIME
 
-    franja_key = data.replace("franja_", "")  # manana / tarde / noche
+    franja_key = data.replace("franja_", "")
     context.user_data["nueva_franja"] = franja_key
     franja_labels = {"manana": "🌅 Mañana", "tarde": "🌆 Tarde", "noche": "🌙 Noche"}
     label = franja_labels.get(franja_key, "")
     await query.edit_message_text(
         f"✅ Franja: *{label}*\n\n"
-        f"⏰ *Paso 3/6* — ¿A qué hora?",
+        f"⏰ *Paso 2/5* — ¿A qué hora?",
         parse_mode="Markdown",
         reply_markup=_kb_horas_franja(franja_key),
     )
@@ -232,10 +251,9 @@ async def nueva_recv_franja(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def nueva_recv_hora_punto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Paso 3 — el usuario elige hora en punto, pide cuartos o escribe exacta."""
     query = update.callback_query
     await query.answer()
-    data = query.data  # hora_punto_HH / hora_ver_cuartos / hora_exacta
+    data = query.data
 
     if data == "hora_exacta":
         await query.edit_message_text(
@@ -245,7 +263,6 @@ async def nueva_recv_hora_punto(update: Update, context: ContextTypes.DEFAULT_TY
         return NUEVA_TIME
 
     if data == "hora_ver_cuartos":
-        # Guardamos hora temporal como 0 y mostramos cuartos del inicio de la franja
         franja = context.user_data.get("nueva_franja", "manana")
         hora_inicio = {"manana": 6, "tarde": 14, "noche": 22}[franja]
         context.user_data["nueva_hora_temp"] = hora_inicio
@@ -256,7 +273,6 @@ async def nueva_recv_hora_punto(update: Update, context: ContextTypes.DEFAULT_TY
         )
         return NUEVA_HORA_CUARTO
 
-    # hora_punto_HH
     hora = int(data.replace("hora_punto_", ""))
     context.user_data["nueva_hora_temp"] = hora
     await query.edit_message_text(
@@ -269,10 +285,9 @@ async def nueva_recv_hora_punto(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def nueva_recv_hora_cuarto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Paso 4 — confirma cuarto de hora o pide escritura exacta."""
     query = update.callback_query
     await query.answer()
-    data = query.data  # hora_cuarto_HH:MM / hora_exacta
+    data = query.data
 
     if data == "hora_exacta":
         await query.edit_message_text(
@@ -281,13 +296,11 @@ async def nueva_recv_hora_cuarto(update: Update, context: ContextTypes.DEFAULT_T
         )
         return NUEVA_TIME
 
-    # hora_cuarto_HH:MM
     time_str = data.replace("hora_cuarto_", "")
     return await _after_time_selected(query, context, time_str)
 
 
 async def nueva_recv_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Hora escrita manualmente (HH:MM)."""
     text = update.message.text.strip()
     if not _RE_TIME.match(text):
         await update.message.reply_text(
@@ -299,7 +312,6 @@ async def nueva_recv_time(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _after_time_selected(obj, context, time_str: str, is_message: bool = False) -> int:
-    """Tras tener la hora, comprueba conflictos y avanza al nombre."""
     context.user_data["nueva_time"] = time_str
     date_str = context.user_data.get("nueva_date", str(date.today()))
     try:
@@ -319,7 +331,7 @@ async def _after_time_selected(obj, context, time_str: str, is_message: bool = F
         pass
     txt = (
         f"✅ Hora: *{time_str}*\n\n"
-        f"📝 *Paso 4/6* — ¿Cómo se llama la cita?"
+        f"📝 *Paso 3/5* — ¿Cómo se llama la cita?"
     )
     if is_message:
         await obj.message.reply_text(txt, parse_mode="Markdown")
@@ -334,11 +346,10 @@ async def nueva_conflict_response(update: Update, context: ContextTypes.DEFAULT_
     if query.data == "aptconf_ok":
         t = context.user_data.get("nueva_time", "")
         await query.edit_message_text(
-            f"✅ Hora: *{t}*\n\n📝 *Paso 4/6* — ¿Cómo se llama la cita?",
+            f"✅ Hora: *{t}*\n\n📝 *Paso 3/5* — ¿Cómo se llama la cita?",
             parse_mode="Markdown",
         )
         return NUEVA_NOMBRE
-    # aptconf_change → volver a elegir franja
     await query.edit_message_text(
         "🕐 *Elige de nuevo la franja:*",
         parse_mode="Markdown",
@@ -354,7 +365,7 @@ async def nueva_recv_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return NUEVA_NOMBRE
     context.user_data["nueva_nombre"] = nombre
     await update.message.reply_text(
-        f"✅ Nombre: *{nombre}*\n\n📋 *Paso 5/6* — ¿Tipo de cita?",
+        f"✅ Nombre: *{nombre}*\n\n📋 *Paso 4/5* — ¿Tipo de cita?",
         parse_mode="Markdown",
         reply_markup=_kb_tipos(),
     )
@@ -367,7 +378,7 @@ async def nueva_recv_type(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     apt_type = query.data.replace("tipo_", "")
     context.user_data["nueva_type"] = apt_type
     await query.edit_message_text(
-        f"✅ Tipo: *{apt_type}*\n\n📝 *Paso 6/6* — ¿Alguna nota? \\(/skip para omitir\\)",
+        f"✅ Tipo: *{apt_type}*\n\n📝 *Paso 5/5* — ¿Alguna nota? \\(/skip para omitir\\)",
         parse_mode="Markdown",
     )
     return NUEVA_NOTES
@@ -511,8 +522,7 @@ def build_nueva_handler() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[
             CommandHandler("nueva", nueva_start),
-            # El botón quick_nueva_DATE llega aquí vía cb_quick_dispatch en menu.py
-            # (el flujo empieza en NUEVA_FRANJA porque la fecha ya está en user_data)
+            CallbackQueryHandler(nueva_start_desde_boton, pattern=r"^quick_nueva"),
         ],
         states={
             NUEVA_DATE:        [MessageHandler(filters.TEXT & ~filters.COMMAND, nueva_recv_date)],
@@ -557,7 +567,6 @@ def build_edit_apt_handler() -> ConversationHandler:
 
 
 async def _cmd_cancelar_inline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Cancelar local para los ConversationHandlers de citas."""
     context.user_data.clear()
     from telegram.ext import ConversationHandler
     await update.message.reply_text(

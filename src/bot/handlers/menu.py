@@ -1,5 +1,7 @@
 """
-Handlers del menú principal — /start, 🏠 Menú, botones rápidos.
+Handlers del menú principal — /start, 🏠 Menú.
+Los botones quick_nueva y quick_habito ahora son capturados
+directamente por los ConversationHandlers de citas.py y habitos.py.
 """
 
 from datetime import date
@@ -51,42 +53,8 @@ async def cb_menu_home(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     )
 
 
-async def cb_quick_dispatch(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Botones rápidos desde /start y vistas de día."""
+async def cb_quick_config(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Botón ⚙️ Config del menú — informa al usuario que use /config."""
     query = update.callback_query
     await query.answer()
-    data  = query.data
-
-    if data == "quick_nueva" or data.startswith("quick_nueva_"):
-        context.user_data.clear()
-        if data.startswith("quick_nueva_"):
-            fecha = data.replace("quick_nueva_", "")
-            context.user_data["nueva_date"] = fecha
-        # El ConversationHandler de /nueva se encarga del resto
-        # Aquí sólo disparamos el flujo si viene de botón sin fecha
-        from src.bot.keyboards import _kb_franjas
-        from src.bot.utils.dates import _date_short
-        fecha = context.user_data.get("nueva_date", str(date.today()))
-        await query.message.reply_text(
-            f"📅 *Nueva cita para {_date_short(fecha)}*\n\n"
-            f"🕐 *Paso 1* — ¿En qué franja del día?",
-            parse_mode="Markdown",
-            reply_markup=_kb_franjas(),
-        )
-
-    elif data == "quick_habito" or data.startswith("quick_habito_"):
-        context.user_data.clear()
-        if data.startswith("quick_habito_"):
-            fecha = data.replace("quick_habito_", "")
-            context.user_data["habito_date"] = fecha
-        else:
-            context.user_data["habito_date"] = str(date.today())
-        from src.bot.utils.dates import _date_short
-        fecha_label = _date_short(context.user_data["habito_date"])
-        await query.message.reply_text(
-            f"📊 *Nuevo hábito para {fecha_label}*\n\n✏️ *Paso 1/2* — ¿Cómo se llama el hábito?",
-            parse_mode="Markdown",
-        )
-
-    elif data == "quick_config":
-        await query.message.reply_text("⚙️ Usa /config para gestionar los tipos de hábitos.")
+    await query.message.reply_text("⚙️ Usa /config para gestionar los tipos de hábitos.")

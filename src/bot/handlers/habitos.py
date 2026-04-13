@@ -160,6 +160,25 @@ async def habito_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     return HABITO_NOMBRE
 
 
+async def habito_start_desde_boton(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entry point desde botones ➕ Nuevo hábito del menú o vistas de día."""
+    query = update.callback_query
+    await query.answer()
+    context.user_data.clear()
+    data = query.data
+    if data.startswith("quick_habito_"):
+        fecha = data.replace("quick_habito_", "")
+    else:
+        fecha = str(date.today())
+    context.user_data["habito_date"] = fecha
+    fecha_label = _date_short(fecha)
+    await query.message.reply_text(
+        f"📊 *Nuevo hábito para {fecha_label}*\n\n✏️ *Paso 1/2* — ¿Cómo se llama el hábito?",
+        parse_mode="Markdown",
+    )
+    return HABITO_NOMBRE
+
+
 async def habito_recv_nombre_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     nombre = update.message.text.strip()
     if not nombre:
@@ -373,7 +392,10 @@ async def _do_edit_habit(msg, context, value: Optional[str]) -> int:
 
 def build_habito_handler() -> ConversationHandler:
     return ConversationHandler(
-        entry_points=[CommandHandler("habito", habito_start)],
+        entry_points=[
+            CommandHandler("habito", habito_start),
+            CallbackQueryHandler(habito_start_desde_boton, pattern=r"^quick_habito"),
+        ],
         states={
             HABITO_NOMBRE: [MessageHandler(filters.TEXT & ~filters.COMMAND, habito_recv_nombre_text)],
             HABITO_VALUE: [
