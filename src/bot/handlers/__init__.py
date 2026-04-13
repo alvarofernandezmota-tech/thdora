@@ -33,7 +33,7 @@ from src.bot.handlers.config import (
 from src.bot.handlers.menu import (
     cmd_start,
     cb_menu_home,
-    cb_quick_dispatch,
+    cb_quick_config,
 )
 from src.bot.handlers.common import (
     cmd_cancelar,
@@ -68,7 +68,7 @@ __all__ = [
     # Menú
     "cmd_start",
     "cb_menu_home",
-    "cb_quick_dispatch",
+    "cb_quick_config",
     # Comunes
     "cmd_cancelar",
     "cb_cancel_action",
