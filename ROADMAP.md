@@ -103,9 +103,47 @@ src/bot/
 - [x] Crear cita contra API (POST `/appointments/`) — **201 Created** ✅
 - [x] Borrar cita (DELETE `/appointments/`) — **204 No Content** ✅
 
+### F9.8 — Documentación técnica completa ✅ (13 abril 2026)
+
+> Todo el sistema documentado antes de implementar F12.
+
+- [x] `docs/FLUJOS_DETALLADOS.md` — todos los flujos del bot con estados y casos borde
+- [x] `docs/API_REFERENCE.md` — referencia completa de los 14 endpoints
+- [x] `docs/CONVENCIONES.md` — patrones, variables de entorno, orden de handlers
+- [x] `docs/INDEX.md` — mapa de lectura por rol
+- [x] `docs/F12_NOTIFICACIONES_DESIGN.md` — diseño completo con extensiones futuras
+
 ---
 
-## 🔶 Próximo — v0.12.x
+## 🔶 En curso / Próximo — v0.12.x
+
+### F12 — Notificaciones proactivas 🔜 SIGUIENTE
+
+> Diseño completo en [docs/F12_NOTIFICACIONES_DESIGN.md](docs/F12_NOTIFICACIONES_DESIGN.md)
+
+**V1 — a implementar:**
+- [ ] `src/db/models.py` — tabla `UserConfig` (defaults automáticos)
+- [ ] `src/core/impl/sqlite_lifemanager.py` — `get_user_config`, `upsert_user_config`
+- [ ] `src/api/routers/user_config.py` — `GET` + `PUT /user_config/{user_id}`
+- [ ] `src/api/main.py` — registrar router
+- [ ] `src/bot/api_client.py` — `get_user_config()`, `update_user_config()`
+- [ ] `src/bot/keyboards.py` — teclados menú config + notificaciones
+- [ ] `src/bot/handlers/config.py` — rediseño con `CFG_MENU` raíz + rama notificaciones
+- [ ] `src/bot/scheduler.py` — APScheduler: resumen diario + evening log + jobs por cita
+- [ ] `src/bot/handlers/citas.py` — reprogramar jobs al crear/editar/borrar
+- [ ] `src/bot/main.py` — `start_scheduler(app)` al arrancar
+
+**V1.1 — extensiones apuntadas (más adelante):**
+- [ ] Snooze `[⏰ +15min]` en avisos
+- [ ] Silencio nocturno (23:00–07:00 configurable)
+- [ ] Cita inminente (aviso si creas cita con <2h de margen)
+
+**V1.2 — extensiones apuntadas:**
+- [ ] Resumen semanal (lunes 08:00)
+- [ ] Recordatorio por hábito específico
+- [ ] Notificación de racha 🔥
+
+---
 
 ### F10 — Docker + despliegue 24/7 🔜
 
@@ -143,14 +181,7 @@ services:
 - [ ] Bot envía `user_id` en cada llamada a la API
 - [ ] Onboarding: primer `/start` → configura perfil
 
----
-
-### F12 — Notificaciones proactivas 🔜
-
-- [ ] `src/bot/scheduler.py` — APScheduler
-- [ ] Morning check-in (08:00): citas del día
-- [ ] Evening log (22:00): registra hábitos del día
-- [ ] Alerta −30min antes de cita
+> ⚠️ `user_id` ya está pre-modelado en `UserConfig` (F12). Facilita la migración.
 
 ---
 
@@ -176,9 +207,10 @@ services:
 ---
 
 ### F15 — Gamificación RPG 🔜
-- XP por hábitos cumplidos
+- XP por hábitos cumplidos (campo `xp_rule` ya modelado en `HabitConfig`)
 - Niveles: 🐣 Novato → 👑 Leyenda
 - Rachas diarias + misiones
+- Conecta con notif de racha de F12.v1.2
 
 ### F16 — Telegram Mini App 🔜
 - HTML5/React + `Telegram.WebApp` SDK
@@ -191,4 +223,18 @@ services:
 
 ---
 
-_Última actualización: 13 abril 2026 — 20:43 CEST_
+## Orden recomendado de implementación
+
+```
+F12 (Notificaciones) → F10 (Docker 24/7) → F11 (Multi-usuario)
+    → F13 (IA) → F14 (Tracking) → F15 (Gamificación)
+    → F16/F17/F18 (Apps)
+```
+
+> F12 primero porque da valor inmediato al usuario actual.
+> F10 justo después para que el scheduler corra 24/7 en un servidor real.
+> F11 antes de F13+ para no tener que hacer dos migraciones.
+
+---
+
+_Última actualización: 13 abril 2026 — 21:24 CEST_
