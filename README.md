@@ -6,6 +6,7 @@
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.135%2B-009688)](https://fastapi.tiangolo.com)
 [![SQLite](https://img.shields.io/badge/SQLite-3-003B57)](https://sqlite.org)
 [![python-telegram-bot](https://img.shields.io/badge/python--telegram--bot-22%2B-2CA5E0)](https://python-telegram-bot.org)
+[![APScheduler](https://img.shields.io/badge/APScheduler-3.10%2B-orange)](https://apscheduler.readthedocs.io)
 [![Docker](https://img.shields.io/badge/Docker-ready-2496ED)](https://docker.com)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
@@ -30,9 +31,10 @@ THDORA no es un tutorial ni un CRUD simple. Es un proyecto **end-to-end real** q
 | Habilidad | Dónde se ve |
 |-----------|-------------|
 | **Arquitectura limpia** | Capa core → API → Bot desacopladas. `AbstractLifeManager` con múltiples implementaciones |
-| **API REST profesional** | FastAPI + SQLAlchemy ORM, 14 endpoints, modelos Pydantic, inyección de dependencias |
+| **API REST profesional** | FastAPI + SQLAlchemy ORM, 16 endpoints, modelos Pydantic, inyección de dependencias |
 | **Bot conversacional** | `python-telegram-bot` v22, 5 `ConversationHandler` anidados, máquina de estados |
 | **Persistencia real** | SQLite con migraciones, datos que sobreviven a reinicios |
+| **Notificaciones proactivas** | APScheduler integrado: resumen diario, avisos de cita, evening log |
 | **UX cuidada** | Franjas horarias, botones inline, detección de conflictos, acumulación de valores |
 | **Docker** | `Dockerfile` + `docker-compose.yml` multi-servicio con health checks |
 | **Tests** | Unit + handlers con mocks, cobertura medida |
@@ -41,7 +43,7 @@ THDORA no es un tutorial ni un CRUD simple. Es un proyecto **end-to-end real** q
 
 ---
 
-## ✨ Funcionalidades actuales (v0.11.0)
+## ✨ Funcionalidades actuales (v0.12.0)
 
 ### Bot Telegram
 
@@ -54,8 +56,16 @@ THDORA no es un tutorial ni un CRUD simple. Es un proyecto **end-to-end real** q
 | `/habitos [fecha]` | Ver hábitos del día, nav ◀️▶️, borrar/editar/sumar |
 | `/semana` | Vista semanal con navegación entre semanas |
 | `/resumen [fecha]` | Resumen completo: citas + hábitos |
-| `/config` | Configurar tipos de hábitos con botones rápidos |
+| `/config` | **Menú raíz** → Hábitos (tipos + botones rápidos) o Notificaciones |
 | `/cancelar` | Cancela cualquier operación en curso |
+
+**Notificaciones proactivas (F12 ★):**
+
+| Notificación | Descripción | Config |
+|---|---|---|
+| 🌅 Resumen diario | Citas del día cada mañana | Hora configurable, activable |
+| 🔔 Aviso de cita | X min antes de cada cita | Offsets configurables (5/15/30/60 min o combos) |
+| 🌙 Evening log | Recordatorio hábitos al final del día | Hora configurable, activable |
 
 **Fechas aceptadas:** `hoy`, `mañana`, `ayer`, `27/03`, `2026-04-12`, `lunes`, `el viernes`…
 
@@ -92,6 +102,10 @@ Hábitos:
 Resumen:
   GET    /summary/{date}                     → citas + hábitos del día
   GET    /summary/week/{date}                → resumen de la semana
+
+Config usuario (F12 ★):
+  GET    /user_config/{user_id}              → leer config (crea fila por defecto si no existe)
+  PUT    /user_config/{user_id}              → actualizar campos de config
 ```
 
 ---
@@ -110,11 +124,14 @@ python -m venv .venv
 source .venv/bin/activate   # Linux/Mac/WSL
 make dev
 
-# 3. Variables de entorno
+# 3. Instalar APScheduler (si no está en requirements)
+pip install apscheduler
+
+# 4. Variables de entorno
 cp .env.example .env
 # Editar .env: añadir TELEGRAM_BOT_TOKEN
 
-# 4. Arrancar
+# 5. Arrancar
 make run-api   # terminal 1 → API en http://localhost:8000
 make run-bot   # terminal 2 → Bot Telegram
 ```
@@ -139,16 +156,18 @@ make docker-down    # parar todo
 thdora/
 ├── src/
 │   ├── api/              ← FastAPI: routers, modelos, deps
-│   │   └── routers/      ← appointments.py, habits.py, summary.py
+│   │   └── routers/      ← appointments.py, habits.py, habit_config.py,
+│   │                         summary.py, user_config.py [F12]
 │   ├── bot/              ← Bot Telegram
-│   │   ├── main.py       ← entrypoint + registro de handlers
+│   │   ├── main.py       ← entrypoint v4.0 + arranca scheduler [F12]
 │   │   ├── api_client.py ← cliente HTTP asíncrono (httpx)
-│   │   ├── keyboards.py  ← todos los teclados inline
+│   │   ├── keyboards.py  ← teclados inline + _kb_notif_* [F12]
+│   │   ├── scheduler.py  ← APScheduler jobs [F12 ★ nuevo]
 │   │   ├── utils/        ← dates.py, accum.py
-│   │   └── handlers/     ← menu, citas, habitos, semana, config, common
+│   │   └── handlers/     ← menu, citas [F12], habitos, semana, config [F12], common
 │   ├── core/             ← abstracción + implementaciones
 │   │   └── impl/         ← SQLiteLifeManager (activo)
-│   └── db/               ← SQLAlchemy: base.py, models.py
+│   └── db/               ← SQLAlchemy: base.py, models.py [F12 +UserConfig]
 ├── tests/
 │   ├── unit/bot/         ← test_dates, test_accum, test_keyboards
 │   └── bot/              ← test_handlers_citas, _habitos, _menu
@@ -183,7 +202,7 @@ make test-cov      # con cobertura → htmlcov/index.html
 | F1–F9.7 | ✅ | Base, API REST, SQLite, Bot completo con franjas, Docker, Pruebas en vivo |
 | F10 | 🔜 | **Docker + despliegue 24/7** — bot siempre encendido en servidor |
 | F11 | 🔜 | **Multi-usuario** — `user_id` en toda la pila |
-| F12 | 🔜 | **Notificaciones proactivas** (APScheduler) |
+| F12 | ✅ | **Notificaciones proactivas** (APScheduler) — resumen diario, avisos cita, evening log |
 | F13 | 🔜 | **IA conversacional** (Groq / Whisper / OpenAI) |
 | F14 | 🔜 | **Tracking personal** (sueño, estado, estudio) |
 | F15 | 🔜 | Gamificación RPG (XP, niveles, rachas) |
