@@ -2,24 +2,31 @@
 Scheduler de notificaciones proactivas — F12.
 
 Jobs:
-    daily_summary   → resumen de citas del día (hora configurable, default 08:00)
-    evening_log     → recordatorio de hábitos del día (hora configurable, default 22:00)
-    apt_reminder_*  → aviso X min antes de cada cita (one-shot, ids dinámicos)
+    daily_summary_{user_id}     → resumen de citas del día (hora configurable, default 08:00)
+    evening_log_{user_id}       → recordatorio de hábitos del día (hora configurable, default 22:00)
+    apt_reminder_{user_id}_{apt_id}_{offset_min}  → aviso X min antes de cita (one-shot)
 
 Arquitectura:
     - Un único AsyncIOScheduler compartido (singleton)
-    - Los jobs diarios se programan al arrancar y se reprograman si el usuario
-      cambia la hora en /config → Notificaciones
-    - Los jobs one-shot de cita se programan al crear la cita y se cancelan
-      al borrarla o reprograman al editarla
-    - Todos los jobs leen la config del usuario en el momento de ejecutarse
-      (no al programarse) para respetar cambios de config en caliente
+    - Se arranca desde main.py via post_init (dentro del event loop de PTB)
+    - Los jobs diarios se programan en cmd_start si el usuario tiene config
+    - Los jobs one-shot de cita se programan al crear y cancelan al borrar
+    - Los jobs se reprograman al editar hora de cita o cambiar config
 
-Uso::
+Nota sobre apt dict:
+    La API puede devolver el campo fecha como 'date' o 'date_str'.
+    schedule_apt_reminders normaliza ambos con: apt.get('date') or apt.get('date_str', '')
 
-    from src.bot.scheduler import get_scheduler, start_scheduler
+Uso desde handlers::
+
+    from src.bot.scheduler import get_scheduler, schedule_apt_reminders, cancel_apt_reminders
+    schedule_apt_reminders(bot, user_id, apt_dict, cfg_dict)
+    cancel_apt_reminders(user_id, apt_id)
+
+Uso desde main.py::
+
     scheduler = get_scheduler()
-    await start_scheduler(app, scheduler)
+    scheduler.start()  # llamar dentro de post_init (event loop activo)
 """
 
 import logging
@@ -53,11 +60,8 @@ def get_scheduler() -> AsyncIOScheduler:
 
 async def start_scheduler(app, bot_app) -> None:
     """
-    Arranca el scheduler y programa los jobs fijos del primer usuario.
-    Se llama desde main.py después de construir la app de Telegram.
-
-    app      → objeto Application de python-telegram-bot (para bot.send_message)
-    bot_app  → el mismo objeto (alias para claridad)
+    Arrancar el scheduler desde post_init de PTB.
+    app / bot_app → objeto Application de python-telegram-bot.
     """
     scheduler = get_scheduler()
     if scheduler.running:
@@ -73,7 +77,8 @@ def schedule_user_jobs(bot, user_id: str, cfg: dict) -> None:
     Programa (o reprograma) los dos jobs diarios del usuario:
         - daily_summary_{user_id}
         - evening_log_{user_id}
-    Si el job ya existe, lo reemplaza con la nueva hora.
+    Si el job ya existe lo reemplaza con la nueva hora.
+    Se llama desde cmd_start y desde config cuando el usuario cambia horarios.
     """
     scheduler = get_scheduler()
     tz = cfg.get("timezone", _DEFAULT_TZ)
@@ -116,18 +121,29 @@ def schedule_user_jobs(bot, user_id: str, cfg: dict) -> None:
 def schedule_apt_reminders(bot, user_id: str, apt: dict, cfg: dict) -> None:
     """
     Programa avisos one-shot para una cita según notif_offsets del usuario.
-    Si la hora ya pasó, no programa nada (APScheduler lo ignoraría de todas formas).
+
+    apt puede tener la fecha como 'date' o 'date_str' (según endpoint de API).
+    Se normaliza con: apt.get('date') or apt.get('date_str', '')
+
+    Si la hora de aviso ya pasó, no programa nada.
     """
     if not cfg.get("notif_enabled", True):
         return
 
-    scheduler  = get_scheduler()
-    tz         = ZoneInfo(cfg.get("timezone", _DEFAULT_TZ))
-    date_str   = apt["date"]
-    time_str   = apt["time"]
-    apt_id     = apt.get("id", apt.get("index", 0))
-    offsets    = cfg.get("notif_offsets", ["60", "30", "15"])
-    apt_dt     = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=tz)
+    scheduler = get_scheduler()
+    tz        = ZoneInfo(cfg.get("timezone", _DEFAULT_TZ))
+
+    # Normalizar campo fecha (la API puede devolver 'date' o 'date_str')
+    date_str  = apt.get("date") or apt.get("date_str", "")
+    time_str  = apt.get("time", "")
+    apt_id    = apt.get("id", apt.get("index", 0))
+    offsets   = cfg.get("notif_offsets", ["60", "30", "15"])
+
+    if not date_str or not time_str:
+        logger.warning("schedule_apt_reminders: apt sin date o time: %s", apt)
+        return
+
+    apt_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=tz)
 
     for offset_str in offsets:
         try:
@@ -145,13 +161,13 @@ def schedule_apt_reminders(bot, user_id: str, apt: dict, cfg: dict) -> None:
             DateTrigger(run_date=fire_at),
             id=job_id,
             kwargs={
-                "bot":      bot,
-                "user_id":  user_id,
-                "apt":      apt,
-                "minutes":  offset_min,
+                "bot":     bot,
+                "user_id": user_id,
+                "apt":     apt,
+                "minutes": offset_min,
             },
         )
-        logger.info("⏰ apt_reminder %s → %s (-% dmin)", job_id, fire_at, offset_min)
+        logger.info("⏰ apt_reminder %s → %s (-%dmin)", job_id, fire_at, offset_min)
 
 
 def cancel_apt_reminders(user_id: str, apt_id: int) -> None:
@@ -232,6 +248,6 @@ async def _send_apt_reminder(bot, user_id: str, apt: dict, minutes: int) -> None
             f"  ⏰ *{apt['time']}* \u2014 {nombre}"
         )
         await bot.send_message(chat_id=int(user_id), text=text, parse_mode="MarkdownV2")
-        logger.info("✅ apt_reminder enviado a %s (-% dmin cita %s)", user_id, minutes, apt.get('id'))
+        logger.info("✅ apt_reminder enviado a %s (-%dmin cita %s)", user_id, minutes, apt.get('id'))
     except Exception as e:
         logger.error("Error en apt_reminder para %s: %s", user_id, e)

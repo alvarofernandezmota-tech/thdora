@@ -12,10 +12,24 @@ Flujo /nueva con franjas:
     NUEVA_TYPE       → tipo [médica / personal / trabajo / otra]
     NUEVA_NOTES      → notas o /skip
 
+Flujo editar cita (build_edit_apt_handler):
+    Entrada: callback ae_{date_str}_{index}
+    EDIT_APT_FIELD   → el usuario elige qué campo editar (botones)
+    EDIT_APT_TIME    → nueva hora (HH:MM)
+    EDIT_APT_NOMBRE  → nuevo nombre
+    EDIT_APT_TYPE    → nuevo tipo (botones)
+    EDIT_APT_NOTES   → nuevas notas
+    Guarda y vuelve al día.
+
 Scheduler (F12):
     Al crear una cita → schedule_apt_reminders()
     Al borrar una cita → cancel_apt_reminders()
     Al editar la hora de una cita → cancel + re-schedule
+
+Nota sobre callback_data con fechas:
+    Los prefijos ae_, ad_, adc_ usan el patrón {prefix}{date_str}_{index}.
+    La fecha contiene guiones (2026-04-13), así que NO usar split('_', 2).
+    Se extrae con: data[len(prefix):] y luego rsplit('_', 1).
 """
 
 import re
@@ -61,7 +75,20 @@ _RE_TIME = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 ) = range(9)
 
 # ── Estados editar cita ───────────────────────────────────────────
-EDIT_APT_TIME, EDIT_APT_NOMBRE, EDIT_APT_TYPE, EDIT_APT_NOTES = range(20, 24)
+EDIT_APT_FIELD, EDIT_APT_TIME, EDIT_APT_NOMBRE, EDIT_APT_TYPE, EDIT_APT_NOTES = range(20, 25)
+
+
+def _parse_apt_callback(prefix: str, data: str):
+    """
+    Extrae (date_str, index) de un callback_data con formato:
+        {prefix}{date_str}_{index}
+    Ejemplo: 'ae_2026-04-13_0' con prefix='ae_' → ('2026-04-13', 0)
+
+    NO usar split('_', 2) porque la fecha contiene guiones.
+    """
+    rest = data[len(prefix):]
+    date_str, idx_str = rest.rsplit("_", 1)
+    return date_str, int(idx_str)
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -123,9 +150,7 @@ async def cb_citas_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 async def cb_cita_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    parts    = query.data.split("_", 3)
-    date_str = parts[2]
-    idx      = int(parts[3])
+    date_str, idx = _parse_apt_callback("cita_detail_", query.data)
     try:
         apts = await api.get_appointments(date_str)
     except ApiError:
@@ -161,20 +186,18 @@ async def cb_cita_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def cb_apt_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    _, date_str, idx_str = query.data.split("_", 2)
-    await query.edit_message_reply_markup(reply_markup=_kb_apt_confirm(date_str, int(idx_str)))
+    date_str, idx = _parse_apt_callback("ad_", query.data)
+    await query.edit_message_reply_markup(reply_markup=_kb_apt_confirm(date_str, idx))
 
 
 async def cb_apt_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    _, date_str, idx_str = query.data.split("_", 2)
+    date_str, apt_id = _parse_apt_callback("adc_", query.data)
     user_id = str(query.from_user.id)
-    apt_id  = int(idx_str)
     try:
         ok  = await api.delete_appointment(date_str, apt_id)
         if ok:
-            # Cancelar jobs pendientes de esta cita
             cancel_apt_reminders(user_id, apt_id)
         txt = "🗑️ Cita eliminada\\." if ok else "⚠️ Cita no encontrada \\(ya borrada\\)\\."
         await query.edit_message_text(
@@ -395,9 +418,11 @@ async def _save_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     try:
         result  = await api.create_appointment(d, t, nm, tp, notes)
         user_id = str(update.effective_user.id)
-        # Programar avisos de esta cita según config del usuario
         try:
             cfg = await api.get_user_config(user_id)
+            # La API devuelve la cita con 'date_str', normalizamos a 'date'
+            if "date" not in result:
+                result["date"] = result.get("date_str", d)
             schedule_apt_reminders(update.get_bot(), user_id, result, cfg)
         except Exception as sched_err:
             logger.warning("No se pudo programar reminder: %s", sched_err)
@@ -419,62 +444,123 @@ async def _save_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# EDITAR CITA
+# EDITAR CITA — flujo con botones (sin /skip)
+#
+# Flujo:
+#   1. cb_apt_edit_start   → muestra los campos actuales + botones para elegir
+#   2. El usuario pulsa qué quiere editar
+#   3. Se pide el nuevo valor (hora con teclado, tipo con botones, resto texto)
+#   4. Se guarda y vuelve al día
 # ═══════════════════════════════════════════════════════════════════════
+
+def _kb_edit_apt_fields(date_str: str, idx: int) -> InlineKeyboardMarkup:
+    """Teclado para elegir qué campo de la cita editar."""
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton("⏰ Hora",    callback_data=f"aedit_time_{date_str}_{idx}")],
+        [InlineKeyboardButton("📝 Nombre",  callback_data=f"aedit_name_{date_str}_{idx}")],
+        [InlineKeyboardButton("🏷 Tipo",    callback_data=f"aedit_type_{date_str}_{idx}")],
+        [InlineKeyboardButton("💬 Notas",   callback_data=f"aedit_notes_{date_str}_{idx}")],
+        [InlineKeyboardButton("← Cancelar", callback_data=f"citas_nav_{date_str}")],
+    ])
+
 
 async def cb_apt_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    _, date_str, idx_str = query.data.split("_", 2)
+    date_str, idx = _parse_apt_callback("ae_", query.data)
     context.user_data["edit_apt_date"]  = date_str
-    context.user_data["edit_apt_index"] = int(idx_str)
+    context.user_data["edit_apt_index"] = idx
+    # Cargar datos actuales de la cita para mostrarlos
+    try:
+        apts = await api.get_appointments(date_str)
+        apt  = next((a for a in apts if a.get("index") == idx), None)
+    except ApiError:
+        apt = None
+    if apt:
+        nombre = apt.get("name", "") or apt.get("type", "—")
+        context.user_data["edit_apt_current"] = apt
+        info = (
+            f"✏️ *Editar cita*\n\n"
+            f"  ⏰ {apt['time']}  📝 {nombre}\n"
+            f"  🏷 {apt['type']}  💬 {apt.get('notes') or '—'}\n\n"
+            f"¿Qué quieres cambiar?"
+        )
+    else:
+        info = "✏️ *Editar cita* — ¿Qué quieres cambiar?"
     await query.edit_message_text(
-        f"✏️ *Editar cita {idx_str} del {date_str}*\n\nNueva hora \\(HH:MM\\) o /skip:",
-        parse_mode="Markdown",
+        info, parse_mode="Markdown",
+        reply_markup=_kb_edit_apt_fields(date_str, idx),
     )
-    return EDIT_APT_TIME
+    return EDIT_APT_FIELD
+
+
+async def cb_apt_edit_field_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """El usuario eligió qué campo editar."""
+    query = update.callback_query
+    await query.answer()
+    data  = query.data  # aedit_{field}_{date_str}_{idx}
+    # Extraer field: segundo token tras 'aedit_'
+    rest  = data[len("aedit_"):]
+    field, rest2 = rest.split("_", 1)
+    date_str, idx = rest2.rsplit("_", 1)
+    idx = int(idx)
+    context.user_data["edit_apt_field"]  = field
+    context.user_data["edit_apt_date"]   = date_str
+    context.user_data["edit_apt_index"]  = idx
+
+    if field == "time":
+        await query.edit_message_text(
+            "⏰ *Nueva hora* \\(HH:MM, 24h\\):", parse_mode="Markdown"
+        )
+        return EDIT_APT_TIME
+    elif field == "name":
+        await query.edit_message_text("📝 *Nuevo nombre:*", parse_mode="Markdown")
+        return EDIT_APT_NOMBRE
+    elif field == "type":
+        await query.edit_message_text(
+            "🏷 *Nuevo tipo:*", parse_mode="Markdown",
+            reply_markup=InlineKeyboardMarkup(
+                [[InlineKeyboardButton(t.capitalize(), callback_data=f"etipo_{t}")] for t in TIPOS_CITA]
+            ),
+        )
+        return EDIT_APT_TYPE
+    elif field == "notes":
+        await query.edit_message_text("💬 *Nuevas notas:*", parse_mode="Markdown")
+        return EDIT_APT_NOTES
+    return ConversationHandler.END
 
 
 async def cb_apt_edit_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip()
-    if text.lower() != "/skip":
-        if not _RE_TIME.match(text):
-            await update.message.reply_text(
-                "❌ Formato incorrecto\\. Usa `HH:MM` o /skip\\.", parse_mode="Markdown"
-            )
-            return EDIT_APT_TIME
-        context.user_data["edit_apt_time"] = text
-    await update.message.reply_text("Nuevo nombre o /skip:")
-    return EDIT_APT_NOMBRE
+    if not _RE_TIME.match(text):
+        await update.message.reply_text(
+            "❌ Formato incorrecto\\. Usa `HH:MM` \\(ej: `10:30`\\)\\.",
+            parse_mode="Markdown",
+        )
+        return EDIT_APT_TIME
+    context.user_data["edit_apt_time"] = text
+    return await _do_update_apt(update, context)
 
 
 async def cb_apt_edit_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text = update.message.text.strip()
-    if text.lower() != "/skip":
-        context.user_data["edit_apt_nombre"] = text
-    await update.message.reply_text(
-        "Nuevo tipo o /skip:",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton(t.capitalize(), callback_data=f"etipo_{t}") for t in TIPOS_CITA]]
-            + [[InlineKeyboardButton("⏭️ Skip", callback_data="etipo_skip")]]
-        ),
-    )
-    return EDIT_APT_TYPE
+    context.user_data["edit_apt_nombre"] = update.message.text.strip()
+    return await _do_update_apt(update, context)
 
 
 async def cb_apt_edit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
     await query.answer()
-    value = query.data.replace("etipo_", "")
-    if value != "skip":
-        context.user_data["edit_apt_type"] = value
-    await query.edit_message_text("Nuevas notas o /skip:")
-    return EDIT_APT_NOTES
+    context.user_data["edit_apt_type"] = query.data.replace("etipo_", "")
+    return await _do_update_apt_from_query(query, context)
 
 
 async def cb_apt_edit_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    text     = update.message.text.strip()
-    notes    = text if text.lower() != "/skip" else None
+    context.user_data["edit_apt_notes"] = update.message.text.strip()
+    return await _do_update_apt(update, context)
+
+
+async def _do_update_apt(update: Update, context) -> int:
+    """Guarda el campo editado y vuelve al día."""
     date_str = context.user_data.get("edit_apt_date", "")
     index    = context.user_data.get("edit_apt_index", 0)
     user_id  = str(update.effective_user.id)
@@ -484,18 +570,19 @@ async def cb_apt_edit_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) 
             time=context.user_data.get("edit_apt_time"),
             name=context.user_data.get("edit_apt_nombre"),
             apt_type=context.user_data.get("edit_apt_type"),
-            notes=notes,
+            notes=context.user_data.get("edit_apt_notes"),
         )
-        # Reprogramar avisos si la hora cambió
         if context.user_data.get("edit_apt_time") and result:
             try:
                 cancel_apt_reminders(user_id, index)
                 cfg = await api.get_user_config(user_id)
+                if "date" not in result:
+                    result["date"] = result.get("date_str", date_str)
                 schedule_apt_reminders(update.get_bot(), user_id, result, cfg)
             except Exception as sched_err:
                 logger.warning("No se pudo reprogramar reminder: %s", sched_err)
         await update.message.reply_text(
-            f"✅ *Cita {index} actualizada\\.*",
+            f"✅ *Cita actualizada\\.*",
             parse_mode="Markdown",
             reply_markup=_kb_back(date_str, "citas"),
         )
@@ -508,20 +595,30 @@ async def cb_apt_edit_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     return ConversationHandler.END
 
 
-async def _skip_to(update, context, next_state, prompt):
-    await update.message.reply_text(prompt)
-    return next_state
-
-
-async def _skip_to_type(update, context):
-    await update.message.reply_text(
-        "Nuevo tipo o /skip:",
-        reply_markup=InlineKeyboardMarkup(
-            [[InlineKeyboardButton(t.capitalize(), callback_data=f"etipo_{t}") for t in TIPOS_CITA]]
-            + [[InlineKeyboardButton("⏭️ Skip", callback_data="etipo_skip")]]
-        ),
-    )
-    return EDIT_APT_TYPE
+async def _do_update_apt_from_query(query, context) -> int:
+    """Versión de _do_update_apt para cuando la respuesta viene de un CallbackQuery."""
+    date_str = context.user_data.get("edit_apt_date", "")
+    index    = context.user_data.get("edit_apt_index", 0)
+    user_id  = str(query.from_user.id)
+    try:
+        await api.update_appointment(
+            date_str, index,
+            time=context.user_data.get("edit_apt_time"),
+            name=context.user_data.get("edit_apt_nombre"),
+            apt_type=context.user_data.get("edit_apt_type"),
+            notes=context.user_data.get("edit_apt_notes"),
+        )
+        await query.edit_message_text(
+            f"✅ *Cita actualizada\\.*",
+            parse_mode="Markdown",
+            reply_markup=_kb_back(date_str, "citas"),
+        )
+    except ApiError:
+        await query.edit_message_text(
+            "⚠️ No pude conectar con la API\\.", parse_mode="Markdown"
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -554,22 +651,27 @@ def build_nueva_handler() -> ConversationHandler:
 
 
 def build_edit_apt_handler() -> ConversationHandler:
+    """
+    ConversationHandler para editar una cita.
+
+    Entrada: callback ae_{date_str}_{index}
+    Estados:
+        EDIT_APT_FIELD  → botones para elegir qué campo editar
+        EDIT_APT_TIME   → texto HH:MM
+        EDIT_APT_NOMBRE → texto libre
+        EDIT_APT_TYPE   → botones de tipo
+        EDIT_APT_NOTES  → texto libre
+    """
     return ConversationHandler(
         entry_points=[CallbackQueryHandler(cb_apt_edit_start, pattern=r"^ae_")],
         states={
-            EDIT_APT_TIME: [
-                CommandHandler("skip", lambda u, c: _skip_to(u, c, EDIT_APT_NOMBRE, "Nuevo nombre o /skip:")),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, cb_apt_edit_time),
+            EDIT_APT_FIELD: [
+                CallbackQueryHandler(cb_apt_edit_field_chosen, pattern=r"^aedit_"),
             ],
-            EDIT_APT_NOMBRE: [
-                CommandHandler("skip", _skip_to_type),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, cb_apt_edit_nombre),
-            ],
-            EDIT_APT_TYPE:  [CallbackQueryHandler(cb_apt_edit_type, pattern=r"^etipo_")],
-            EDIT_APT_NOTES: [
-                CommandHandler("skip", lambda u, c: cb_apt_edit_notes(u, c)),
-                MessageHandler(filters.TEXT & ~filters.COMMAND, cb_apt_edit_notes),
-            ],
+            EDIT_APT_TIME:   [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_apt_edit_time)],
+            EDIT_APT_NOMBRE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_apt_edit_nombre)],
+            EDIT_APT_TYPE:   [CallbackQueryHandler(cb_apt_edit_type, pattern=r"^etipo_")],
+            EDIT_APT_NOTES:  [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_apt_edit_notes)],
         },
         fallbacks=[CommandHandler("cancelar", _cmd_cancelar_inline)],
         name="editar_cita", persistent=False, per_message=False,
