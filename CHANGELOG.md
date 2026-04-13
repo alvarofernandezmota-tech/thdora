@@ -6,6 +6,93 @@ Formato basado en [Keep a Changelog](https://keepachangelog.com/es/1.0.0/).
 
 ---
 
+## [0.12.0] — 2026-04-13
+
+### Añadido — F12: Notificaciones proactivas (APScheduler) ✅ + F10: Docker listo
+
+#### F12 — Notificaciones proactivas
+
+**Nueva tabla DB `UserConfig`** con campos:
+
+| Campo | Tipo | Default |
+|-------|------|---------|
+| `user_id` | str PK | — |
+| `daily_summary_enabled` | bool | `true` |
+| `daily_summary_time` | str | `"08:00"` |
+| `notif_enabled` | bool | `true` |
+| `notif_offsets` | str JSON | `"[\"60\",\"30\",\"15\"]"` |
+| `evening_log_enabled` | bool | `true` |
+| `evening_log_time` | str | `"22:00"` |
+| `timezone` | str | `"Europe/Madrid"` |
+
+**Nuevos endpoints API:**
+
+| Método | Ruta | Descripción |
+|--------|------|-------------|
+| `GET` | `/user_config/{user_id}` | Leer config (crea fila por defecto si no existe) |
+| `PUT` | `/user_config/{user_id}` | Actualizar campos de config |
+
+**Nuevos ficheros:**
+
+| Fichero | Cambio |
+|---------|--------|
+| `src/db/models.py` | + modelo `UserConfig` |
+| `src/core/impl/sqlite_lifemanager.py` | + `get_user_config`, `upsert_user_config` |
+| `src/api/routers/user_config.py` | Router GET + PUT (nuevo) |
+| `src/api/main.py` | Registra `user_config` router, versión `0.12.0` |
+| `src/bot/api_client.py` | + `get_user_config`, `update_user_config` |
+| `src/bot/keyboards.py` | + `_kb_config_menu`, `_kb_notif_menu`, `_kb_notif_hora`, `_kb_notif_offsets` |
+| `src/bot/handlers/config.py` | Rediseñado: menú raíz + rama Hábitos + rama Notificaciones (estados 40–47) |
+| `src/bot/scheduler.py` | **Nuevo.** APScheduler singleton: `daily_summary`, `evening_log`, `apt_reminder_*` |
+| `src/bot/handlers/citas.py` | Al crear cita → `schedule_apt_reminders`. Al borrar → `cancel_apt_reminders`. Al editar hora → cancel + reschedule |
+| `src/bot/main.py` | v4.0: arranca `scheduler` antes del polling |
+
+**Jobs del scheduler:**
+
+| Job | Tipo | Cuándo dispara |
+|-----|------|----------------|
+| `daily_summary_{user_id}` | Cron | Hora configurable (default 08:00) |
+| `evening_log_{user_id}` | Cron | Hora configurable (default 22:00) |
+| `apt_reminder_{user_id}_{apt_id}_{min}` | One-shot | X min antes de cada cita |
+
+**Flujo `/config` rediseñado:**
+```
+/config
+ ├── 🧠 Hábitos      → nombre → tipo → unidad → botones rápidos
+ └── 🔔 Notificaciones → toggles + cambiar hora/offsets
+```
+
+---
+
+#### F10 — Docker listo para producción
+
+La infraestructura Docker ya existía. Único cambio necesario:
+
+| Fichero | Cambio |
+|---------|--------|
+| `requirements.txt` | + `APScheduler==3.10.4` (necesario para `docker build`) |
+
+**Estado Docker:**
+- `Dockerfile` — imagen única 2-stage, usuario no-root, multi-servicio
+- `docker-compose.yml` — servicios `api` + `bot`, healthcheck, `restart: always`, volumen persistente
+- `docker/entrypoint-api.sh` / `entrypoint-bot.sh` — scripts de arranque
+- `docker/.env.docker.example` — plantilla de variables
+
+**Comandos Makefile Docker:**
+```bash
+make docker-build     # construir imagen
+make docker-up        # arrancar en segundo plano
+make docker-down      # parar
+make docker-logs      # ver logs en vivo
+make docker-logs-api  # solo API
+make docker-logs-bot  # solo bot
+make docker-restart   # reiniciar
+make docker-rebuild   # rebuild completo desde cero
+make docker-db        # consola SQLite de la DB
+```
+
+---
+
 ## [0.11.0] — 2026-04-13
 
 ### Probado en vivo — F9.7: Pruebas en entorno real + fix entry points menú ✅
@@ -152,4 +239,4 @@ Paso 7 → Notas o /skip
 
 ---
 
-_Última actualización: 13 abril 2026 — 20:43 CEST_
+_Última actualización: 13 abril 2026 — 22:45 CEST_
