@@ -1,20 +1,23 @@
 # 📍 THDORA — CÓMO PROCEDER
 
-> Este fichero es tu punto de entrada cada vez que abres el proyecto.  
+> Este fichero es tu punto de entrada **cada vez que abres el proyecto**.
 > Te dice exactamente dónde estás, qué tienes que hacer ahora y en qué orden.
 >
 > **Navegación:** [README](README.md) · [ROADMAP](ROADMAP.md) · [CHANGELOG](CHANGELOG.md) · [Índice docs](docs/INDEX.md)
 
 ---
 
-## 📍 Dónde estamos ahora — v0.11.0 (12 abril 2026)
+## 📍 Dónde estamos ahora — v0.11.0 (13 abril 2026)
 
 ```
-✅ F9.6  — handlers.py monolítico → 9 módulos limpios
+✅ F9.3  — UI unificada (menú inline, navegación, cambio de vista)
+✅ F9.4  — Vista detalle de cita con click en ⏰ hora
+✅ F9.5  — UX avanzada: saludo contextual, fechas flexibles, franjas horarias
+✅ F9.6  — Refactor: handlers.py monolítico → 9 módulos limpios
 ✅ F9.7  — Docker + despliegue 24/7
-✅ Tests — 72 casos nuevos para el bot (unit + handlers)
-⚠️  PENDIENTE — prueba en vivo de F9.3 → F9.7 (nunca probado en Telegram real)
-🔒  BLOQUEADO — F9.8 Multi-usuario (no empezar hasta que el checklist esté limpio)
+✅ TEST  — Pruebas en vivo completadas (13 abril 2026) — todo funciona
+✅ FIX   — Entry points ConversationHandlers arreglados (botones menú funcionan)
+🔜 NEXT  — F10 Docker 24/7 o F11 Multi-usuario o F12 Notificaciones
 ```
 
 ---
@@ -23,9 +26,8 @@
 
 ### Requisitos previos
 - Python 3.12 instalado
-- Entorno virtual activo con `pip install -e ".[dev]"`  
-  (o simplemente `make dev`)
-- Fichero `.env` en la raíz con tu token real:
+- Entorno virtual activo: `pip install -e ".[dev]"` o simplemente `make dev`
+- Fichero `.env` en la raíz:
 
 ```bash
 # .env
@@ -37,20 +39,26 @@ THDORA_DB_PATH=data/thdora.db
 ### Pasos para arrancar
 
 ```bash
+# Matar procesos que puedan quedar de sesiones anteriores
+fuser -k 8000/tcp
+pkill -9 -f "bot.main"
+sleep 2
+
 # Terminal 1 — API
 make run-api
-# Debería responder en http://localhost:8000
-# Verifica: http://localhost:8000/health  → {"status": "ok"}
+# Verifica: http://localhost:8000/health → {"status": "ok"}
 
 # Terminal 2 — Bot
-make run-bot
-# Debería mostrar: "Bot arrancado. Esperando mensajes..."
+python3 -m src.bot.main
+# Debería mostrar: "🤖 THDORA bot v3.2 arrancando (polling)…"
 ```
+
+> ⚠️ Si ves `Conflict: terminated by other getUpdates` es porque hay **otra instancia del bot corriendo**.
+> Solución: `pkill -9 -f "bot.main"` y volver a arrancar.
 
 ### Arranque con Docker (alternativa)
 
 ```bash
-# Primera vez
 cp docker/.env.docker.example .env
 # edita .env y pon tu TELEGRAM_BOT_TOKEN real
 
@@ -62,165 +70,123 @@ make docker-down     # parar todo
 
 ---
 
-## 🧪 Pruebas automáticas (sin Telegram)
+## 🧪 Pruebas automáticas
 
 ```bash
-# Todos los tests
-make test
-
-# Solo tests del bot (los nuevos de esta sesión)
-make test-bot
-
-# Con cobertura
-make test-cov
-# Abre htmlcov/index.html para ver el informe
-```
-
-> Los tests del bot usan mocks — no necesitas la API ni el bot arrancados.
-
----
-
-## ✅ Checklist de prueba en vivo
-
-> Ejecuta esto con la API y el bot arrancados. Marca cada casilla en tu Telegram.
-> Si algo falla, anota el bug en `docs/diarios/FECHA.md` y corriges antes de seguir.
-
-### 🟢 Bloque 1 — Menú principal
-- [ ] `/start` → aparece menú con botones inline
-- [ ] El saludo cambia según la hora (🌅 mañana / 🌆 tarde / 🌙 noche)
-- [ ] Botón `📅 Citas de hoy` → abre vista citas
-- [ ] Botón `💪 Hábitos de hoy` → abre vista hábitos
-- [ ] Botón `➕ Nueva cita` desde menú → arranca flujo /nueva
-- [ ] `/cancelar` en mitad de cualquier flujo → cancela limpiamente
-
-### 🟢 Bloque 2 — Citas: navegación
-- [ ] `/citas` → muestra citas de hoy
-- [ ] Botón `◀️` → día anterior
-- [ ] Botón `▶️` → día siguiente
-- [ ] Botón central (fecha) → muestra la fecha real
-- [ ] Botón `🏠 Menú` → vuelve al menú principal
-- [ ] Botón `📋 Semana` → abre vista semanal
-- [ ] Botón `💤 Hábitos` → cambia a vista hábitos del mismo día
-
-### 🟢 Bloque 3 — /nueva con franjas horarias
-- [ ] `➕ Nueva` desde vista citas → pide fecha
-- [ ] Fecha `hoy` → avanza a franjas
-- [ ] Fecha `mañana` → avanza a franjas
-- [ ] Fecha inválida (ej. `zzz`) → pide de nuevo (no cuelga)
-- [ ] Botón `🌅 Mañana` → muestra botones 06:00–13:00
-- [ ] Botón `🌆 Tarde` → muestra botones 14:00–21:00
-- [ ] Botón `🌙 Noche` → muestra botones 22:00–05:00
-- [ ] Botón `✏️ Exacta` en franjas → pide HH:MM directamente
-- [ ] Seleccionar hora en punto (ej. 10:00) → muestra cuartos
-- [ ] Botón `🕐 Ver cuartos` → muestra cuartos
-- [ ] Seleccionar cuarto (ej. 10:30) → pide nombre
-- [ ] Botón `✏️ Exacta` en hora/cuarto → pide HH:MM
-- [ ] HH:MM válida (10:30) → pide nombre
-- [ ] HH:MM inválida (99:99) → pide de nuevo
-- [ ] Nombre → tipo → notas (o `/skip`) → cita guardada
-- [ ] Conflicto de hora → aviso ⚠️ + vuelve a franjas (no a texto)
-- [ ] Cita guardada aparece en `/citas` del día correspondiente
-
-### 🟢 Bloque 4 — Citas: detalle y acciones
-- [ ] Click en ⏰ hora de una cita → abre vista detalle
-- [ ] Vista detalle muestra: fecha, hora, nombre, tipo, notas
-- [ ] Botón `Editar` → flujo de edición funciona
-- [ ] Botón `Borrar` → pide confirmación → se borra → desaparece de la lista
-- [ ] Botón `← Volver` → regresa a la vista del día
-
-### 🟢 Bloque 5 — Hábitos
-- [ ] `/habitos` → muestra hábitos de hoy
-- [ ] Navegación ◀️▶️ igual que en citas
-- [ ] Botón `📊 Citas` → cambia a vista citas del mismo día
-- [ ] `➕ Nuevo` desde vista hábitos → pide nombre libre
-- [ ] `/habito` → nombre libre → valor → guardado en DB
-- [ ] Valor `+N` sobre hábito existente → acumula (ej. 1L + 0.5L = 1.5L)
-- [ ] Valor sin `+` sobre existente → conflicto: Sobreescribir / Sumar / Cancelar
-- [ ] Editar nombre del hábito → se actualiza
-- [ ] Editar valor del hábito → se actualiza
-- [ ] Borrar hábito → desaparece de la lista
-- [ ] Botón `➕` en hábito existente (sumar rápido) → pide valor
-
-### 🟢 Bloque 6 — Semana y Config
-- [ ] `/semana` → muestra semana actual con hábitos/citas por día
-- [ ] Nav ◀️▶️ entre semanas
-- [ ] Click en un día de la semana → abre vista citas de ese día
-- [ ] `/config` → muestra configuración de hábitos
-- [ ] Añadir tipo con botones rápidos → se guarda
-- [ ] `/resumen` → muestra citas + hábitos del día
-
-### 🟡 Bloque 7 — Docker (si tienes Docker instalado)
-- [ ] `make docker-build` → construye sin errores
-- [ ] `make docker-up` → api + bot arrancan
-- [ ] `make docker-logs` → se ven logs de ambos
-- [ ] Bot funciona igual que en local
-- [ ] `make docker-down` + `make docker-up` → datos persisten (SQLite no se borra)
-- [ ] `make docker-db` → abre consola SQLite
-
----
-
-## 🐛 Si algo falla — cómo documentarlo
-
-```bash
-# Crea el diario del día y anota los bugs
-# Formato: docs/diarios/YYYY-MM-DD.md
-
-# Ejemplo de entrada de bug:
-## 🐛 Bugs encontrados
-- [ ] BUG: al pulsar ◀️ en /citas del primer día disponible → mensaje de error
-      Archivo: src/bot/handlers/citas.py  Línea aprox: cb_citas_nav
-      Reproducción: /citas → ◀️ ◀️ ◀️ hasta fecha muy antigua
+make test          # todos los tests
+make test-bot      # solo tests del bot (sin API ni Telegram real)
+make test-cov      # con cobertura → htmlcov/index.html
 ```
 
 ---
 
-## 🔜 Una vez el checklist esté limpio — F9.8 Multi-usuario
+## ✅ Estado de pruebas en vivo (13 abril 2026)
 
-Esto es lo que implica F9.8 para no olvidar nada:
+Todas las funciones probadas en Telegram real. Resultados:
 
-### Cambios en SQLite (`src/db/models.py`)
+| Función | Estado | Notas |
+|---------|--------|-------|
+| `/start` + menú inline | ✅ | |
+| ➕ Nueva cita desde botón menú | ✅ | Fix entry point aplicado |
+| Flujo franjas horarias `/nueva` | ✅ | |
+| Crear cita → API `POST /appointments/` | ✅ | 201 Created |
+| Borrar cita → API `DELETE /appointments/` | ✅ | 204 No Content |
+| Editar cita | ✅ | |
+| Navegación ◀️▶️ citas/hábitos | ✅ | |
+| ➕ Nuevo hábito desde botón menú | ✅ | Fix entry point aplicado |
+| Registrar hábito → API `POST /habits/` | ✅ | 201 Created |
+| Editar/sumar hábito | ✅ | |
+| `/semana` | ✅ | |
+
+---
+
+## 💡 Cómo trabajamos en este proyecto
+
+> Contexto para retomar el trabajo rápidamente en cualquier sesión.
+
+### Flujo de sesión típico
+1. **Leer este fichero** — saber dónde estamos
+2. **Arrancar API + Bot** — comandos de arriba
+3. **Trabajar en la feature** — editar código, probar en Telegram
+4. **Pushear** — commits semánticos, actualizar ROADMAP + CHANGELOG
+5. **Actualizar este fichero** — reflejar el nuevo estado
+
+### Convenciones de código
+- **Handlers**: cada dominio tiene su módulo (`citas.py`, `habitos.py`, etc.)
+- **Entry points**: los `ConversationHandler` se construyen con `build_*_handler()` y se registran en `main.py`
+- **Callbacks del menú**: los botones `quick_nueva_*` y `quick_habito_*` son capturados como entry points de sus respectivos `ConversationHandler`, NO por un dispatcher central
+- **Keyboards**: todos en `keyboards.py`, nunca inline en los handlers
+- **API calls**: siempre a través de `ThdoraApiClient` en `api_client.py`
+- **Fechas**: siempre pasar por `_parse_date_flex` o `_parse_date_arg` de `utils/dates.py`
+
+### Estructura de estados ConversationHandler
+```
+/nueva (citas):
+  NUEVA_DATE → NUEVA_FRANJA → NUEVA_HORA_PUNTO → NUEVA_HORA_CUARTO
+  → NUEVA_TIME (si exacta) → NUEVA_CONFLICT (si hay conflicto)
+  → NUEVA_NOMBRE → NUEVA_TYPE → NUEVA_NOTES → END
+
+/habito (hábitos):
+  HABITO_NOMBRE → HABITO_VALUE → HABITO_CONFLICT (si existe) → END
+
+Editar cita:
+  EDIT_APT_TIME → EDIT_APT_NOMBRE → EDIT_APT_TYPE → EDIT_APT_NOTES → END
+
+Editar hábito:
+  EDIT_HAB_NOMBRE → EDIT_HAB_VALUE → END
+
+Config:
+  CFG_NOMBRE → CFG_TYPE → CFG_UNIT → CFG_QUICK → END
+```
+
+---
+
+## 🔜 Siguiente — opciones para v0.12.x
+
+Cualquiera de estas tres se puede hacer en la próxima sesión:
+
+### Opción A — F10 Docker + despliegue 24/7
+> El bot corre siempre en un servidor, sin intervención manual.
+- `Dockerfile` + `docker-compose.yml` multi-servicio
+- Health checks y reinicio automático
+- Probar en VPS (Railway / DigitalOcean / Raspberry Pi)
+
+### Opción B — F12 Notificaciones proactivas
+> El bot avisa sin que el usuario pregunte.
+- APScheduler integrado en `src/bot/scheduler.py`
+- Morning check-in (08:00): citas del día
+- Alerta −30 min antes de una cita
+- Evening log (22:00): registra hábitos del día
+
+### Opción C — F13 IA conversacional
+> Hablar con el bot en lenguaje natural.
+- Provider abstracto (Groq / OpenAI / Ollama)
+- `intent_parser.py` — extrae intención + entidades
+- `/ia` modo conversación libre
+- Soporte voz con Whisper
+
+---
+
+## 📄 F11 Multi-usuario (cuando toque)
+
+### Cambios en SQLite
 ```python
-# Añadir en Appointment y Habit:
+# src/db/models.py — añadir en Appointment y Habit:
 user_id = Column(String, nullable=False, index=True)
 ```
 
-### Cambios en la API (`src/api/routers/*.py`)
+### Cambios en la API
 ```python
-# Todos los endpoints filtran por user_id:
-GET /appointments/{date}?user_id=123
-# O mejor: header X-User-Id: 123
+# Header X-User-Id en todos los endpoints
+# Todos los queries filtran por user_id
 ```
 
-### Cambios en el bot (`src/bot/api_client.py`)
+### Cambios en el bot
 ```python
-# ThdoraApiClient pasa user_id en cada llamada:
+# api_client.py pasa user_id en cada llamada:
 # update.effective_user.id  → Telegram siempre lo tiene
 ```
 
-### Migración de datos existentes
-```python
-# Script de migración para datos ya en la DB:
-# ALTER TABLE appointments ADD COLUMN user_id TEXT NOT NULL DEFAULT 'default'
-```
-
-> ⚠️ **No empezar F9.8 hasta que el checklist de prueba en vivo esté 100% limpio.**
-
 ---
 
-## 🗺️ Roadmap resumido a partir de aquí
-
-```
-AHORA       Prueba en vivo — checklist arriba
-F9.8        Multi-usuario (user_id en todo)
-F10         Módulo Tracking personal (sueño, estado, sustancias)
-F11         Notificaciones proactivas (APScheduler)
-F12         IA conversacional (Groq/OpenAI/Whisper)
-F13         Gamificación RPG (XP, niveles, rachas)
-F14         Telegram Mini App
-F15         PWA
-F16         React Native
-```
-
----
-
-_Última actualización: 12 abril 2026 — 21:22 CEST_
+_Última actualización: 13 abril 2026 — 20:45 CEST_

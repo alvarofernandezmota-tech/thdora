@@ -19,9 +19,25 @@
 
 ## ¿Qué es THDORA?
 
-THDORA es un ecosistema de **gestión personal** que vive en Telegram. Registra citas, hábitos diarios y genera resúmenes — todo desde el móvil, sin abrir ninguna app extra.
+THDORA es un **ecosistema de gestión personal** que vive en Telegram. Registra citas, hábitos diarios y genera resúmenes — todo desde el móvil, sin abrir ninguna app extra.
 
-Los datos se guardan en **SQLite local** (persisten entre reinicios) y se exponen a través de una **API REST** con FastAPI. El bot corre en Docker con reinicio automático. En el futuro próximo: multi-usuario, tracking personal, IA y gamificación RPG.
+Los datos se guardan en **SQLite local** (persisten entre reinicios) y se exponen a través de una **API REST con FastAPI**. El bot corre en Docker con reinicio automático. En el futuro próximo: multi-usuario, tracking personal, IA y gamificación RPG.
+
+### 🧠 Por qué es un buen proyecto de portfolio
+
+THDORA no es un tutorial ni un CRUD simple. Es un proyecto **end-to-end real** que demuestra:
+
+| Habilidad | Dónde se ve |
+|-----------|-------------|
+| **Arquitectura limpia** | Capa core → API → Bot desacopladas. `AbstractLifeManager` con múltiples implementaciones |
+| **API REST profesional** | FastAPI + SQLAlchemy ORM, 14 endpoints, modelos Pydantic, inyección de dependencias |
+| **Bot conversacional** | `python-telegram-bot` v22, 5 `ConversationHandler` anidados, máquina de estados |
+| **Persistencia real** | SQLite con migraciones, datos que sobreviven a reinicios |
+| **UX cuidada** | Franjas horarias, botones inline, detección de conflictos, acumulación de valores |
+| **Docker** | `Dockerfile` + `docker-compose.yml` multi-servicio con health checks |
+| **Tests** | Unit + handlers con mocks, cobertura medida |
+| **Documentación** | README, ROADMAP, CHANGELOG, ADRs, diarios de sesión |
+| **Git disciplinado** | Commits semánticos, historial limpio, versiones etiquetadas |
 
 ---
 
@@ -125,8 +141,8 @@ thdora/
 │   ├── api/              ← FastAPI: routers, modelos, deps
 │   │   └── routers/      ← appointments.py, habits.py, summary.py
 │   ├── bot/              ← Bot Telegram
-│   │   ├── main.py       ← entrypoint
-│   │   ├── api_client.py ← cliente HTTP asíncrono
+│   │   ├── main.py       ← entrypoint + registro de handlers
+│   │   ├── api_client.py ← cliente HTTP asíncrono (httpx)
 │   │   ├── keyboards.py  ← todos los teclados inline
 │   │   ├── utils/        ← dates.py, accum.py
 │   │   └── handlers/     ← menu, citas, habitos, semana, config, common
@@ -138,10 +154,10 @@ thdora/
 │   └── bot/              ← test_handlers_citas, _habitos, _menu
 ├── docker/               ← entrypoints + .env.docker.example
 ├── data/                 ← thdora.db (SQLite, no versionado)
-├── docs/                 ← diarios, architecture, INDEX.md
+├── docs/                 ← diarios, architecture, ADRs, INDEX.md
 ├── Dockerfile
 ├── docker-compose.yml
-├── COMO_PROCEDER.md      ← ⭐ empieza aquí
+├── COMO_PROCEDER.md      ← ⭐ empieza aquí en cada sesión
 ├── ROADMAP.md
 ├── CHANGELOG.md
 ├── pyproject.toml
@@ -160,26 +176,27 @@ make test-cov      # con cobertura → htmlcov/index.html
 
 ---
 
-## 🗣️ Hoja de ruta
+## 🗺️ Hoja de ruta
 
 | Fase | Estado | Descripción |
 |------|--------|-------------|
-| F1–F9.7 | ✅ | Base, API REST, SQLite, Bot completo, Docker |
-| F9.8 | 🔒 | **Multi-usuario** — bloqueado hasta prueba en vivo |
-| F10 | ⏳ | Módulo Tracking personal (sueño, estado, estudio) |
-| F11 | ⏳ | Notificaciones proactivas (APScheduler) |
-| F12 | ⏳ | IA conversacional (Groq / Whisper) |
-| F13 | ⏳ | Gamificación RPG (XP, niveles, rachas) |
-| F14–F16 | ⏳ | Telegram Mini App → PWA → React Native |
+| F1–F9.7 | ✅ | Base, API REST, SQLite, Bot completo con franjas, Docker, Pruebas en vivo |
+| F10 | 🔜 | **Docker + despliegue 24/7** — bot siempre encendido en servidor |
+| F11 | 🔜 | **Multi-usuario** — `user_id` en toda la pila |
+| F12 | 🔜 | **Notificaciones proactivas** (APScheduler) |
+| F13 | 🔜 | **IA conversacional** (Groq / Whisper / OpenAI) |
+| F14 | 🔜 | **Tracking personal** (sueño, estado, estudio) |
+| F15 | 🔜 | Gamificación RPG (XP, niveles, rachas) |
+| F16–F18 | 🔜 | Telegram Mini App → PWA → React Native |
 
 ---
 
 ## 📚 Documentación
 
 - [📍 Cómo proceder](COMO_PROCEDER.md) — arranque + checklist + siguiente paso
-- [🗺️ ROADMAP](ROADMAP.md) — visión completa F1→F16
+- [🗺️ ROADMAP](ROADMAP.md) — visión completa F1→F18
 - [📝 CHANGELOG](CHANGELOG.md) — historial de versiones
-- [🗂️ Índice docs](docs/INDEX.md) — diarios, arquitectura, módulos
+- [🗂️ Índice docs](docs/INDEX.md) — diarios, arquitectura, módulos, ADRs
 
 ---
 
