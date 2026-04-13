@@ -1,5 +1,5 @@
 """
-Entrypoint del bot Telegram de THDORA — v3.2
+Entrypoint del bot Telegram de THDORA — v4.0
 
 Variables de entorno::
     TELEGRAM_BOT_TOKEN   → token de @BotFather (obligatorio)
@@ -11,6 +11,11 @@ Orden de registro:
     3. MessageHandler texto libre (acumulación)
     4. CommandHandlers simples
     5. Error handler
+
+Scheduler (F12):
+    - Se arranca justo antes del polling
+    - Los jobs diarios se programan al hacer /start si el usuario tiene config
+    - Los jobs one-shot de cita se gestionan en handlers/citas.py
 """
 
 import asyncio
@@ -22,6 +27,7 @@ from dotenv import load_dotenv
 from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
 
 from src.bot.api_client import ThdoraApiClient
+from src.bot.scheduler import get_scheduler, start_scheduler
 from src.bot.handlers import (
     # Factories
     build_nueva_handler,
@@ -67,6 +73,7 @@ logging.basicConfig(
 )
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram.ext").setLevel(logging.WARNING)
+logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
@@ -91,16 +98,15 @@ def _load_token() -> str:
 def build_app(token: str):
     app = ApplicationBuilder().token(token).build()
 
-    # ── 1. ConversationHandlers ───────────────────────────────────────────────
+    # ── 1. ConversationHandlers ───────────────────────────────────────────
     app.add_handler(build_nueva_handler())     # /nueva + quick_nueva
     app.add_handler(build_habito_handler())    # /habito + quick_habito
     app.add_handler(build_edit_apt_handler())  # ^ae_
     app.add_handler(build_edit_hab_handler())  # ^he_
-    app.add_handler(build_config_handler())    # /config
+    app.add_handler(build_config_handler())    # /config + quick_config
 
-    # ── 2. CallbackQueryHandlers globales ────────────────────────────────
+    # ── 2. CallbackQueryHandlers globales ──────────────────────────────
     app.add_handler(CallbackQueryHandler(cb_menu_home,          pattern=r"^menu_home$"))
-    app.add_handler(CallbackQueryHandler(cb_quick_config,       pattern=r"^quick_config$"))
     app.add_handler(CallbackQueryHandler(cb_citas_nav,          pattern=r"^citas_nav_"))
     app.add_handler(CallbackQueryHandler(cb_habitos_nav,        pattern=r"^habitos_nav_"))
     app.add_handler(CallbackQueryHandler(cb_semana_nav,         pattern=r"^semana_nav_"))
@@ -112,10 +118,10 @@ def build_app(token: str):
     app.add_handler(CallbackQueryHandler(cb_hab_add,            pattern=r"^ha_"))
     app.add_handler(CallbackQueryHandler(cb_cancel_action,      pattern=r"^cancel_action$"))
 
-    # ── 3. Texto libre (acumulación fuera de flujos) ────────────────────
+    # ── 3. Texto libre (acumulación fuera de flujos) ──────────────────
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _route_free_text))
 
-    # ── 4. Comandos ─────────────────────────────────────────────────────
+    # ── 4. Comandos ───────────────────────────────────────────────
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("citas",    cmd_citas))
     app.add_handler(CommandHandler("habitos",  cmd_habitos))
@@ -123,7 +129,7 @@ def build_app(token: str):
     app.add_handler(CommandHandler("resumen",  cmd_resumen))
     app.add_handler(CommandHandler("cancelar", cmd_cancelar))
 
-    # ── 5. Error handler ─────────────────────────────────────────────────
+    # ── 5. Error handler ────────────────────────────────────────────
     app.add_error_handler(error_handler)
 
     return app
@@ -137,8 +143,14 @@ async def _route_free_text(update, context) -> None:
 def main() -> None:
     token = _load_token()
     asyncio.run(_check_api())
-    app = build_app(token)
-    logger.info("🤖 THDORA bot v3.2 arrancando (polling)…")
+    app   = build_app(token)
+
+    # ── Arrancar scheduler F12 ────────────────────────────────────────
+    scheduler = get_scheduler()
+    scheduler.start()
+    logger.info("⏰ Scheduler F12 iniciado")
+
+    logger.info("🤖 THDORA bot v4.0 arrancando (polling)…")
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=["message", "callback_query"],

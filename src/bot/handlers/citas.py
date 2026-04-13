@@ -11,6 +11,11 @@ Flujo /nueva con franjas:
     NUEVA_NOMBRE     → nombre libre
     NUEVA_TYPE       → tipo [médica / personal / trabajo / otra]
     NUEVA_NOTES      → notas o /skip
+
+Scheduler (F12):
+    Al crear una cita → schedule_apt_reminders()
+    Al borrar una cita → cancel_apt_reminders()
+    Al editar la hora de una cita → cancel + re-schedule
 """
 
 import re
@@ -35,13 +40,14 @@ from src.bot.keyboards import (
     TIPOS_CITA,
 )
 from src.bot.utils.dates import _parse_date_flex, _parse_date_arg, _date_label, _date_short
+from src.bot.scheduler import schedule_apt_reminders, cancel_apt_reminders
 
 logger = logging.getLogger(__name__)
 api    = ThdoraApiClient()
 
 _RE_TIME = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
 
-# ── Estados ConversationHandler /nueva ────────────────────────────────
+# ── Estados ConversationHandler /nueva ───────────────────────────────
 (
     NUEVA_DATE,
     NUEVA_FRANJA,
@@ -54,13 +60,13 @@ _RE_TIME = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
     NUEVA_NOTES,
 ) = range(9)
 
-# ── Estados editar cita ───────────────────────────────────────────────
+# ── Estados editar cita ───────────────────────────────────────────
 EDIT_APT_TIME, EDIT_APT_NOMBRE, EDIT_APT_TYPE, EDIT_APT_NOTES = range(20, 24)
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════
 # VISTAS
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════
 
 async def cmd_citas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     from src.bot.utils.accum import _clean_acum_context
@@ -148,9 +154,9 @@ async def cb_cita_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     )
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════
 # BORRAR CITA
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════
 
 async def cb_apt_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -163,8 +169,13 @@ async def cb_apt_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     _, date_str, idx_str = query.data.split("_", 2)
+    user_id = str(query.from_user.id)
+    apt_id  = int(idx_str)
     try:
-        ok  = await api.delete_appointment(date_str, int(idx_str))
+        ok  = await api.delete_appointment(date_str, apt_id)
+        if ok:
+            # Cancelar jobs pendientes de esta cita
+            cancel_apt_reminders(user_id, apt_id)
         txt = "🗑️ Cita eliminada\\." if ok else "⚠️ Cita no encontrada \\(ya borrada\\)\\."
         await query.edit_message_text(
             txt, parse_mode="Markdown",
@@ -174,9 +185,9 @@ async def cb_apt_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TY
         await query.edit_message_text("⚠️ Error al borrar la cita\\.", parse_mode="Markdown")
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════
 # /nueva — ConversationHandler con FRANJAS HORARIAS
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════
 
 async def nueva_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
@@ -188,7 +199,6 @@ async def nueva_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 
 async def nueva_start_desde_boton(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Entry point desde botones ➕ Nueva del menú o vistas de día."""
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
@@ -229,14 +239,12 @@ async def nueva_recv_franja(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     query = update.callback_query
     await query.answer()
     data = query.data
-
     if data == "franja_exacta":
         await query.edit_message_text(
             "✏️ *Escribe la hora exacta* \\(HH:MM, 24h\\):",
             parse_mode="Markdown",
         )
         return NUEVA_TIME
-
     franja_key = data.replace("franja_", "")
     context.user_data["nueva_franja"] = franja_key
     franja_labels = {"manana": "🌅 Mañana", "tarde": "🌆 Tarde", "noche": "🌙 Noche"}
@@ -254,14 +262,11 @@ async def nueva_recv_hora_punto(update: Update, context: ContextTypes.DEFAULT_TY
     query = update.callback_query
     await query.answer()
     data = query.data
-
     if data == "hora_exacta":
         await query.edit_message_text(
-            "✏️ *Escribe la hora exacta* \\(HH:MM, 24h\\):",
-            parse_mode="Markdown",
+            "✏️ *Escribe la hora exacta* \\(HH:MM, 24h\\):", parse_mode="Markdown"
         )
         return NUEVA_TIME
-
     if data == "hora_ver_cuartos":
         franja = context.user_data.get("nueva_franja", "manana")
         hora_inicio = {"manana": 6, "tarde": 14, "noche": 22}[franja]
@@ -272,12 +277,10 @@ async def nueva_recv_hora_punto(update: Update, context: ContextTypes.DEFAULT_TY
             reply_markup=_kb_cuartos(hora_inicio),
         )
         return NUEVA_HORA_CUARTO
-
     hora = int(data.replace("hora_punto_", ""))
     context.user_data["nueva_hora_temp"] = hora
     await query.edit_message_text(
-        f"⏰ Hora: *{hora:02d}:00* seleccionada\n\n"
-        f"¿Quieres afinar los cuartos o confirmar?",
+        f"⏰ Hora: *{hora:02d}:00* seleccionada\n\n¿Quieres afinar los cuartos o confirmar?",
         parse_mode="Markdown",
         reply_markup=_kb_cuartos(hora),
     )
@@ -288,14 +291,11 @@ async def nueva_recv_hora_cuarto(update: Update, context: ContextTypes.DEFAULT_T
     query = update.callback_query
     await query.answer()
     data = query.data
-
     if data == "hora_exacta":
         await query.edit_message_text(
-            "✏️ *Escribe la hora exacta* \\(HH:MM, 24h\\):",
-            parse_mode="Markdown",
+            "✏️ *Escribe la hora exacta* \\(HH:MM, 24h\\):", parse_mode="Markdown"
         )
         return NUEVA_TIME
-
     time_str = data.replace("hora_cuarto_", "")
     return await _after_time_selected(query, context, time_str)
 
@@ -329,10 +329,7 @@ async def _after_time_selected(obj, context, time_str: str, is_message: bool = F
             return NUEVA_CONFLICT
     except Exception:
         pass
-    txt = (
-        f"✅ Hora: *{time_str}*\n\n"
-        f"📝 *Paso 3/5* — ¿Cómo se llama la cita?"
-    )
+    txt = f"✅ Hora: *{time_str}*\n\n📝 *Paso 3/5* — ¿Cómo se llama la cita?"
     if is_message:
         await obj.message.reply_text(txt, parse_mode="Markdown")
     else:
@@ -351,9 +348,7 @@ async def nueva_conflict_response(update: Update, context: ContextTypes.DEFAULT_
         )
         return NUEVA_NOMBRE
     await query.edit_message_text(
-        "🕐 *Elige de nuevo la franja:*",
-        parse_mode="Markdown",
-        reply_markup=_kb_franjas(),
+        "🕐 *Elige de nuevo la franja:*", parse_mode="Markdown", reply_markup=_kb_franjas()
     )
     return NUEVA_FRANJA
 
@@ -373,7 +368,7 @@ async def nueva_recv_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def nueva_recv_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query    = update.callback_query
+    query = update.callback_query
     await query.answer()
     apt_type = query.data.replace("tipo_", "")
     context.user_data["nueva_type"] = apt_type
@@ -398,8 +393,14 @@ async def _save_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     nm = context.user_data.get("nueva_nombre", "")
     tp = context.user_data.get("nueva_type", "otra")
     try:
-        result = await api.create_appointment(d, t, nm, tp, notes)
-        idx    = result.get("index", "?")
+        result  = await api.create_appointment(d, t, nm, tp, notes)
+        user_id = str(update.effective_user.id)
+        # Programar avisos de esta cita según config del usuario
+        try:
+            cfg = await api.get_user_config(user_id)
+            schedule_apt_reminders(update.get_bot(), user_id, result, cfg)
+        except Exception as sched_err:
+            logger.warning("No se pudo programar reminder: %s", sched_err)
         await update.message.reply_text(
             f"✅ *Cita creada*\n\n"
             f"  📅 {d}  🕰 {t}\n"
@@ -417,9 +418,9 @@ async def _save_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE, 
     return ConversationHandler.END
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════
 # EDITAR CITA
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════
 
 async def cb_apt_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     query = update.callback_query
@@ -476,14 +477,23 @@ async def cb_apt_edit_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     notes    = text if text.lower() != "/skip" else None
     date_str = context.user_data.get("edit_apt_date", "")
     index    = context.user_data.get("edit_apt_index", 0)
+    user_id  = str(update.effective_user.id)
     try:
-        await api.update_appointment(
+        result = await api.update_appointment(
             date_str, index,
             time=context.user_data.get("edit_apt_time"),
             name=context.user_data.get("edit_apt_nombre"),
             apt_type=context.user_data.get("edit_apt_type"),
             notes=notes,
         )
+        # Reprogramar avisos si la hora cambió
+        if context.user_data.get("edit_apt_time") and result:
+            try:
+                cancel_apt_reminders(user_id, index)
+                cfg = await api.get_user_config(user_id)
+                schedule_apt_reminders(update.get_bot(), user_id, result, cfg)
+            except Exception as sched_err:
+                logger.warning("No se pudo reprogramar reminder: %s", sched_err)
         await update.message.reply_text(
             f"✅ *Cita {index} actualizada\\.*",
             parse_mode="Markdown",
@@ -514,9 +524,9 @@ async def _skip_to_type(update, context):
     return EDIT_APT_TYPE
 
 
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════
 # FACTORIES
-# ════════════════════════════════════════════════════════════════════════
+# ═══════════════════════════════════════════════════════════════════════
 
 def build_nueva_handler() -> ConversationHandler:
     return ConversationHandler(
