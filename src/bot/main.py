@@ -22,7 +22,8 @@ Persistencia (PicklePersistence):
     - Archivo: data/bot_persistence.pkl (excluido en .gitignore)
     - Persiste: user_data (nlp_history, acum_hab_nombre, preferencias)
     - Efecto: el contexto NLP y los flujos activos sobreviven reinicios del bot
-    - store_bot_data / store_chat_data = False para no persistir datos globales
+    - NOTA: store_bot_data / store_chat_data no existen en PTB v20 — la
+      persistencia selectiva se controla con update_interval únicamente.
 
 Scheduler (F12):
     - Se arranca en post_init (dentro del event loop de PTB, evita RuntimeError)
@@ -124,14 +125,9 @@ def _load_token() -> str:
 
 def build_app(token: str):
     # PicklePersistence: persiste user_data entre reinicios del proceso.
-    # Solo user_data es necesario (nlp_history, acum_hab_nombre).
-    # bot_data y chat_data se excluyen para no aumentar el tamaño del pkl.
+    # PTB v20 no acepta store_bot_data / store_chat_data — se usa solo filepath.
     os.makedirs("data", exist_ok=True)
-    persistence = PicklePersistence(
-        filepath=_PERSISTENCE_PATH,
-        store_bot_data=False,
-        store_chat_data=False,
-    )
+    persistence = PicklePersistence(filepath=_PERSISTENCE_PATH)
 
     app = (
         ApplicationBuilder()
@@ -141,8 +137,6 @@ def build_app(token: str):
     )
 
     # ── 1. ConversationHandlers ───────────────────────────────────────────
-    # IMPORTANTE: quick_config es entry_point de build_config_handler.
-    # NO registrar cb_quick_config como handler global o habrá conflicto.
     app.add_handler(build_nueva_handler())     # /nueva + quick_nueva_*
     app.add_handler(build_habito_handler())    # /habito + quick_habito_*
     app.add_handler(build_edit_apt_handler())  # ^ae_
@@ -198,12 +192,6 @@ def main() -> None:
     app = build_app(token)
 
     async def _post_init(application) -> None:
-        """
-        Se ejecuta dentro del event loop de PTB — único lugar seguro
-        para arrancar AsyncIOScheduler sin RuntimeError.
-        No programamos jobs aquí porque no tenemos user_id ni bot listo;
-        los jobs diarios se programan en cmd_start por usuario.
-        """
         scheduler = get_scheduler()
         if not scheduler.running:
             scheduler.start()
