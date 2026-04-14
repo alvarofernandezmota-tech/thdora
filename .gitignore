@@ -14,13 +14,11 @@ build/
 venv/
 env/
 
-# Datos personales (no versionar)
+# Datos personales — NUNCA versionar
 datos/
 !datos/.gitkeep
-
-# Persistencia bot (PicklePersistence — contiene user_data con historial NLP)
-# Se genera automáticamente en data/ al arrancar el bot
-data/bot_persistence.pkl
+data/
+!data/.gitkeep
 
 # Logs
 logs/
@@ -43,7 +41,7 @@ htmlcov/
 .DS_Store
 Thumbs.db
 
-# Variables de entorno (NUNCA versionar tokens)
+# Variables de entorno — NUNCA versionar tokens ni API keys
 .env
 .env.local
 .env.production
