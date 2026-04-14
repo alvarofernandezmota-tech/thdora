@@ -25,6 +25,7 @@ Nota /skip:
     Se acepta '/skip' (con barra) y 'skip' (sin barra) en CFG_UNIT y CFG_QUICK.
 """
 
+import asyncio
 import logging
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -97,7 +98,9 @@ async def cfg_menu_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 async def _show_hab_configs(query) -> int:
     """Muestra la lista de hábitos configurados con botón borrar por cada uno."""
     try:
-        configs = await api.get_all_habit_configs()
+        configs = await asyncio.wait_for(api.get_all_habit_configs(), timeout=5.0)
+    except asyncio.TimeoutError:
+        configs = []
     except Exception:
         configs = []
     lines, buttons = [], []
