@@ -106,6 +106,14 @@ async def _fetch_api_context(today: str, tomorrow: str) -> dict:
     habitos    = habitos    or {}
     semana_raw = semana_raw or {}
 
+    # FIX Bug1: inyectar campo date en cada cita de semana_raw
+    # La API no devuelve date dentro de cada cita, solo como clave del dict.
+    # Sin este fix, build_todas_citas y _build_borrar_cita_system usaban
+    # today como fallback para todas las citas futuras, impidiendo borrarlas.
+    for day_str, day_citas in semana_raw.items():
+        for c in day_citas:
+            c.setdefault("date", day_str)
+
     semana_lines = []
     for day_str in sorted(semana_raw.keys()):
         if day_str == today:
@@ -124,7 +132,7 @@ async def _fetch_api_context(today: str, tomorrow: str) -> dict:
         "citas_manana": citas_man,
         "habitos":      habitos,
         "citas_semana": citas_semana,
-        "semana_raw":   semana_raw,   # ← nuevo: para desambiguación en groq_router
+        "semana_raw":   semana_raw,   # ← para desambiguación en groq_router
     }
 
 
@@ -477,8 +485,7 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 )
             else:
                 await update.message.reply_text(
-                    f"⚠️ No encontré el hábito *{borrar_hab_name}* en {borrar_hab_date}. "
-                    f"Usa /habitos para verlos.",
+                    f"⚠️ No encontré el hábito *{borrar_hab_name}* en {borrar_hab_date}.",
                     parse_mode="Markdown", reply_markup=_kb_start(),
                 )
         except Exception as e:
