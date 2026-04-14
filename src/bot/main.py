@@ -1,5 +1,5 @@
 """
-Entrypoint del bot Telegram de THDORA — v4.0
+Entrypoint del bot Telegram de THDORA — v4.1
 
 Variables de entorno::
     TELEGRAM_BOT_TOKEN   → token de @BotFather (obligatorio)
@@ -18,6 +18,12 @@ Orden de registro de handlers:
     4. CommandHandlers simples
     5. Error handler
 
+Persistencia (PicklePersistence):
+    - Archivo: data/bot_persistence.pkl (excluido en .gitignore)
+    - Persiste: user_data (nlp_history, acum_hab_nombre, preferencias)
+    - Efecto: el contexto NLP y los flujos activos sobreviven reinicios del bot
+    - store_bot_data / store_chat_data = False para no persistir datos globales
+
 Scheduler (F12):
     - Se arranca en post_init (dentro del event loop de PTB, evita RuntimeError)
     - Los jobs diarios (daily_summary / evening_log) se programan en cmd_start
@@ -35,7 +41,14 @@ import os
 import sys
 
 from dotenv import load_dotenv
-from telegram.ext import ApplicationBuilder, CallbackQueryHandler, CommandHandler, MessageHandler, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    CallbackQueryHandler,
+    CommandHandler,
+    MessageHandler,
+    PicklePersistence,
+    filters,
+)
 
 from src.bot.api_client import ThdoraApiClient
 from src.bot.scheduler import get_scheduler
@@ -88,6 +101,9 @@ logging.getLogger("apscheduler").setLevel(logging.WARNING)
 
 logger = logging.getLogger(__name__)
 
+# Carpeta donde se guarda el archivo de persistencia
+_PERSISTENCE_PATH = os.path.join("data", "bot_persistence.pkl")
+
 
 async def _check_api() -> None:
     api = ThdoraApiClient()
@@ -107,7 +123,22 @@ def _load_token() -> str:
 
 
 def build_app(token: str):
-    app = ApplicationBuilder().token(token).build()
+    # PicklePersistence: persiste user_data entre reinicios del proceso.
+    # Solo user_data es necesario (nlp_history, acum_hab_nombre).
+    # bot_data y chat_data se excluyen para no aumentar el tamaño del pkl.
+    os.makedirs("data", exist_ok=True)
+    persistence = PicklePersistence(
+        filepath=_PERSISTENCE_PATH,
+        store_bot_data=False,
+        store_chat_data=False,
+    )
+
+    app = (
+        ApplicationBuilder()
+        .token(token)
+        .persistence(persistence)
+        .build()
+    )
 
     # ── 1. ConversationHandlers ───────────────────────────────────────────
     # IMPORTANTE: quick_config es entry_point de build_config_handler.
@@ -180,7 +211,7 @@ def main() -> None:
 
     app.post_init = _post_init
 
-    logger.info("🤖 THDORA bot v4.0 arrancando (polling)…")
+    logger.info("🤖 THDORA bot v4.1 arrancando (polling)…")
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=["message", "callback_query"],

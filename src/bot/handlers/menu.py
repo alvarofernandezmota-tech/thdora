@@ -9,6 +9,10 @@ Notas:
       ConversationHandler; cb_quick_config ya no existe en este módulo.
     - cmd_start programa los jobs diarios del scheduler para el usuario
       (daily_summary y evening_log) si tiene config guardada.
+
+Modos de uso que se explican al usuario:
+    1. Botones — toda la gestión estructurada de citas y hábitos.
+    2. Lenguaje natural — escribe directamente y THDORA entiende.
 """
 
 import logging
@@ -25,12 +29,21 @@ from src.bot.utils.dates import _date_short, _greeting
 logger = logging.getLogger(__name__)
 api    = ThdoraApiClient()
 
+_AYUDA_NLP = (
+    "\n\n💬 _También puedes escribirme directamente:_\n"
+    "  • \"mañana dentista a las 5\"\n"
+    "  • \"dormí 7 horas\""
+)
+
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Muestra el menú principal y programa los jobs diarios del scheduler.
     Se llama al arrancar el bot (/start) y es el único punto donde se
     garantiza que los jobs diarios quedan activos para ese usuario.
+
+    El mensaje incluye un recordatorio de los dos modos de uso (botones
+    y lenguaje natural) para que el usuario no tenga que descubrirlos solo.
     """
     today      = str(date.today())
     greeting   = _greeting()
@@ -53,7 +66,8 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
     await update.message.reply_text(
         f"{greeting}, soy *THDORA* — {date_short}{citas_txt}\n"
-        f"_Tu asistente personal de gestión de vida_",
+        f"_Tu asistente personal de gestión de vida_"
+        f"{_AYUDA_NLP}",
         parse_mode="Markdown",
         reply_markup=_kb_start(),
     )
@@ -73,7 +87,8 @@ async def cb_menu_home(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     except Exception:
         citas_txt = ""
     await query.message.reply_text(
-        f"{greeting}, soy *THDORA* — {date_short}{citas_txt}",
+        f"{greeting}, soy *THDORA* — {date_short}{citas_txt}\n"
+        f"{_AYUDA_NLP}",
         parse_mode="Markdown",
         reply_markup=_kb_start(),
     )

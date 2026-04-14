@@ -9,6 +9,11 @@ Flujo:
         nueva_cita  → api.create_appointment() → confirmación
         log_habito  → api.log_habit()           → confirmación
         chat/otros  → respuesta conversacional
+
+Mejoras UX (abr-2026):
+    - Mensaje '⏳ Procesando...' mientras Groq trabaja, se borra al terminar.
+      Evita que el usuario crea que el bot no responde durante el llamado LLM.
+    - Si la hora devuelta es '00:00' se pide confirmación antes de crear la cita.
 """
 
 import logging
@@ -36,13 +41,21 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     Handler principal de texto libre con NLP.
     Se llama desde _route_free_text() en main.py.
     """
-    text     = update.message.text.strip()
+    text      = update.message.text.strip()
     user_data = context.user_data
 
-    # Indicador de escritura mientras procesa
-    await update.message.chat.send_action("typing")
+    # Indicador visual: mensaje temporal mientras Groq procesa
+    processing_msg = await update.message.reply_text("⏳ Procesando...")
 
-    result = await route(text, user_data)
+    try:
+        result = await route(text, user_data)
+    finally:
+        # Borrar el indicador independientemente del resultado
+        try:
+            await processing_msg.delete()
+        except Exception:
+            pass
+
     intent = result["intent"]
     data   = result["data"]
     reply  = result["reply"]
@@ -68,13 +81,26 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 
 async def _handle_nueva_cita(update: Update, data: dict) -> None:
-    """Crea la cita en la API y confirma al usuario."""
+    """Crea la cita en la API y confirma al usuario.
+
+    Si Groq no detectó la hora (devuelve '00:00') pide confirmación
+    antes de guardar para evitar citas sin hora válida.
+    """
     try:
         date_str = data.get("date") or date.today().isoformat()
         time_str = data.get("time", "09:00")
         name     = data.get("name", "Cita")
         apt_type = data.get("type", "otro")
         notes    = data.get("notes", "")
+
+        # Si la hora es 00:00, Groq no la detectó — pedir confirmación
+        if time_str == "00:00":
+            await update.message.reply_text(
+                f"⚠️ No detecté la hora para *{name}*. "
+                f"¿A qué hora es? (o usa /nueva para crearla manualmente)",
+                parse_mode="Markdown",
+            )
+            return
 
         # Comprobar conflicto de hora
         conflict = await api.check_appointment_conflict(date_str, time_str)
@@ -95,7 +121,6 @@ async def _handle_nueva_cita(update: Update, data: dict) -> None:
         )
 
         tipo_label = _TIPOS_ES.get(apt_type, "📌 Otro")
-        # Formatear fecha legible
         from datetime import datetime
         fecha_bonita = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d/%m/%Y")
 
