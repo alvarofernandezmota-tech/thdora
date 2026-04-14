@@ -18,6 +18,10 @@ env/
 datos/
 !datos/.gitkeep
 
+# Persistencia bot (PicklePersistence — contiene user_data con historial NLP)
+# Se genera automáticamente en data/ al arrancar el bot
+data/bot_persistence.pkl
+
 # Logs
 logs/
 *.log
