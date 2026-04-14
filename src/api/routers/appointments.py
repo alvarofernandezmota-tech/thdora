@@ -1,11 +1,11 @@
 """
-Router de citas — v2.1 (F9.2: endpoint conflicto de hora).
+Router de citas — v2.2 (solapamiento real de 1h).
 
 Endpoints::
 
     POST   /appointments/{date}                     → crear cita
     GET    /appointments/{date}                     → citas del día
-    GET    /appointments/{date}/conflict/{time}     → conflicto de hora (None o cita)
+    GET    /appointments/{date}/conflict/{time}     → conflicto de hora (solapamiento 1h)
     DELETE /appointments/{date}/{index}             → borrar por índice
     PUT    /appointments/{date}/{index}             → editar cita
     GET    /appointments/range/{from}/{to}          → citas en rango
@@ -24,8 +24,11 @@ from src.core.impl.sqlite_lifemanager import SQLiteLifeManager
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
 
+# Duración predeterminada de una cita (minutos)
+_DEFAULT_DURATION_MIN = 60
 
-# ── Modelos Pydantic ───────────────────────────────────────────────────────
+
+# ── Modelos Pydantic ─────────────────────────────────────────────────────────
 
 class AppointmentCreate(BaseModel):
     time: str
@@ -81,7 +84,31 @@ def _to_response(apt: dict) -> AppointmentResponse:
     )
 
 
-# ── Endpoints ─────────────────────────────────────────────────────────────
+def _time_to_minutes(time_str: str) -> int:
+    """Convierte 'HH:MM' a minutos desde medianoche."""
+    h, m = time_str.split(":")
+    return int(h) * 60 + int(m)
+
+
+def _find_overlap(
+    apts: list, new_time: str, duration: int = _DEFAULT_DURATION_MIN
+) -> Optional[dict]:
+    """
+    Devuelve la primera cita que solapa con new_time + duration.
+    Solapamiento real: new_start < exist_end AND new_end > exist_start
+    Asume que todas las citas duran 'duration' minutos.
+    """
+    new_start = _time_to_minutes(new_time)
+    new_end   = new_start + duration
+    for apt in apts:
+        exist_start = _time_to_minutes(apt["time"])
+        exist_end   = exist_start + duration
+        if new_start < exist_end and new_end > exist_start:
+            return apt
+    return None
+
+
+# ── Endpoints ──────────────────────────────────────────────────────────────
 
 @router.post("/{date_str}", response_model=AppointmentCreatedResponse, status_code=201)
 def create_appointment(
@@ -142,20 +169,22 @@ def get_upcoming(
 def check_conflict(
     date_str: str,
     time_str: str,
+    duration: int = Query(default=_DEFAULT_DURATION_MIN, ge=1, le=480),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> Optional[AppointmentResponse]:
     """
-    Comprueba si ya existe una cita a esa hora exacta.
+    Comprueba si la nueva cita (time_str, duración 'duration' min) solapa con alguna existente.
+    Usa solapamiento real: new_start < exist_end AND new_end > exist_start.
 
-    - 200 + cita   → hay conflicto
-    - 404          → hora libre
+    - 200 + cita   → hay solapamiento, devuelve la cita que choca
+    - 404          → franja libre
     """
     _parse_date(date_str)
     apts = manager.get_appointments(date_str)
-    for apt in apts:
-        if apt["time"] == time_str:
-            return _to_response(apt)
-    raise HTTPException(status_code=404, detail="Hora libre.")
+    overlap = _find_overlap(apts, time_str, duration)
+    if overlap:
+        return _to_response(overlap)
+    raise HTTPException(status_code=404, detail="Franja libre.")
 
 
 @router.get("/{date_str}", response_model=List[AppointmentResponse])

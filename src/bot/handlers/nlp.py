@@ -10,16 +10,16 @@ Flujo completo:
     3. Llama a groq_router.route() con texto + contexto + username
     4. Según el intent ejecuta la acción y responde.
 
-Conflicto de cita:
-    Si el slot solicitado está ocupado, muestra el horario visual del día
-    (franjas de 1h entre 8-22h, marcando ocupadas/libres) para que el
-    usuario elija directamente.
+Horario visual:
+    _build_day_schedule() genera franjas de 30min entre 08:00 y 22:00.
+    Cada cita ocupa su slot de inicio + los siguientes hasta completar 60min.
+    🔴 ocupado | 🟢 libre | ⚠️ slot del conflicto solicitado
 """
 
 import asyncio
 import logging
 from datetime import date, timedelta
-from typing import List, Dict
+from typing import Dict, List
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -30,6 +30,11 @@ from src.bot.keyboards import _kb_start
 
 logger = logging.getLogger(__name__)
 api    = ThdoraApiClient()
+
+_DEFAULT_DURATION_MIN = 60   # duración predeterminada de cada cita
+_SCHEDULE_START_H     = 8    # primera franja del horario visual
+_SCHEDULE_END_H       = 22   # última franja (exclusive)
+_SLOT_MIN             = 30   # granularidad del horario visual en minutos
 
 _MSG_MENU = (
     "🤔 No he entendido bien lo que quieres hacer.\n"
@@ -46,41 +51,70 @@ _MSG_HORA_CONFIRM = (
 )
 
 
-# ── Horario visual del día ───────────────────────────────────────────────────
+# ── Horario visual del día ─────────────────────────────────────────────────
 
-def _build_day_schedule(citas: List[Dict], date_str: str, highlight_time: str = "") -> str:
+def _time_to_min(t: str) -> int:
+    h, m = t.split(":")
+    return int(h) * 60 + int(m)
+
+
+def _build_day_schedule(
+    citas: List[Dict],
+    date_str: str,
+    highlight_time: str = "",
+    duration: int = _DEFAULT_DURATION_MIN,
+) -> str:
     """
-    Genera un bloque de texto con el horario visual del día.
-    Franjas de 1h entre 08:00 y 22:00.
-    • 🔴 hora ocupada (con nombre de cita)
-    • 🟢 hora libre
-    • highlight_time: la hora solicitada que causó el conflicto (se marca con ⚠️)
+    Genera el horario visual del día con franjas de _SLOT_MIN minutos.
+    - 🔴 slot ocupado por alguna cita (dentro de su bloque de duración)
+    - 🟢 slot libre
+    - ⚠️ slot solicitado que causó el conflicto
+    Al inicio del bloque de cada cita se muestra su nombre.
     """
-    # Construir mapa hora → nombre de cita
-    ocupadas: Dict[str, str] = {}
+    # Mapa: minuto_inicio_slot -> etiqueta de cita si ocupa ese slot
+    bloques: Dict[int, str] = {}
     for c in citas:
-        t = c.get("time", "")[:5]  # "HH:MM"
-        if t:
-            ocupadas[t] = c.get("name", "Cita")
+        c_start = _time_to_min(c.get("time", "00:00"))
+        c_name  = c.get("name", "Cita")
+        # Marcar todos los slots de 30min que ocupa esta cita
+        slot = c_start
+        while slot < c_start + duration:
+            bloques[slot] = c_name if slot == c_start else "┃"  # nombre solo en el 1er slot
+            slot += _SLOT_MIN
+
+    highlight_min = _time_to_min(highlight_time) if highlight_time else -1
 
     lines = [f"📅 *Horario del {date_str}*\n"]
-    for h in range(8, 23):
-        slot = f"{h:02d}:00"
-        if slot == highlight_time:
-            name = ocupadas.get(slot, "")
-            if name:
-                lines.append(f"⚠️ `{slot}` — *{name}* ← ocupada")
+    current = _SCHEDULE_START_H * 60
+    end     = _SCHEDULE_END_H   * 60
+
+    while current < end:
+        hh = current // 60
+        mm = current % 60
+        slot_label = f"{hh:02d}:{mm:02d}"
+
+        if current == highlight_min:
+            # Slot del conflicto solicitado
+            name = bloques.get(current, "")
+            if name and name != "┃":
+                lines.append(f"⚠️ `{slot_label}` — *{name}* ← ocupada")
             else:
-                lines.append(f"⚠️ `{slot}` — solicitada")
-        elif slot in ocupadas:
-            lines.append(f"🔴 `{slot}` — {ocupadas[slot]}")
+                lines.append(f"⚠️ `{slot_label}` ← solicitada")
+        elif current in bloques:
+            name = bloques[current]
+            if name == "┃":
+                lines.append(f"🔴 `{slot_label}`")
+            else:
+                lines.append(f"🔴 `{slot_label}` — {name}")
         else:
-            lines.append(f"🟢 `{slot}`")
+            lines.append(f"🟢 `{slot_label}`")
+
+        current += _SLOT_MIN
 
     return "\n".join(lines)
 
 
-# ── Helpers ──────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────
 
 def _find_index_by_id(citas: list, cita_id: int) -> int:
     for c in citas:
@@ -165,14 +199,12 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     reply     = result["reply"]
     show_menu = result.get("show_menu", False)
 
-    # ── desconocido → menú ──────────────────────────────────────────────────
     if show_menu:
         await update.message.reply_text(
             _MSG_MENU, parse_mode="Markdown", reply_markup=_kb_start()
         )
         return
 
-    # ── reply sola (fallo extracción, chat, consulta) ──────────────────────
     if reply and not data:
         await update.message.reply_text(reply, parse_mode="Markdown")
         return
@@ -185,7 +217,6 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         cita_type  = data.get("type", "otra")
         cita_notes = data.get("notes", "")
 
-        # Obtener citas del día de la cita (puede no ser hoy)
         if cita_date == today:
             citas_del_dia = api_context.get("citas", [])
         else:
@@ -194,7 +225,7 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             except Exception:
                 citas_del_dia = []
 
-        # Fix hora 00:00: no crear a medianoche, mostrar horario
+        # Fix hora 00:00: mostrar horario para elegir
         if cita_time == "00:00":
             schedule = _build_day_schedule(citas_del_dia, cita_date)
             await update.message.reply_text(
@@ -204,13 +235,16 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
             return
 
-        # Conflicto de hora → mostrar horario visual del día
+        # Conflicto con solapamiento real de 1h → mostrar horario visual
         conflict = await api.check_appointment_conflict(cita_date, cita_time)
         if conflict:
-            schedule = _build_day_schedule(citas_del_dia, cita_date, highlight_time=cita_time)
+            schedule = _build_day_schedule(
+                citas_del_dia, cita_date, highlight_time=cita_time
+            )
             await update.message.reply_text(
-                f"⚠️ Las *{cita_time}* del {cita_date} ya están ocupadas "
-                f"con *{conflict.get('name', 'una cita')}*.\n"
+                f"⚠️ Las *{cita_time}* del {cita_date} solapan con "
+                f"*{conflict.get('name', 'una cita')}* "
+                f"({conflict.get('time','?')}–{_end_time(conflict.get('time','?'))}).\n"
                 f"Elige otra hora libre y respóndeme:\n\n{schedule}",
                 parse_mode="Markdown",
             )
@@ -218,11 +252,8 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         try:
             await api.create_appointment(
-                date_str=cita_date,
-                time=cita_time,
-                name=cita_name,
-                apt_type=cita_type,
-                notes=cita_notes,
+                date_str=cita_date, time=cita_time,
+                name=cita_name, apt_type=cita_type, notes=cita_notes,
             )
             await update.message.reply_text(
                 f"✅ *{cita_name}* añadida el {cita_date} a las {cita_time} ⌟",
@@ -255,8 +286,7 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text(
                 f"⚠️ No encontré la cita *{borrar_name}* en {borrar_date}.\n"
                 f"Puede que ya haya sido borrada. Usa /citas para verlas.",
-                parse_mode="Markdown",
-                reply_markup=_kb_start(),
+                parse_mode="Markdown", reply_markup=_kb_start(),
             )
             return
 
@@ -265,8 +295,7 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             if ok:
                 await update.message.reply_text(
                     f"✅ *{borrar_name or 'Cita'}* eliminada del {borrar_date}.",
-                    parse_mode="Markdown",
-                    reply_markup=_kb_start(),
+                    parse_mode="Markdown", reply_markup=_kb_start(),
                 )
             else:
                 await update.message.reply_text(
@@ -303,13 +332,11 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             await update.message.reply_text(
                 f"⚠️ No encontré la cita *{editar_name}* en {editar_date}.\n"
                 f"Usa /citas para gestionarlas.",
-                parse_mode="Markdown",
-                reply_markup=_kb_start(),
+                parse_mode="Markdown", reply_markup=_kb_start(),
             )
             return
 
         if new_time == "00:00":
-            # Mostrar horario del día también al editar con hora ambigua
             schedule = _build_day_schedule(citas_actuales, editar_date)
             await update.message.reply_text(
                 f"⏰ ¿A qué hora quieres mover *{editar_name}*?\n\n{schedule}",
@@ -319,12 +346,8 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
         try:
             await api.update_appointment(
-                date_str=editar_date,
-                index=editar_index,
-                time=new_time,
-                name=new_name,
-                apt_type=new_type,
-                notes=new_notes,
+                date_str=editar_date, index=editar_index,
+                time=new_time, name=new_name, apt_type=new_type, notes=new_notes,
             )
             cambios = []
             if new_time:  cambios.append(f"hora → {new_time}")
@@ -332,11 +355,9 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             if new_type:  cambios.append(f"tipo → {new_type}")
             if new_notes: cambios.append("notas actualizadas")
             cambios_str = ", ".join(cambios) or "sin cambios detectados"
-
             await update.message.reply_text(
                 f"✅ *{editar_name}* actualizada: {cambios_str}.",
-                parse_mode="Markdown",
-                reply_markup=_kb_start(),
+                parse_mode="Markdown", reply_markup=_kb_start(),
             )
         except Exception as e:
             logger.error("Error editando cita desde NLP: %s", e)
@@ -351,13 +372,11 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         hab_date  = data.get("date", today)
         hab_name  = data.get("habit", "hábito")
         hab_value = data.get("value", "")
-
         try:
             await api.log_habit(date_str=hab_date, habit=hab_name, value=hab_value)
             await update.message.reply_text(
                 f"✅ *{hab_name}*: {hab_value} — registrado",
-                parse_mode="Markdown",
-                reply_markup=_kb_start(),
+                parse_mode="Markdown", reply_markup=_kb_start(),
             )
         except Exception as e:
             logger.error("Error registrando hábito desde NLP: %s", e)
@@ -371,21 +390,18 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     if intent == "borrar_habito" and data:
         borrar_hab_date = data.get("date", today)
         borrar_hab_name = data.get("habit", "")
-
         try:
             ok = await api.delete_habit(date_str=borrar_hab_date, habit=borrar_hab_name)
             if ok:
                 await update.message.reply_text(
                     f"✅ *{borrar_hab_name}* eliminado del {borrar_hab_date}.",
-                    parse_mode="Markdown",
-                    reply_markup=_kb_start(),
+                    parse_mode="Markdown", reply_markup=_kb_start(),
                 )
             else:
                 await update.message.reply_text(
                     f"⚠️ No encontré el hábito *{borrar_hab_name}* en {borrar_hab_date}. "
                     f"Usa /habitos para verlos.",
-                    parse_mode="Markdown",
-                    reply_markup=_kb_start(),
+                    parse_mode="Markdown", reply_markup=_kb_start(),
                 )
         except Exception as e:
             logger.error("Error borrando hábito desde NLP: %s", e)
@@ -394,3 +410,14 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 reply_markup=_kb_start(),
             )
         return
+
+
+def _end_time(start: str, duration: int = _DEFAULT_DURATION_MIN) -> str:
+    """Calcula la hora de fin dado un inicio 'HH:MM' y duración en minutos."""
+    total = _time_to_min(start) + duration
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def _time_to_min(t: str) -> int:
+    h, m = t.split(":")
+    return int(h) * 60 + int(m)
