@@ -2,35 +2,24 @@
 Handler de texto libre — modo Toki.
 
 Flujo completo:
-    1. Envía ⏳ Procesando... (feedback inmediato mientras trabaja Groq)
-    2. Consulta contexto real de la API:
+    1. Envía ⏳ Procesando... (feedback inmediato)
+    2. Consulta contexto real de la API en paralelo:
        — citas de hoy y mañana
-       — citas de la semana actual (1 llamada a /appointments/week/{date})
+       — citas de la semana (1 llamada a /appointments/week/{date})
        — hábitos de hoy
-       Si la API falla, el contexto queda vacío y el bot sigue funcionando.
-    3. Llama a groq_router.route() con el texto + contexto + username
-    4. Según el intent:
-       nueva_cita      → crea la cita en la API (con fix hora 00:00)
-       borrar_cita     → confirma + borra por index real de la cita
-       editar_cita     → confirma + edita por index real de la cita
-       log_habito      → registra el hábito en la API
-       borrar_habito   → confirma + borra el hábito en la API
-       consulta        → responde con datos reales de hoy/mañana
-       consulta_semana → responde con datos de la semana
-       chat            → respuesta conversacional con contexto
-       desconocido     → muestra el menú principal del bot (NO texto suelto)
+    3. Llama a groq_router.route() con texto + contexto + username
+    4. Según el intent ejecuta la acción y responde.
 
-Diseño Toki:
-    La IA actúa solo como router de intención + extractor de slots.
-    Cuando no entiende, devuelve siempre la interfaz del bot (botones).
-    Para borrar/editar: el modelo devuelve el id real de la BD; el handler
-    usa ese id para buscar el index actual en la lista de citas (evita
-    desfases por inserciones/borrados previos en la misma sesión).
+Conflicto de cita:
+    Si el slot solicitado está ocupado, muestra el horario visual del día
+    (franjas de 1h entre 8-22h, marcando ocupadas/libres) para que el
+    usuario elija directamente.
 """
 
 import asyncio
 import logging
 from datetime import date, timedelta
+from typing import List, Dict
 
 from telegram import Update
 from telegram.ext import ContextTypes
@@ -57,12 +46,43 @@ _MSG_HORA_CONFIRM = (
 )
 
 
+# ── Horario visual del día ───────────────────────────────────────────────────
+
+def _build_day_schedule(citas: List[Dict], date_str: str, highlight_time: str = "") -> str:
+    """
+    Genera un bloque de texto con el horario visual del día.
+    Franjas de 1h entre 08:00 y 22:00.
+    • 🔴 hora ocupada (con nombre de cita)
+    • 🟢 hora libre
+    • highlight_time: la hora solicitada que causó el conflicto (se marca con ⚠️)
+    """
+    # Construir mapa hora → nombre de cita
+    ocupadas: Dict[str, str] = {}
+    for c in citas:
+        t = c.get("time", "")[:5]  # "HH:MM"
+        if t:
+            ocupadas[t] = c.get("name", "Cita")
+
+    lines = [f"📅 *Horario del {date_str}*\n"]
+    for h in range(8, 23):
+        slot = f"{h:02d}:00"
+        if slot == highlight_time:
+            name = ocupadas.get(slot, "")
+            if name:
+                lines.append(f"⚠️ `{slot}` — *{name}* ← ocupada")
+            else:
+                lines.append(f"⚠️ `{slot}` — solicitada")
+        elif slot in ocupadas:
+            lines.append(f"🔴 `{slot}` — {ocupadas[slot]}")
+        else:
+            lines.append(f"🟢 `{slot}`")
+
+    return "\n".join(lines)
+
+
+# ── Helpers ──────────────────────────────────────────────────────────
+
 def _find_index_by_id(citas: list, cita_id: int) -> int:
-    """
-    Busca el index ordinal de una cita dado su ID real de BD.
-    Devuelve -1 si no la encuentra.
-    Esto evita desfases cuando el index ha cambiado por borrados previos.
-    """
     for c in citas:
         if c.get("id") == cita_id:
             return c.get("index", -1)
@@ -70,11 +90,6 @@ def _find_index_by_id(citas: list, cita_id: int) -> int:
 
 
 async def _get_api_context(today: str, tomorrow: str) -> dict:
-    """
-    Obtiene el contexto real de la API en paralelo.
-    Usa /appointments/week/{date} para la semana completa (1 llamada).
-    Degradación elegante: si falla cualquier llamada, continúa con vacío.
-    """
     async def _safe(coro):
         try:
             return await coro
@@ -88,12 +103,11 @@ async def _get_api_context(today: str, tomorrow: str) -> dict:
         _safe(api.get_appointments_week(today)),
     )
 
-    citas     = citas     or []
-    citas_man = citas_man or []
-    habitos   = habitos   or {}
+    citas      = citas      or []
+    citas_man  = citas_man  or []
+    habitos    = habitos    or {}
     semana_raw = semana_raw or {}
 
-    # Construir resumen legible de la semana (excluimos hoy, ya está en 'citas')
     semana_lines = []
     for day_str in sorted(semana_raw.keys()):
         if day_str == today:
@@ -115,6 +129,8 @@ async def _get_api_context(today: str, tomorrow: str) -> dict:
     }
 
 
+# ── Handler principal ──────────────────────────────────────────────────
+
 async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     text = (update.message.text or "").strip()
     if not text:
@@ -123,20 +139,15 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     today    = date.today().isoformat()
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
 
-    # Nombre del usuario para personalizar respuestas THDORA
     username = (
         update.effective_user.first_name
         or update.effective_user.username
         or "Álvaro"
     )
 
-    # 1. Feedback inmediato
     processing_msg = await update.message.reply_text("⏳ Procesando...")
+    api_context    = await _get_api_context(today, tomorrow)
 
-    # 2. Contexto real de la API (paralelo, semana en 1 llamada)
-    api_context = await _get_api_context(today, tomorrow)
-
-    # 3. Router NLP con contexto + username
     result = await route(
         text=text,
         user_data=context.user_data,
@@ -144,7 +155,6 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         username=username,
     )
 
-    # Borrar ⏳ Procesando...
     try:
         await processing_msg.delete()
     except Exception:
@@ -155,21 +165,19 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     reply     = result["reply"]
     show_menu = result.get("show_menu", False)
 
-    # ── intent desconocido → menú del bot ─────────────────────────────
+    # ── desconocido → menú ──────────────────────────────────────────────────
     if show_menu:
         await update.message.reply_text(
-            _MSG_MENU,
-            parse_mode="Markdown",
-            reply_markup=_kb_start(),
+            _MSG_MENU, parse_mode="Markdown", reply_markup=_kb_start()
         )
         return
 
-    # ── reply sola (fallo extraccion, chat, consulta) ───────────────────
+    # ── reply sola (fallo extracción, chat, consulta) ──────────────────────
     if reply and not data:
         await update.message.reply_text(reply, parse_mode="Markdown")
         return
 
-    # ── nueva_cita ────────────────────────────────────────────────────
+    # ── nueva_cita ─────────────────────────────────────────────────────
     if intent == "nueva_cita" and data:
         cita_date  = data.get("date", today)
         cita_time  = data.get("time", "09:00")
@@ -177,21 +185,33 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         cita_type  = data.get("type", "otra")
         cita_notes = data.get("notes", "")
 
-        # Fix hora 00:00: pedir confirmación en vez de crear a medianoche
+        # Obtener citas del día de la cita (puede no ser hoy)
+        if cita_date == today:
+            citas_del_dia = api_context.get("citas", [])
+        else:
+            try:
+                citas_del_dia = await api.get_appointments(cita_date)
+            except Exception:
+                citas_del_dia = []
+
+        # Fix hora 00:00: no crear a medianoche, mostrar horario
         if cita_time == "00:00":
+            schedule = _build_day_schedule(citas_del_dia, cita_date)
             await update.message.reply_text(
-                _MSG_HORA_CONFIRM.format(name=cita_name),
+                f"⏰ No he detectado la hora para *{cita_name}*.\n"
+                f"Elige una hora libre y respóndeme:\n\n{schedule}",
                 parse_mode="Markdown",
             )
             return
 
-        # Conflicto de hora
+        # Conflicto de hora → mostrar horario visual del día
         conflict = await api.check_appointment_conflict(cita_date, cita_time)
         if conflict:
+            schedule = _build_day_schedule(citas_del_dia, cita_date, highlight_time=cita_time)
             await update.message.reply_text(
-                f"⚠️ Ya tienes *{conflict.get('name', 'una cita')}* "
-                f"el {cita_date} a las {cita_time}.\n"
-                f"Elige otra hora o usa /nueva para el flujo guiado.",
+                f"⚠️ Las *{cita_time}* del {cita_date} ya están ocupadas "
+                f"con *{conflict.get('name', 'una cita')}*.\n"
+                f"Elige otra hora libre y respóndeme:\n\n{schedule}",
                 parse_mode="Markdown",
             )
             return
@@ -217,13 +237,12 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
         return
 
-    # ── borrar_cita ────────────────────────────────────────────────────
+    # ── borrar_cita ─────────────────────────────────────────────────────
     if intent == "borrar_cita" and data:
         borrar_date = data.get("date", today)
         borrar_id   = data.get("id", -1)
         borrar_name = data.get("name", "")
 
-        # Resolver index real a partir del id (recargamos lista fresca)
         citas_actuales = api_context.get("citas", [])
         if borrar_date != today:
             try:
@@ -262,7 +281,7 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
         return
 
-    # ── editar_cita ────────────────────────────────────────────────────
+    # ── editar_cita ─────────────────────────────────────────────────────
     if intent == "editar_cita" and data:
         editar_date  = data.get("date", today)
         editar_id    = data.get("id", -1)
@@ -272,7 +291,6 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         new_type     = data.get("new_type")  or None
         new_notes    = data.get("new_notes") or None
 
-        # Resolver index real a partir del id
         citas_actuales = api_context.get("citas", [])
         if editar_date != today:
             try:
@@ -290,10 +308,11 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
             return
 
-        # Fix hora 00:00 en la edición
         if new_time == "00:00":
+            # Mostrar horario del día también al editar con hora ambigua
+            schedule = _build_day_schedule(citas_actuales, editar_date)
             await update.message.reply_text(
-                _MSG_HORA_CONFIRM.format(name=editar_name),
+                f"⏰ ¿A qué hora quieres mover *{editar_name}*?\n\n{schedule}",
                 parse_mode="Markdown",
             )
             return
@@ -334,11 +353,7 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         hab_value = data.get("value", "")
 
         try:
-            await api.log_habit(
-                date_str=hab_date,
-                habit=hab_name,
-                value=hab_value,
-            )
+            await api.log_habit(date_str=hab_date, habit=hab_name, value=hab_value)
             await update.message.reply_text(
                 f"✅ *{hab_name}*: {hab_value} — registrado",
                 parse_mode="Markdown",
@@ -352,16 +367,13 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
             )
         return
 
-    # ── borrar_habito ───────────────────────────────────────────────────
+    # ── borrar_habito ────────────────────────────────────────────────────
     if intent == "borrar_habito" and data:
         borrar_hab_date = data.get("date", today)
         borrar_hab_name = data.get("habit", "")
 
         try:
-            ok = await api.delete_habit(
-                date_str=borrar_hab_date,
-                habit=borrar_hab_name,
-            )
+            ok = await api.delete_habit(date_str=borrar_hab_date, habit=borrar_hab_name)
             if ok:
                 await update.message.reply_text(
                     f"✅ *{borrar_hab_name}* eliminado del {borrar_hab_date}.",
