@@ -4,7 +4,7 @@
 
 ---
 
-## Estado actual — v0.12.0 (14 abril 2026)
+## Estado actual — v0.14.0 (14 abril 2026)
 
 ```
 Bot Telegram (9 comandos + 5 ConversationHandlers + inline buttons + NLP texto libre)
@@ -15,216 +15,141 @@ API (14 endpoints: CRUD + semana + rango + stats)
     ↕ SQLAlchemy ORM
 SQLite (data/thdora.db — persistencia real)
     ↕ Groq API (NLP gratuito)
-GroqRouter (intent + entidades + chat conversacional)
+GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 ```
 
-### Lo que funciona hoy
+### Lo que funciona hoy ✅
 - `/start` `/citas` `/habitos` `/habito` `/nueva` `/semana` `/resumen` `/config` `/cancelar`
 - Saludo contextual (buenos días/tardes/noches)
 - Navegación ◀️▶️ con fecha real visible en botón central
 - Vista detalle de cita con click en ⏰ hora
 - Inline buttons: borrar/editar/sumar citas y hábitos
-- Editar nombre y valor de hábito
-- Nombre de hábito libre (sin lista predefinida)
 - Conflicto hora en citas: aviso ⚠️ al crear
-- Conflicto hábito existente: Sobreescribir / Sumar / Cancelar
-- Cambio de vista Citas ↔ Hábitos desde la nav
 - `/semana` con navegación semanal y botones por día
 - `/config` para configurar tipos de hábitos con botones rápidos
 - Fechas flexibles: `hoy`, `mañana`, `ayer`, `27/03`, nombres de día
 - **Datos persistentes en SQLite** — sobreviven a reinicios
-- **Franjas horarias en /nueva** — 🌅 Mañana / 🌆 Tarde / 🌙 Noche + hora en punto + cuartos
-- **Código modular** — `src/bot/handlers/` package (7 módulos) + `keyboards.py` + `utils/`
-- **➕ Nueva cita desde botón del menú** — arranca ConversationHandler directamente ✅
-- **➕ Nuevo hábito desde botón del menú** — arranca ConversationHandler directamente ✅
-- **Menú operativo al 100%** — probado en vivo ✅
-- **🤖 NLP con Groq** — texto libre → citas/hábitos/chat ✅ (código listo, requiere GROQ_API_KEY)
+- **Scheduler F12** — resumen diario + evening log + avisos citas
+- **🤖 NLP Groq — modo Toki (v0.14.0):**
+  - Contexto real de API inyectado en el prompt (citas + hábitos hoy y mañana)
+  - `¿qué tengo hoy?` → responde con datos reales ✅
+  - `mañana dentista a las 5` → crea cita ✅
+  - `dormí 7 horas` → registra hábito ✅
+  - Detección de conflicto de hora ✅
+  - Intent `desconocido` → muestra menú del bot (no texto suelto) ✅
+  - 3 llamadas API en paralelo (asyncio.gather) para mínima latencia
+  - ⏳ Procesando... feedback inmediato al usuario
+  - Fix hora 00:00 → pide confirmación antes de crear
 
 ---
 
 ## ✅ Completadas
 
-### F1–F9.8 — Base, API, Bot, Persistencia, Documentación
+### F1–F12 — Base, API, Bot, Persistencia, Scheduler
 > Ver historial completo en [CHANGELOG.md](CHANGELOG.md)
 
-### F12 — Notificaciones proactivas ✅ (14 abril 2026)
-- [x] `UserConfig` en SQLite (horarios resumen + evening)
-- [x] APScheduler integrado en bot
-- [x] Jobs diarios: resumen mañana + evening log
-- [x] Jobs one-shot por cita (aviso 15 min antes)
-- [x] `/config` → rama notificaciones con horarios configurables
-- [x] Scheduler arranca en `post_init` (sin RuntimeError)
-
 ### F13-base — NLP con Groq ✅ (14 abril 2026)
+- Clasificador + extractor entidades + chat conversacional
+- Intents: `nueva_cita`, `log_habito`, `consulta`, `chat`, `desconocido`
 
-> Arquitectura decidida y código base implementado.
-> Requiere `GROQ_API_KEY` en `.env` para activarse.
-
-**Ficheros creados:**
-- [x] `src/bot/groq_router.py` — orquestador NLP (intent + entidades + chat)
-- [x] `src/bot/handlers/nlp.py` — handler de Telegram para texto libre
-- [x] `src/bot/main.py` — `_route_free_text` conectado a NLP
-
-**Arquitectura de modelos (todo Groq, 100% gratis):**
-```
-① llama-3.1-8b-instant     → clasificar intent  (~560 t/s)
-② llama-3.3-70b-versatile  → extraer entidades + chat conversacional
-③ context.user_data        → memoria últimos 10 mensajes
-```
-
-**Intents soportados:**
-- `nueva_cita`  → extrae fecha/hora/nombre/tipo → `api.create_appointment()`
-- `log_habito`  → extrae fecha/hábito/valor → `api.log_habit()`
-- `consulta`    → respuesta conversacional con contexto
-- `chat`        → chat libre con Llama 3.3 70B
-- `desconocido` → pide aclaración al usuario
-
-**Para activar en local:**
-```bash
-echo "GROQ_API_KEY=tu_key_aqui" >> .env
-pip install groq
-git pull && python -m src.bot.main
-```
+### F13-toki — Modo Toki: contexto real ✅ (14 abril 2026)
+- `api_context` inyectado en el prompt de Groq
+- `_build_chat_system()` construye el system prompt con datos reales
+- Intent `desconocido` → menú del bot, no texto inventado
+- Probado en vivo: todos los casos funcionan ✅
 
 ---
 
-## 🔶 En curso / Próximo
+## 🔶 Siguiente — F13-v2: Mejorar NLP
 
-### F13-test — Probar NLP en Telegram real 🔜 SIGUIENTE
+> El NLP base funciona. Ahora toca expandirlo y pulirlo.
 
-> El código está en main. Solo falta la API key y probarlo.
+### Prioridad 1 — Personalidad y comprensión (impacto inmediato)
+- [ ] Reescribir `_CHAT_SYSTEM_BASE` con personalidad más rica
+- [ ] Instrucciones de tono: directo, cercano, proactivo
+- [ ] Que sugiera acciones cuando detecte contexto relevante
+- [ ] Que recuerde el nombre del usuario en respuestas
 
-- [ ] Añadir `GROQ_API_KEY` al `.env` local
-- [ ] `pip install groq` en el entorno
-- [ ] Probar: `"mañana dentista a las 5"` → cita creada ✅
-- [ ] Probar: `"dormí 7 horas"` → hábito registrado ✅
-- [ ] Probar: `"¿qué tengo mañana?"` → respuesta conversacional ✅
-- [ ] Probar: `"cámbiala a las 6"` → entiende contexto con historial ✅
-- [ ] Actualizar `.env.example` con `GROQ_API_KEY`
-- [ ] Añadir `groq` a `requirements.txt`
+### Prioridad 2 — Nuevos intents de acción
+- [ ] `borrar_cita` → "cancela el gym de hoy"
+- [ ] `editar_cita` → "mueve la peluquería a las 18"
+- [ ] `consulta_semana` → "¿qué tengo esta semana?"
+- [ ] `borrar_habito` → "quita el registro de agua de hoy"
 
----
+### Prioridad 3 — Contexto más rico
+- [ ] Inyectar también citas de la semana en consultas semanales
+- [ ] Historial de hábitos de los últimos 7 días en el contexto
+- [ ] Persistir `nlp_history` en SQLite (sobrevive reinicios con más datos)
 
-### F13-v2 — Expansión NLP 🔜
-
-> Una vez probado el NLP base, añadir estas mejoras:
-
-**Modelos adicionales (opcionales, activables por variable de entorno):**
-
-| Variable | Proveedor | Modelo | Cuándo activar |
+### Prioridad 4 — Modelos opcionales
+| Variable | Proveedor | Modelo | Para qué |
 |---|---|---|---|
-| `OPENROUTER_API_KEY` | OpenRouter | `deepseek/deepseek-r1` | Chat conversacional mejorado (gratis) |
-| `OPENROUTER_API_KEY` | OpenRouter | `perplexity/sonar` | Consultas con acceso a internet (gratis) |
-| `ANTHROPIC_API_KEY` | Anthropic | `claude-sonnet-4-5` | Conversación premium (de pago, opcional) |
-| `GEMINI_API_KEY` | Google | `gemini-2.0-flash` | Chat alternativo (gratis 1M tokens/mes) |
-
-**Mejoras de NLP:**
-- [ ] Detectar intent `editar_cita` ("cambia la cita del dentista")
-- [ ] Detectar intent `borrar_cita` ("borra la cita de mañana")
-- [ ] Detectar intent `consulta_habitos` ("¿cuánto dormí esta semana?")
-- [ ] Responder consultas con datos reales de la API (inject contexto)
-- [ ] Persistir historial conversacional en SQLite (no solo en memoria)
-
-**Acceso a internet:**
-- [ ] Integrar OpenRouter `perplexity/sonar` para preguntas factuales
-- [ ] Opción self-hosted: Perplexica + SearxNG (gratis, sin API key)
+| `OPENROUTER_API_KEY` | OpenRouter | DeepSeek R1 | Chat mejorado (gratis) |
+| `GEMINI_API_KEY` | Google | Gemini 2.0 Flash | Alternativa (gratis 1M/mes) |
+| `ANTHROPIC_API_KEY` | Anthropic | Claude Sonnet | Premium (de pago) |
 
 ---
 
-### F15 — Voz (Whisper) 🔜
+## 🔜 F15 — Voz (Whisper)
 
 > Groq ya ofrece `whisper-large-v3-turbo` a $0.04/hora.
-> Una vez el NLP texto esté probado, añadir soporte de audio.
+> Una vez el NLP texto esté pulido, añadir soporte de audio.
 
-- [ ] Handler de mensajes de voz en Telegram (`filters.VOICE`)
-- [ ] Descargar audio del mensaje → transcribir con Groq Whisper
+- [ ] Handler de mensajes de voz (`filters.VOICE`)
+- [ ] Descargar audio → transcribir con Groq Whisper
 - [ ] Pasar transcripción a `groq_router.route()` como texto normal
 - [ ] Sin cambios en la lógica de intents
 
 ---
 
-### F10 — Docker + despliegue 24/7 🔜
+## 🔜 F10 — Docker + despliegue 24/7
 
-> **Objetivo:** THDORA corriendo siempre en un servidor, sin intervención manual
-
-```yaml
-# docker-compose.yml
-services:
-  api:
-    build: .
-    command: uvicorn src.api.main:app --host 0.0.0.0 --port 8000
-    volumes: ["./data:/app/data"]
-    ports: ["8000:8000"]
-  bot:
-    build: .
-    command: python -m src.bot.main
-    depends_on: [api]
-    env_file: .env
-```
-
-**Tareas:**
-- [ ] `Dockerfile` — imagen base Python 3.12, deps instaladas
-- [ ] `docker-compose.yml` — servicios `api` + `bot` + volumen `data/`
+- [ ] `Dockerfile` + `docker-compose.yml`
 - [ ] Health checks y reinicio automático
-- [ ] Variables de entorno seguras (`.env` + secrets)
-- [ ] Probar en VPS (Railway / DigitalOcean / Raspberry Pi)
+- [ ] Desplegar en VPS (Railway / DigitalOcean / Raspberry Pi)
 - [ ] Backup automático de `thdora.db`
 
 ---
 
-### F11 — Multi-usuario 🔜
+## 🔜 F11 — Multi-usuario
 
-- [ ] Añadir `user_id` a todas las tablas SQLite
+- [ ] `user_id` en todas las tablas SQLite
 - [ ] Middleware en API para `X-User-Id`
-- [ ] Bot envía `user_id` en cada llamada a la API
 - [ ] Onboarding: primer `/start` → configura perfil
 
-> ⚠️ `user_id` ya está pre-modelado en `UserConfig` (F12). Facilita la migración.
+> ⚠️ `user_id` ya está pre-modelado en `UserConfig`. Facilita la migración.
 
 ---
 
-### F14 — Módulo Tracking personal 🔜
+## 🔜 F14 — Tracking personal
 
 > sueño, sustancias, estado, estudio, proyecto
 
-- [ ] `src/db/models.py` — tabla `daily_tracking`
-- [ ] `src/api/routers/tracking.py` — endpoints CRUD
-- [ ] `src/bot/handlers/tracking.py` — formulario guiado
+- [ ] Tabla `daily_tracking` en SQLite
+- [ ] Endpoints CRUD en FastAPI
+- [ ] Formulario guiado en bot
 - [ ] Sistema de puntuación diaria (0–10)
-- [ ] Dashboard tracking — tendencias + racha
 
 ---
 
-### F16 — Gamificación RPG 🔜
-- XP por hábitos cumplidos (campo `xp_rule` ya modelado en `HabitConfig`)
-- Niveles: 🐣 Novato → 👑 Leyenda
-- Rachas diarias + misiones
-- Conecta con notif de racha de F12.v1.2
+## 🔜 F16–F19 — Gamificación, Mini App, PWA, React Native
 
-### F17 — Telegram Mini App 🔜
-- HTML5/React + `Telegram.WebApp` SDK
-- Conectar con API FastAPI existente
-
-### F18 — PWA 🔜
-- App instalable en móvil, offline-first
-
-### F19 — React Native 🔜
+- F16: XP + niveles + rachas (campo `xp_rule` ya modelado)
+- F17: Telegram Mini App (HTML5 + WebApp SDK)
+- F18: PWA instalable, offline-first
+- F19: React Native
 
 ---
 
-## Orden recomendado de implementación
+## Orden recomendado
 
 ```
-F13-test (probar NLP) → F13-v2 (expandir NLP) → F15 (Voz Whisper)
+F13-v2 (mejorar NLP) → F15 (Voz Whisper)
     → F10 (Docker 24/7) → F11 (Multi-usuario)
     → F14 (Tracking) → F16 (Gamificación)
     → F17/F18/F19 (Apps)
 ```
 
-> F13-test primero: el código ya está, solo falta la API key.
-> F15 (voz) después de NLP porque usa el mismo router.
-> F10 antes de F11 para no tener que migrar dos veces.
-
 ---
 
-_Última actualización: 14 abril 2026 — 11:46 CEST_
+_Última actualización: 14 abril 2026 — 16:14 CEST_

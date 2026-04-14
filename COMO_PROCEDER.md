@@ -1,20 +1,30 @@
 # 🧭 THDORA — CÓMO PROCEDER
 
 > Guía de trabajo para retomar el proyecto en cualquier momento sin perder contexto.
-> Última actualización: **14 abril 2026**
+> Última actualización: **14 abril 2026 — 16:14 CEST**
 
 ---
 
-## Estado actual — qué hay funcionando
+## Estado actual — v0.14.0
 
 ```
-✅ API FastAPI       → http://localhost:8000
-✅ Bot Telegram      → polling, v4.0
-✅ SQLite            → data/thdora.db
-✅ Scheduler F12     → APScheduler (resumen + evening + citas)
-✅ groq_router.py   → NLP listo (necesita GROQ_API_KEY)
-✅ handlers/nlp.py  → handler texto libre conectado
+✅ API FastAPI        → http://localhost:8000
+✅ Bot Telegram       → polling activo
+✅ SQLite             → data/thdora.db
+✅ Scheduler F12      → APScheduler (resumen + evening + citas)
+✅ groq_router.py    → NLP modo Toki con contexto real
+✅ handlers/nlp.py   → handler texto libre + menú en desconocido
+✅ GROQ_API_KEY       → configurada y funcionando
 ```
+
+### Probado en vivo hoy ✅
+| Caso | Resultado |
+|---|---|
+| `Gol` | Menú del bot (intent desconocido) ✅ |
+| `¿qué tengo hoy?` | Listó citas y hábitos reales ✅ |
+| `tengo gym a las 13` | Detectó conflicto con "soci" ✅ |
+| `mañana dentista a las 5` | Creó cita ✅ |
+| `dormí 8 horas` | Registró hábito ✅ |
 
 ---
 
@@ -22,99 +32,77 @@
 
 ```bash
 # Terminal 1 — API
-uvicorn src.api.main:app --reload
+make run-api
 
 # Terminal 2 — Bot
-python -m src.bot.main
+make run-bot
 ```
+
+Tras arrancar, manda `/start` al bot para programar los jobs diarios.
 
 ---
 
-## 🔜 LO MÁS URGENTE — Activar NLP
+## 🔜 LO SIGUIENTE — F13-v2: Mejorar NLP
 
-> El código NLP ya está en GitHub. Solo falta la API key.
+### Paso 1 — Personalidad más rica (30 min, impacto inmediato)
+Editar `_CHAT_SYSTEM_BASE` en `src/bot/groq_router.py`:
+- Más proactivo: que sugiera acciones relevantes
+- Que recuerde el nombre del usuario
+- Respuestas más naturales y menos robóticas
+- Instrucciones claras para cada tipo de consulta
 
-```bash
-# 1. Ir a https://console.groq.com → crear cuenta gratis → copiar API key
-
-# 2. Añadir al .env
-echo "GROQ_API_KEY=gsk_xxxxxxxxxxxx" >> .env
-
-# 3. Instalar dependencia
-pip install groq
-
-# 4. Añadir groq al requirements.txt
-echo "groq>=0.9.0" >> requirements.txt
-git add requirements.txt && git commit -m "deps: añadir groq"
-
-# 5. Reiniciar el bot y probar
-python -m src.bot.main
+### Paso 2 — Nuevos intents (1-2h)
+En `groq_router.py`:
+```python
+# Añadir al clasificador:
+- borrar_cita    → "cancela el gym", "borra la cita de mañana"
+- editar_cita    → "mueve la peluquería a las 18"
+- consulta_semana → "¿qué tengo esta semana?"
 ```
+En `handlers/nlp.py`:
+- Handler para cada nuevo intent
+- `borrar_cita`: buscar por nombre/fecha + confirmar + `api.delete_appointment()`
+- `editar_cita`: buscar + pedir nuevo valor + `api.update_appointment()`
 
-**Pruebas a hacer en Telegram:**
-- `"mañana dentista a las 5"` → debe crear cita el 15/04 a las 17:00
-- `"dormí 7 horas"` → debe registrar Sueño: 7h hoy
-- `"¿qué tengo mañana?"` → respuesta conversacional
-- `"cámbiala a las 6"` → debe entender contexto anterior
+### Paso 3 — Contexto semanal
+- En consultas de semana, inyectar `get_appointments()` de los 7 días
+- Historial de hábitos de los últimos 7 días
 
 ---
 
-## Arquitectura NLP (decisiones tomadas el 14/04/2026)
+## Arquitectura NLP actual (modo Toki)
 
-Ver documentación completa en [`docs/NLP_ARQUITECTURA.md`](docs/NLP_ARQUITECTURA.md)
-
-### Resumen de decisiones
-
-1. **Todo en Groq gratis al principio** — sin coste, sin límites prácticos para uso personal
-2. **Dos modelos Groq:**
-   - `llama-3.1-8b-instant` → clasificar intent (rápido, barato)
-   - `llama-3.3-70b-versatile` → extraer entidades + chat (preciso)
-3. **Memoria conversacional** en `context.user_data` — últimos 10 mensajes
-4. **Arquitectura abierta** — se pueden añadir Claude, OpenRouter, Gemini después sin tocar el código base
-
-### Proveedores opcionales para más adelante
-
-| Proveedor | Modelo | Para qué | Coste |
-|---|---|---|---|
-| OpenRouter | DeepSeek R1 | Chat mejorado | Gratis |
-| OpenRouter | Perplexity Sonar | Acceso internet | Gratis |
-| Google AI Studio | Gemini 2.0 Flash | Chat alternativo | Gratis (1M/mes) |
-| Anthropic | Claude Sonnet 4.5 | Conversación premium | ~$0.001/msg |
-
-> Para añadir cualquiera: solo añadir su API key al `.env` y actualizar `groq_router.py`
-
----
-
-## Próximos pasos ordenados
-
-### Paso 1 — Probar NLP (ahora, 30 minutos)
 ```
-[ ] Conseguir GROQ_API_KEY en console.groq.com
-[ ] Añadir al .env + pip install groq
-[ ] Probar los 4 casos de uso en Telegram
-[ ] Añadir groq a requirements.txt y commitear
+Usuario escribe texto
+    ↓
+nlp_handler() — handlers/nlp.py
+    ↓
+⏳ Procesando... (feedback inmediato)
+    ↓
+_get_api_context()  ←── 3 llamadas paralelas a la API
+    ├── get_appointments(hoy)
+    ├── get_appointments(mañana)
+    └── get_habits(hoy)
+    ↓
+groq_router.route(text, user_data, api_context)
+    ↓
+① llama-3.1-8b-instant → clasificar intent
+    ├── nueva_cita   → extract_cita()  → api.create_appointment()
+    ├── log_habito   → extract_habito() → api.log_habit()
+    ├── consulta     → chat_response(contexto real)
+    ├── chat         → chat_response(contexto real)
+    └── desconocido  → mostrar menú del bot
 ```
 
-### Paso 2 — Mejorar NLP (cuando Paso 1 funcione)
-```
-[ ] Intent editar_cita y borrar_cita
-[ ] Consultas con datos reales (inject resumen del día en el prompt)
-[ ] Persistir historial en SQLite (no perder contexto al reiniciar)
-[ ] Soporte voz con Whisper (ver docs/NLP_ARQUITECTURA.md)
-```
+### Cómo cambiar la personalidad de THDORA
+Edita solo `_CHAT_SYSTEM_BASE` en `src/bot/groq_router.py`.
+El cambio tiene efecto inmediato al reiniciar el bot.
+No hay que tocar ningún otro módulo.
 
-### Paso 3 — Docker 24/7 (F10)
-```
-[ ] Dockerfile + docker-compose.yml
-[ ] Desplegar en VPS o Raspberry Pi
-[ ] El bot siempre activo sin tener el portátil encendido
-```
-
-### Paso 4 — Multi-usuario (F11)
-```
-[ ] user_id en todas las tablas
-[ ] Varias personas usando el mismo bot
-```
+### Cómo añadir un nuevo intent
+1. Añadir el nombre al `_CLASSIFY_SYSTEM` en `groq_router.py`
+2. Añadir la rama en `route()` con su función de extracción
+3. Añadir el handler correspondiente en `nlp.py`
 
 ---
 
@@ -123,7 +111,7 @@ Ver documentación completa en [`docs/NLP_ARQUITECTURA.md`](docs/NLP_ARQUITECTUR
 ```bash
 # Obligatorias
 TELEGRAM_BOT_TOKEN=xxx   # token de @BotFather
-GROQ_API_KEY=gsk_xxx     # console.groq.com — gratis
+GROQ_API_KEY=gsk_xxx     # console.groq.com — gratis ✅ configurada
 
 # Opcionales (para cuando se quiera expandir)
 OPENROUTER_API_KEY=xxx   # openrouter.ai — gratis
@@ -143,12 +131,11 @@ thdora/
 ├── src/bot/
 │   ├── main.py              ← entrypoint bot
 │   ├── api_client.py        ← llamadas HTTP a FastAPI
-│   ├── groq_router.py       ← 🆕 orquestador NLP
+│   ├── groq_router.py       ← orquestador NLP modo Toki
 │   ├── scheduler.py         ← APScheduler F12
 │   ├── keyboards.py         ← teclados Telegram
 │   └── handlers/
-│       ├── __init__.py
-│       ├── nlp.py           ← 🆕 handler texto libre
+│       ├── nlp.py           ← handler texto libre
 │       ├── menu.py
 │       ├── citas.py
 │       ├── habitos.py
@@ -158,16 +145,27 @@ thdora/
 ├── src/api/                 ← FastAPI
 ├── src/db/                  ← SQLAlchemy + SQLite
 ├── docs/
-│   ├── NLP_ARQUITECTURA.md  ← 🆕 decisiones IA
+│   ├── NLP_ARQUITECTURA.md  ← decisiones IA
 │   ├── INDEX.md
 │   ├── FLUJOS_DETALLADOS.md
 │   ├── API_REFERENCE.md
 │   └── CONVENCIONES.md
-├── ROADMAP.md
-├── CHANGELOG.md
+├── ROADMAP.md               ← qué viene
+├── CHANGELOG.md             ← qué se hizo
 └── COMO_PROCEDER.md         ← estás aquí
 ```
 
 ---
 
-_Actualizado: 14 abril 2026 — después de implementar groq_router.py y handlers/nlp.py_
+## Warnings conocidos (no críticos)
+
+```
+PTBUserWarning: per_message=False en ConversationHandler
+```
+No afecta al funcionamiento. Se arregla añadiendo `per_message=True`
+a los `CallbackQueryHandler` internos de `citas.py`, `habitos.py` y `config.py`.
+No es urgente.
+
+---
+
+_Actualizado: 14 abril 2026 — 16:14 CEST — post pruebas v0.14.0 en vivo_
