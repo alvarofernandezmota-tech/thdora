@@ -4,6 +4,7 @@ Entrypoint del bot Telegram de THDORA — v4.0
 Variables de entorno::
     TELEGRAM_BOT_TOKEN   → token de @BotFather (obligatorio)
     THDORA_API_URL       → URL de la FastAPI (por defecto http://localhost:8000)
+    GROQ_API_KEY         → API key de Groq para NLP (obligatorio para texto libre)
 
 Orden de registro de handlers:
     1. ConversationHandlers (mayor prioridad; incluyen sus propios entry_points)
@@ -13,7 +14,7 @@ Orden de registro de handlers:
        - build_edit_hab_handler()  ^he_
        - build_config_handler()    /config + ^quick_config$
     2. CallbackQueryHandlers globales (navegación, borrado, detalle)
-    3. MessageHandler texto libre (acumulación hab fuera de flujos)
+    3. MessageHandler texto libre (acumulación hab fuera de flujos → NLP)
     4. CommandHandlers simples
     5. Error handler
 
@@ -72,6 +73,7 @@ from src.bot.handlers import (
     # Error
     error_handler,
 )
+from src.bot.handlers.nlp import nlp_handler
 
 load_dotenv()
 
@@ -129,7 +131,7 @@ def build_app(token: str):
     app.add_handler(CallbackQueryHandler(cb_hab_add,            pattern=r"^ha_"))
     app.add_handler(CallbackQueryHandler(cb_cancel_action,      pattern=r"^cancel_action$"))
 
-    # ── 3. Texto libre (acumulación fuera de flujos) ──────────────────
+    # ── 3. Texto libre (acumulación hábito → NLP) ──────────────────────
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _route_free_text))
 
     # ── 4. Comandos ───────────────────────────────────────────────
@@ -148,10 +150,15 @@ def build_app(token: str):
 
 async def _route_free_text(update, context) -> None:
     """Enruta texto libre fuera de ConversationHandlers.
-    Actualmente solo gestiona la acumulación de hábitos (cb_hab_add_value).
+
+    Prioridad:
+        1. Si hay acumulación de hábito activa → cb_hab_add_value (flujo existente)
+        2. En cualquier otro caso              → nlp_handler (Groq)
     """
     if context.user_data.get("acum_hab_nombre"):
         await cb_hab_add_value(update, context)
+        return
+    await nlp_handler(update, context)
 
 
 def main() -> None:
