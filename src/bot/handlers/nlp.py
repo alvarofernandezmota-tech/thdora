@@ -1,165 +1,195 @@
 """
-Handler de lenguaje natural (NLP) para THDORA.
+Handler de texto libre — modo Toki.
 
-Actúa cuando el usuario escribe texto libre fuera de cualquier
-ConversationHandler activo y NO está acumulando un hábito.
+Flujo completo:
+    1. Envía ⏳ Procesando... (feedback inmediato mientras trabaja Groq)
+    2. Consulta contexto real de la API:
+       — citas de hoy y mañana
+       — hábitos de hoy
+       Si la API falla, el contexto queda vacío y el bot sigue funcionando.
+    3. Llama a groq_router.route() con el texto + contexto
+    4. Según el intent:
+       nueva_cita  → crea la cita en la API (con fix hora 00:00)
+       log_habito  → registra el hábito en la API
+       consulta    → responde con datos reales de la agenda
+       chat        → respuesta conversacional con contexto
+       desconocido → muestra el menú principal del bot (NO texto suelto)
 
-Flujo:
-    texto libre → groq_router.route() → intent
-        nueva_cita  → api.create_appointment() → confirmación
-        log_habito  → api.log_habit()           → confirmación
-        chat/otros  → respuesta conversacional
-
-Mejoras UX (abr-2026):
-    - Mensaje '⏳ Procesando...' mientras Groq trabaja, se borra al terminar.
-      Evita que el usuario crea que el bot no responde durante el llamado LLM.
-    - Si la hora devuelta es '00:00' se pide confirmación antes de crear la cita.
+Diseño Toki:
+    La IA actua solo como router de intención + extractor de slots.
+    Cuando no entiende, devuelve siempre la interfaz del bot (botones),
+    no una respuesta de texto inventada.
+    El contexto real (agenda + hábitos) se inyecta en el prompt antes
+    de llamar a Groq, para respuestas tipo ¿qué tengo mañana?
 """
 
 import logging
-from datetime import date
+from datetime import date, timedelta
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from src.bot.api_client import ThdoraApiClient
 from src.bot.groq_router import route
+from src.bot.keyboards import _kb_start
 
 logger = logging.getLogger(__name__)
 api    = ThdoraApiClient()
 
-_TIPOS_ES = {
-    "medica":   "🏥 Médica",
-    "personal": "👤 Personal",
-    "trabajo":  "💼 Trabajo",
-    "otro":     "📌 Otro",
-}
+_MSG_MENU = (
+    "🤔 No he entendido bien lo que quieres hacer.\n"
+    "Usa los botones o escíbeme algo como:\n"
+    "  • _\"mañana dentista a las 5\"_\n"
+    "  • _\"dormí 7 horas\"_"
+)
+
+_MSG_HORA_CONFIRM = (
+    "⏰ No he detectado la hora. ¿A qué hora es la cita _{name}_?\n"
+    "Escíbeme la hora (ej: _17:00_) o usa /nueva para el flujo guiado."
+)
+
+
+async def _get_api_context(today: str, tomorrow: str) -> dict:
+    """
+    Obtiene el contexto real de la API para inyectar en el prompt de Groq.
+    Hace las 3 llamadas en paralelo con gather. Si alguna falla, devuelve
+    lo que haya podido obtener (degradación elegante).
+    """
+    import asyncio
+
+    async def _safe(coro):
+        try:
+            return await coro
+        except Exception:
+            return None
+
+    citas, citas_man, habitos = await asyncio.gather(
+        _safe(api.get_appointments(today)),
+        _safe(api.get_appointments(tomorrow)),
+        _safe(api.get_habits(today)),
+    )
+    return {
+        "citas":        citas        or [],
+        "citas_manana": citas_man    or [],
+        "habitos":      habitos      or {},
+    }
 
 
 async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Handler principal de texto libre con NLP.
-    Se llama desde _route_free_text() en main.py.
-    """
-    text      = update.message.text.strip()
-    user_data = context.user_data
+    text = (update.message.text or "").strip()
+    if not text:
+        return
 
-    # Indicador visual: mensaje temporal mientras Groq procesa
+    today    = date.today().isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+
+    # 1. Feedback inmediato
     processing_msg = await update.message.reply_text("⏳ Procesando...")
 
-    try:
-        result = await route(text, user_data)
-    finally:
-        # Borrar el indicador independientemente del resultado
-        try:
-            await processing_msg.delete()
-        except Exception:
-            pass
+    # 2. Contexto real de la API (paralelo)
+    api_context = await _get_api_context(today, tomorrow)
 
-    intent = result["intent"]
-    data   = result["data"]
-    reply  = result["reply"]
-
-    # ── Crear cita ────────────────────────────────────────────────────
-    if intent == "nueva_cita" and data:
-        await _handle_nueva_cita(update, data)
-        return
-
-    # ── Registrar hábito ──────────────────────────────────────────────
-    if intent == "log_habito" and data:
-        await _handle_log_habito(update, data)
-        return
-
-    # ── Chat / consulta / desconocido ────────────────────────────────
-    if reply:
-        await update.message.reply_text(reply)
-        return
-
-    await update.message.reply_text(
-        "🤔 No he entendido bien. Puedes usar /nueva para una cita o /habito para un hábito."
+    # 3. Router NLP con contexto
+    result = await route(
+        text=text,
+        user_data=context.user_data,
+        api_context=api_context,
     )
 
-
-async def _handle_nueva_cita(update: Update, data: dict) -> None:
-    """Crea la cita en la API y confirma al usuario.
-
-    Si Groq no detectó la hora (devuelve '00:00') pide confirmación
-    antes de guardar para evitar citas sin hora válida.
-    """
+    # Borrar ⏳ Procesando...
     try:
-        date_str = data.get("date") or date.today().isoformat()
-        time_str = data.get("time", "09:00")
-        name     = data.get("name", "Cita")
-        apt_type = data.get("type", "otro")
-        notes    = data.get("notes", "")
+        await processing_msg.delete()
+    except Exception:
+        pass
 
-        # Si la hora es 00:00, Groq no la detectó — pedir confirmación
-        if time_str == "00:00":
+    intent    = result["intent"]
+    data      = result["data"]
+    reply     = result["reply"]
+    show_menu = result.get("show_menu", False)
+
+    # ── intent desconocido → menú del bot ─────────────────────────────
+    if show_menu:
+        await update.message.reply_text(
+            _MSG_MENU,
+            parse_mode="Markdown",
+            reply_markup=_kb_start(),
+        )
+        return
+
+    # ── reply sola (fallo extraccion, chat, consulta) ───────────────────
+    if reply and not data:
+        await update.message.reply_text(reply, parse_mode="Markdown")
+        return
+
+    # ── nueva_cita ────────────────────────────────────────────────────
+    if intent == "nueva_cita" and data:
+        cita_date = data.get("date", today)
+        cita_time = data.get("time", "09:00")
+        cita_name = data.get("name", "Cita")
+        cita_type = data.get("type", "otro")
+        cita_notes = data.get("notes", "")
+
+        # Fix hora 00:00: pedir confirmación en vez de crear a medianoche
+        if cita_time == "00:00":
             await update.message.reply_text(
-                f"⚠️ No detecté la hora para *{name}*. "
-                f"¿A qué hora es? (o usa /nueva para crearla manualmente)",
+                _MSG_HORA_CONFIRM.format(name=cita_name),
                 parse_mode="Markdown",
             )
             return
 
-        # Comprobar conflicto de hora
-        conflict = await api.check_appointment_conflict(date_str, time_str)
+        # Conflicto de hora
+        conflict = await api.check_appointment_conflict(cita_date, cita_time)
         if conflict:
             await update.message.reply_text(
-                f"⚠️ Ya tienes *{conflict['name']}* a las *{time_str}* el {date_str}.\n"
-                f"Usa /nueva para elegir otra hora.",
+                f"⚠️ Ya tienes *{conflict.get('name', 'una cita')}* "
+                f"el {cita_date} a las {cita_time}.\n"
+                f"Elige otra hora o usa /nueva para el flujo guiado.",
                 parse_mode="Markdown",
             )
             return
 
-        await api.create_appointment(
-            date_str=date_str,
-            time=time_str,
-            name=name,
-            apt_type=apt_type,
-            notes=notes,
-        )
-
-        tipo_label = _TIPOS_ES.get(apt_type, "📌 Otro")
-        from datetime import datetime
-        fecha_bonita = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d/%m/%Y")
-
-        await update.message.reply_text(
-            f"✅ *{name}* el *{fecha_bonita}* a las *{time_str}*\n"
-            f"Tipo: {tipo_label}",
-            parse_mode="Markdown",
-        )
-    except Exception as e:
-        logger.error("Error creando cita desde NLP: %s", e)
-        await update.message.reply_text(
-            "⚠️ No pude crear la cita. Inténtalo con /nueva."
-        )
-
-
-async def _handle_log_habito(update: Update, data: dict) -> None:
-    """Registra el hábito en la API y confirma al usuario."""
-    try:
-        date_str = data.get("date") or date.today().isoformat()
-        habit    = data.get("habit", "")
-        value    = data.get("value", "")
-
-        if not habit or not value:
-            await update.message.reply_text(
-                "🤔 No entendí bien el hábito. Puedes usar /habito para registrarlo."
+        try:
+            await api.create_appointment(
+                date_str=cita_date,
+                time=cita_time,
+                name=cita_name,
+                apt_type=cita_type,
+                notes=cita_notes,
             )
-            return
+            await update.message.reply_text(
+                f"✅ *{cita_name}* añadida el {cita_date} a las {cita_time} \u231f",
+                parse_mode="Markdown",
+                reply_markup=_kb_start(),
+            )
+        except Exception as e:
+            logger.error("Error creando cita desde NLP: %s", e)
+            await update.message.reply_text(
+                f"❌ No pude crear la cita ({e}).\nPrueba con /nueva.",
+                reply_markup=_kb_start(),
+            )
+        return
 
-        await api.log_habit(date_str=date_str, habit=habit, value=value)
+    # ── log_habito ──────────────────────────────────────────────────────
+    if intent == "log_habito" and data:
+        hab_date  = data.get("date", today)
+        hab_name  = data.get("habit", "hábito")
+        hab_value = data.get("value", "")
 
-        from datetime import datetime
-        fecha_bonita = datetime.strptime(date_str, "%Y-%m-%d").strftime("%d/%m/%Y")
-
-        await update.message.reply_text(
-            f"✅ *{habit}*: {value} — {fecha_bonita}",
-            parse_mode="Markdown",
-        )
-    except Exception as e:
-        logger.error("Error registrando hábito desde NLP: %s", e)
-        await update.message.reply_text(
-            "⚠️ No pude registrar el hábito. Inténtalo con /habito."
-        )
+        try:
+            await api.log_habit(
+                date_str=hab_date,
+                habit=hab_name,
+                value=hab_value,
+            )
+            await update.message.reply_text(
+                f"✅ *{hab_name}*: {hab_value} — registrado",
+                parse_mode="Markdown",
+                reply_markup=_kb_start(),
+            )
+        except Exception as e:
+            logger.error("Error registrando hábito desde NLP: %s", e)
+            await update.message.reply_text(
+                f"❌ No pude registrar el hábito ({e}).\nPrueba con /habito.",
+                reply_markup=_kb_start(),
+            )
+        return
