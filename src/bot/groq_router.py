@@ -23,6 +23,7 @@ Variables de entorno:
 import json
 import logging
 import os
+import re
 from datetime import date, timedelta
 from typing import Any, Dict, List, Optional
 
@@ -47,6 +48,15 @@ MODEL_FAST   = "llama-3.1-8b-instant"       # clasificador
 MODEL_STRONG = "llama-3.3-70b-versatile"    # extracción + chat
 MAX_HISTORY  = 10                            # mensajes de contexto
 
+# Tipos de cita válidos en la API (con y sin tilde → normalización)
+_TIPO_MAP = {
+    "medica": "médica", "médica": "médica",
+    "personal": "personal",
+    "trabajo": "trabajo",
+    "otro": "otro", "otra": "otro",
+}
+_TIPO_DEFAULT = "otro"
+
 
 # ── Utilidades de fecha ──────────────────────────────────────────────
 
@@ -55,6 +65,19 @@ def _today() -> str:
 
 def _tomorrow() -> str:
     return (date.today() + timedelta(days=1)).isoformat()
+
+
+# ── Extracción robusta de JSON (elimina texto extra antes/después) ────
+
+def _extract_json(raw: str) -> Optional[dict]:
+    """Extrae el primer objeto JSON encontrado en raw, ignorando texto extra."""
+    match = re.search(r"\{.*?\}", raw, re.DOTALL)
+    if not match:
+        return None
+    try:
+        return json.loads(match.group())
+    except json.JSONDecodeError:
+        return None
 
 
 # ── Historial de conversación ────────────────────────────────────────
@@ -117,18 +140,18 @@ async def extract_cita(text: str, history: List[Dict[str, str]]) -> Optional[Dic
     cita_system = f"""
 Eres un extractor de datos para crear citas en un asistente personal.
 Hoy es {_today()} y mañana es {_tomorrow()}.
-Extraes los datos del mensaje y devuelves SOLO un JSON válido con este formato exacto:
+Extrae los datos del mensaje y devuelve SOLO un JSON válido con este formato exacto:
 
 {{"date": "YYYY-MM-DD", "time": "HH:MM", "name": "título", "type": "tipo", "notes": ""}}
 
 Reglas:
 - date: infiere la fecha. "mañana" = {_tomorrow()}, "hoy" = {_today()}, "el lunes" = próximo lunes, etc.
-- time: formato 24h. "las 5" = "17:00", "las 5 de la tarde" = "17:00", "las 9" = "09:00".
+- time: formato 24h. "las 5" = "17:00", "las 5 de la tarde" = "17:00", "las 9" = "09:00". Si no hay hora clara usa "00:00".
 - name: título breve de la cita (ej: "Dentista", "Reunión con Ana", "Médico").
-- type: uno de: "medica", "personal", "trabajo", "otro".
+- type: EXACTAMENTE uno de: "médica", "personal", "trabajo", "otro".
 - notes: notas adicionales o string vacío.
 
-Devuelve SOLO el JSON, sin texto adicional.
+Devuelve SOLO el JSON, sin texto adicional, sin markdown, sin explicaciones.
 """
     try:
         messages = [
@@ -139,11 +162,15 @@ Devuelve SOLO el JSON, sin texto adicional.
         resp = await client.chat.completions.create(
             model=MODEL_STRONG,
             messages=messages,
-            max_tokens=150,
+            max_tokens=200,
             temperature=0.0,
         )
         raw = resp.choices[0].message.content.strip()
-        return json.loads(raw)
+        data = _extract_json(raw)
+        if data:
+            # Normalizar tipo por si el LLM devuelve sin tilde u otro valor
+            data["type"] = _TIPO_MAP.get(data.get("type", "").lower(), _TIPO_DEFAULT)
+        return data
     except Exception as e:
         logger.error("Error extrayendo cita: %s", e)
         return None
@@ -159,7 +186,7 @@ async def extract_habito(text: str, history: List[Dict[str, str]]) -> Optional[D
     habito_system = f"""
 Eres un extractor de datos para registrar hábitos en un asistente personal.
 Hoy es {_today()}.
-Extraes los datos del mensaje y devuelves SOLO un JSON válido con este formato exacto:
+Extrae los datos del mensaje y devuelve SOLO un JSON válido con este formato exacto:
 
 {{"date": "YYYY-MM-DD", "habit": "nombre_habito", "value": "valor"}}
 
@@ -168,7 +195,7 @@ Reglas:
 - habit: nombre del hábito tal como suele registrarlo (ej: "Sueño", "Ejercicio", "Agua", "Peso").
 - value: el valor registrado como string (ej: "7h", "30min", "2L", "72kg", "sí").
 
-Devuelve SOLO el JSON, sin texto adicional.
+Devuelve SOLO el JSON, sin texto adicional, sin markdown, sin explicaciones.
 """
     try:
         messages = [
@@ -179,11 +206,11 @@ Devuelve SOLO el JSON, sin texto adicional.
         resp = await client.chat.completions.create(
             model=MODEL_STRONG,
             messages=messages,
-            max_tokens=100,
+            max_tokens=150,
             temperature=0.0,
         )
         raw = resp.choices[0].message.content.strip()
-        return json.loads(raw)
+        return _extract_json(raw)
     except Exception as e:
         logger.error("Error extrayendo hábito: %s", e)
         return None
@@ -247,7 +274,6 @@ async def route(
         if data:
             push_history(user_data, "assistant", f"[cita creada: {data}]")
             return {"intent": intent, "data": data, "reply": None}
-        # Si falla la extracción, caemos a chat
         reply = await chat_response(text, history)
         push_history(user_data, "assistant", reply)
         return {"intent": "chat", "data": None, "reply": reply}
