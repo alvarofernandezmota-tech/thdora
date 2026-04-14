@@ -1,5 +1,5 @@
 """
-Entrypoint del bot Telegram de THDORA — v4.1
+Entrypoint del bot Telegram de THDORA — v4.2
 
 Variables de entorno::
     TELEGRAM_BOT_TOKEN   → token de @BotFather (obligatorio)
@@ -13,17 +13,15 @@ Orden de registro de handlers:
        - build_edit_apt_handler()  ^ae_
        - build_edit_hab_handler()  ^he_
        - build_config_handler()    /config + ^quick_config$
-    2. CallbackQueryHandlers globales (navegación, borrado, detalle)
+    2. CallbackQueryHandlers globales (navegación, borrado, detalle, desambiguación)
     3. MessageHandler texto libre (acumulación hab fuera de flujos → NLP)
     4. CommandHandlers simples
     5. Error handler
 
 Persistencia (PicklePersistence):
     - Archivo: data/bot_persistence.pkl (excluido en .gitignore)
-    - Persiste: user_data (nlp_history, acum_hab_nombre, preferencias)
+    - Persiste: user_data (nlp_history, api_context_cache, nlp_pending_changes, preferencias)
     - Efecto: el contexto NLP y los flujos activos sobreviven reinicios del bot
-    - NOTA: store_bot_data / store_chat_data no existen en PTB v20 — la
-      persistencia selectiva se controla con update_interval únicamente.
 
 Scheduler (F12):
     - Se arranca en post_init (dentro del event loop de PTB, evita RuntimeError)
@@ -88,6 +86,7 @@ from src.bot.handlers import (
     error_handler,
 )
 from src.bot.handlers.nlp import nlp_handler
+from src.bot.handlers.nlp_disambig import cb_nlp_disambig
 
 load_dotenv()
 
@@ -124,8 +123,6 @@ def _load_token() -> str:
 
 
 def build_app(token: str):
-    # PicklePersistence: persiste user_data entre reinicios del proceso.
-    # PTB v20 no acepta store_bot_data / store_chat_data — se usa solo filepath.
     os.makedirs("data", exist_ok=True)
     persistence = PicklePersistence(filepath=_PERSISTENCE_PATH)
 
@@ -155,6 +152,8 @@ def build_app(token: str):
     app.add_handler(CallbackQueryHandler(cb_hab_delete_confirm, pattern=r"^hdc_"))
     app.add_handler(CallbackQueryHandler(cb_hab_add,            pattern=r"^ha_"))
     app.add_handler(CallbackQueryHandler(cb_cancel_action,      pattern=r"^cancel_action$"))
+    # Desambiguación NLP — debe ir antes de cancel_action para no colisionar
+    app.add_handler(CallbackQueryHandler(cb_nlp_disambig,       pattern=r"^nlp_disambig\|"))
 
     # ── 3. Texto libre (acumulación hábito → NLP) ──────────────────────
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _route_free_text))
@@ -199,7 +198,7 @@ def main() -> None:
 
     app.post_init = _post_init
 
-    logger.info("🤖 THDORA bot v4.1 arrancando (polling)…")
+    logger.info("🤖 THDORA bot v4.2 arrancando (polling)…")
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=["message", "callback_query"],
