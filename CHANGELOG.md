@@ -1,64 +1,93 @@
-# CHANGELOG — THDORA
+# 📋 THDORA — CHANGELOG
 
-Todos los cambios relevantes del proyecto ordenados de más reciente a más antiguo.
-
----
-
-## [v4.1.0] — 2026-04-14
-
-### Fixed
-- **`citas.py`**: `_parse_apt_callback()` usa `rsplit('_', 1)` para extraer
-  `(date_str, index)` de callbacks `ae_`, `ad_`, `adc_` — evita romper con
-  fechas que contienen guiones (`2026-04-13`).
-- **`habitos.py`**: `_parse_hab_callback()` usa slice fijo `[:10]` / `[11:]`
-  para extraer `(date_str, habit)` de callbacks `hd_`, `hdc_`, `he_`, `ha_`.
-- **`scheduler.py`**: `apt.get('date') or apt.get('date_str', '')` — evita
-  `WARNING: 'date'` al programar recordatorios de cita.
-- **Flujo editar cita**: reescrito con botones (Hora / Nombre / Tipo / Notas).
-  Elimina el uso de `/skip` en edición.
-- **Flujo editar hábito**: reescrito con botones (Cambiar nombre / Cambiar valor).
-- **`main.py`**: eliminado `cb_quick_config` como handler global — era
-  entry_point de `build_config_handler()` y causaba conflicto de captura.
-- **`main.py`**: `post_init` arranca el scheduler dentro del event loop de PTB
-  (evita `RuntimeError: no running event loop`).
-- **`menu.py`**: `cmd_start` llama a `schedule_user_jobs()` para programar los
-  jobs diarios (daily_summary / evening_log) del usuario al arrancar.
-- **`config.py`**: añadido botón 🗑️ Borrar por cada hábito configurado +
-  estado `CFG_DEL_CONF` con confirmación.
-- **`config.py`**: `_is_skip()` normaliza `/skip` y `skip` (con y sin barra)
-  en pasos `CFG_UNIT` y `CFG_QUICK`.
-- **`config.py`**: `notif_cancel_to_menu` registrado en `NOTIF_SET_TIME` y
-  `NOTIF_SET_OFFSETS` — el botón ❌ Cancelar del teclado de horas ya funciona
-  y vuelve al menú de notificaciones sin guardar.
-- **`config.py`**: los toggles on/off de notificaciones ya **no reprograman**
-  el scheduler; solo `notif_recv_time` lo hace al confirmar una hora nueva.
-  Elimina la duplicación de jobs APScheduler.
-- **`common.py`**: `error_handler` ahora notifica al usuario con
-  `show_alert=True` cuando hay un error no controlado.
-- **`handlers/__init__.py`**: eliminado export de `cb_quick_config`.
+> **Navegación rápida:** [README](README.md) · [ROADMAP](ROADMAP.md) · [Índice docs](docs/INDEX.md)
 
 ---
 
-## [v4.0.0] — 2026-04-13
+## [v0.12.0] — 14 abril 2026
 
-### Added
-- Franjas horarias en `/nueva`: 🌅 Mañana / 🌆 Tarde / 🌙 Noche + cuartos.
-- `build_edit_apt_handler()`: ConversationHandler dedicado a editar citas.
-- `build_edit_hab_handler()`: ConversationHandler dedicado a editar hábitos.
-- `build_config_handler()`: rama Hábitos + rama Notificaciones unificadas.
-- Scheduler F12 con APScheduler: `daily_summary`, `evening_log`,
-  `apt_reminder` (one-shot por cita con offsets configurables).
-- Teclados de navegación semanal en `/semana`.
-- `_kb_notif_menu()` con estado visible (✅/❌) y botones de hora.
-- `COMO_PROCEDER.md` con guía de trabajo incremental.
+### ✨ Añadido — NLP con Groq (F13-base)
 
-### Changed
-- Estados de ConversationHandlers reorganizados sin colisiones (rangos fijos).
-- `keyboards.py` centraliza todos los teclados inline.
+- **`src/bot/groq_router.py`** — Orquestador NLP completo:
+  - `classify_intent()` con `llama-3.1-8b-instant` (~50ms)
+  - `extract_cita()` con `llama-3.3-70b-versatile` → JSON estructurado
+  - `extract_habito()` con `llama-3.3-70b-versatile` → JSON estructurado
+  - `chat_response()` con `llama-3.3-70b-versatile` → respuesta libre
+  - `route()` — orquestador principal con historial de 10 mensajes
+  - Memoria conversacional en `context.user_data["nlp_history"]`
+
+- **`src/bot/handlers/nlp.py`** — Handler de Telegram:
+  - Detecta conflictos de hora antes de crear cita
+  - Formato de respuesta consistente con el resto del bot
+  - Fallback a `/nueva` o `/habito` si la extracción falla
+
+- **`src/bot/main.py`** — Actualizado:
+  - `_route_free_text()` prioriza `acum_hab_nombre` y cae a NLP
+  - Import de `nlp_handler`
+  - Documentación de `GROQ_API_KEY` en docstring
+
+- **`docs/NLP_ARQUITECTURA.md`** — Documentación completa:
+  - Decisiones de arquitectura multi-modelo
+  - Roadmap de proveedores opcionales (OpenRouter, Claude, Gemini)
+  - Ejemplos de uso y plan de voz (Whisper)
+
+### 🔧 Requiere para activar
+```
+GROQ_API_KEY=gsk_xxxx  ← añadir al .env
+pip install groq        ← instalar dependencia
+```
 
 ---
 
-## [v3.x] — 2026-Q1
+## [v0.11.0] — 13 abril 2026
 
-- Versión inicial funcional: citas, hábitos, resumen, semana.
-- Sin scheduler, sin franjas, sin edición por botones.
+### ✨ Añadido — F12 Notificaciones + Documentación técnica
+
+- `UserConfig` en SQLite (horarios resumen + evening)
+- APScheduler integrado: resumen diario + evening log + jobs one-shot por cita
+- `/config` → rama notificaciones con horarios configurables
+- Scheduler arranca en `post_init` (sin RuntimeError)
+- Fix entry points `/config`: `quick_config` como entry_point del ConversationHandler
+
+### 📚 Documentación
+- `docs/FLUJOS_DETALLADOS.md`
+- `docs/API_REFERENCE.md`
+- `docs/CONVENCIONES.md`
+- `docs/INDEX.md`
+- `docs/F12_NOTIFICACIONES_DESIGN.md`
+
+---
+
+## [v0.10.0] — Abril 2026
+
+### ✨ Añadido — Bot v4 modular + UX avanzada
+- Refactor handlers en package `src/bot/handlers/`
+- Franjas horarias en `/nueva`: 🌅 Mañana / 🌆 Tarde / 🌙 Noche
+- Entry points desde botones del menú (➕ cita, ➕ hábito)
+- Vista detalle de cita al pulsar ⏰ hora
+- Editar nombre y valor de hábito inline
+- Cambio vista Citas ↔ Hábitos desde la nav
+- Conflicto hábito: Sobreescribir / Sumar / Cancelar
+
+---
+
+## [v0.9.0] — Marzo 2026
+
+### ✨ Añadido — Persistencia SQLite
+- `SQLiteLifeManager` CRUD completo
+- `data/thdora.db` — datos persistentes entre reinicios
+- 14 endpoints REST en FastAPI
+- `GET /summary/{date}`, `/week`, `/range`, `/stats`
+
+---
+
+## [v0.1–0.8] — Febrero–Marzo 2026
+
+- Arquitectura base (`AbstractLifeManager`, `MemoryLifeManager`, `JsonLifeManager`)
+- FastAPI REST con CRUD citas y hábitos
+- Bot Telegram v1–v3: comandos, inline buttons, fechas flexibles
+- Endpoints temporales (semana, rango, próximas citas)
+
+---
+
+_Última actualización: 14 abril 2026 — 11:46 CEST_

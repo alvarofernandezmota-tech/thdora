@@ -1,142 +1,173 @@
-# CÓMO PROCEDER — THDORA
+# 🧭 THDORA — CÓMO PROCEDER
 
-Guía de trabajo para continuar el desarrollo de forma ordenada.
-Actualizado: 2026-04-14.
-
----
-
-## 🔴 PENDIENTE — Probar antes de tagear v4.1.0
-
-> Estos cambios se hicieron el 2026-04-14 pero **no se han probado en local**.
-> Mañana arranca con `git pull && make run-bot` y valida los 3 casos.
-
-### Checklist de pruebas
-
-- [ ] **1. Cancelar en pantalla de horas**
-  - `/config` → Notificaciones → ⏰ Hora resumen → pulsa **❌ Cancelar**
-  - ✅ Esperado: vuelve al menú de notificaciones sin cambiar nada
-  - ✅ Mismo test con ⏰ Hora evening log → ❌ Cancelar
-
-- [ ] **2. Jobs no duplicados al cambiar hora**
-  - Cambia la hora del resumen 2 veces seguidas
-  - ✅ Esperado: en logs aparece **una sola línea** `daily_summary_XXX programado a las XX:00` cada vez
-  - ❌ Si aparece dos veces → hay regresión en `scheduler.py`
-
-- [ ] **3. Borrar config de hábito**
-  - `/config` → Hábitos → pulsa 🗑️ Borrar en uno → confirmar
-  - ✅ Esperado: mensaje `Config de X eliminada`
-
-- [ ] **4. Skip en config de hábito**
-  - `/config` → Hábitos → nuevo hábito → en "unidad" escribe `skip` (sin barra)
-  - ✅ Esperado: pasa al paso de botones rápidos sin error
-
-- [ ] **5. Flujo editar cita completo**
-  - Crear cita → botón ✏️ → cambiar hora → verificar que el reminder se reprograma en logs
-  - Crear cita → botón ✏️ → cambiar nombre → verificar que se actualiza
-
-- [ ] **6. Flujo editar hábito completo**
-  - Registrar hábito → botón ✏️ → cambiar valor → verificar que se actualiza
-  - Registrar hábito → botón ✏️ → cambiar nombre → verificar que el antiguo desaparece
-
-Una vez validados todos → `git tag v4.1.0 && git push --tags`
+> Guía de trabajo para retomar el proyecto en cualquier momento sin perder contexto.
+> Última actualización: **14 abril 2026**
 
 ---
 
-## Estado actual (v4.1.0 — pendiente validación)
-
-### ✅ Completado (en código)
-
-| Módulo | Estado | Notas |
-|---|---|---|
-| `main.py` | ✅ | Scheduler en `post_init`, sin conflicto `quick_config` |
-| `handlers/citas.py` | ✅ | Crear, editar (botones), borrar, detalle, recordatorios |
-| `handlers/habitos.py` | ✅ | Registrar, editar (botones), borrar, sumar, conflicto |
-| `handlers/config.py` | ✅ | Hábitos (CRUD config) + Notificaciones (hora, toggles, offsets) |
-| `handlers/menu.py` | ✅ | `/start` programa jobs diarios del scheduler |
-| `handlers/common.py` | ✅ | `/resumen`, `/cancelar`, error handler con aviso al usuario |
-| `handlers/semana.py` | ✅ | Vista semanal con navegación |
-| `keyboards.py` | ✅ | Todos los teclados inline centralizados |
-| `scheduler.py` | ✅ | daily_summary, evening_log, apt_reminder sin duplicados |
-| `api_client.py` | ✅ | Cliente HTTP para FastAPI |
-
-### 🔔 Warnings conocidos (no son errores)
+## Estado actual — qué hay funcionando
 
 ```
-PTBUserWarning: If 'per_message=False', 'CallbackQueryHandler' will not be tracked...
+✅ API FastAPI       → http://localhost:8000
+✅ Bot Telegram      → polling, v4.0
+✅ SQLite            → data/thdora.db
+✅ Scheduler F12     → APScheduler (resumen + evening + citas)
+✅ groq_router.py   → NLP listo (necesita GROQ_API_KEY)
+✅ handlers/nlp.py  → handler texto libre conectado
 ```
-Informativo de PTB v22+. No afecta al funcionamiento. **Tarea pendiente opcional** (ver P3).
 
 ---
 
-## Reglas de trabajo
-
-### Callbacks con fechas
-Los prefijos `ae_`, `ad_`, `adc_` usan `rsplit('_', 1)` para extraer
-`(date_str, index)`. Los prefijos `hd_`, `hdc_`, `he_`, `ha_` usan
-slice fijo `[:10]` / `[11:]`. **Nunca usar `split('_', 2)` con fechas.**
-
-### Scheduler
-- `schedule_user_jobs(bot, user_id, cfg)` es **idempotente**: hace
-  `remove_job` antes de `add_job`. Llamar siempre que cambie la hora.
-- Los toggles on/off **no reprograman** — solo cambian el campo en la API.
-- `schedule_apt_reminders` y `cancel_apt_reminders` se gestionan en `citas.py`.
-
-### ConversationHandlers — rangos de estados
-
-| Handler | Rango |
-|---|---|
-| `/nueva` (citas) | 0–8 |
-| `/habito` | 10–12 |
-| editar cita | 20–24 |
-| editar hábito | 30–32 |
-| `/config` hábitos | 40–44 |
-| `/config` notificaciones | 45–47 |
-| CFG_DEL_CONF | 48 |
-
-### quick_config
-`quick_config` es **entry_point** de `build_config_handler()`. **NO registrar**
-como handler global en `main.py` o habrá conflicto de captura.
-
----
-
-## Próximos pasos (por orden de impacto)
-
-### P1 — Validar checklist de pruebas (ver arriba)
-Antes de cualquier otra cosa.
-
-### P2 — Tests
-- Añadir tests unitarios para `_parse_apt_callback` y `_parse_hab_callback`.
-- Tests de integración para los flujos principales con `pytest-asyncio`.
-- CI ya está configurado en `.github/workflows/`.
-
-### P3 — Persistencia del scheduler
-- Actualmente los jobs se pierden si el bot se reinicia (APScheduler en memoria).
-- Migrar a `APScheduler` con `SQLAlchemyJobStore` usando la misma DB de FastAPI.
-
-### P4 — `per_message=True` en ConversationHandlers
-- Evaluar para eliminar los PTBUserWarnings.
-
-### P5 — Comando `/ayuda`
-- Listar todos los comandos disponibles con descripción breve.
-
-### P6 — Deploy
-- Dockerfile y docker-compose ya están listos.
-- Configurar variables en `.env` (ver `.env.example`).
-- `make docker-up` para arrancar todo en producción.
-
----
-
-## Arranque rápido
+## Arrancar el proyecto
 
 ```bash
 # Terminal 1 — API
-make run-api
+uvicorn src.api.main:app --reload
 
 # Terminal 2 — Bot
-make run-bot
-
-# O todo en tmux
-tmux new-session -d -s thdora 'make run-api' \; split-window -h 'sleep 3 && make run-bot' \; attach
+python -m src.bot.main
 ```
 
-Después de arrancar, mandar `/start` al bot para programar los jobs diarios.
+---
+
+## 🔜 LO MÁS URGENTE — Activar NLP
+
+> El código NLP ya está en GitHub. Solo falta la API key.
+
+```bash
+# 1. Ir a https://console.groq.com → crear cuenta gratis → copiar API key
+
+# 2. Añadir al .env
+echo "GROQ_API_KEY=gsk_xxxxxxxxxxxx" >> .env
+
+# 3. Instalar dependencia
+pip install groq
+
+# 4. Añadir groq al requirements.txt
+echo "groq>=0.9.0" >> requirements.txt
+git add requirements.txt && git commit -m "deps: añadir groq"
+
+# 5. Reiniciar el bot y probar
+python -m src.bot.main
+```
+
+**Pruebas a hacer en Telegram:**
+- `"mañana dentista a las 5"` → debe crear cita el 15/04 a las 17:00
+- `"dormí 7 horas"` → debe registrar Sueño: 7h hoy
+- `"¿qué tengo mañana?"` → respuesta conversacional
+- `"cámbiala a las 6"` → debe entender contexto anterior
+
+---
+
+## Arquitectura NLP (decisiones tomadas el 14/04/2026)
+
+Ver documentación completa en [`docs/NLP_ARQUITECTURA.md`](docs/NLP_ARQUITECTURA.md)
+
+### Resumen de decisiones
+
+1. **Todo en Groq gratis al principio** — sin coste, sin límites prácticos para uso personal
+2. **Dos modelos Groq:**
+   - `llama-3.1-8b-instant` → clasificar intent (rápido, barato)
+   - `llama-3.3-70b-versatile` → extraer entidades + chat (preciso)
+3. **Memoria conversacional** en `context.user_data` — últimos 10 mensajes
+4. **Arquitectura abierta** — se pueden añadir Claude, OpenRouter, Gemini después sin tocar el código base
+
+### Proveedores opcionales para más adelante
+
+| Proveedor | Modelo | Para qué | Coste |
+|---|---|---|---|
+| OpenRouter | DeepSeek R1 | Chat mejorado | Gratis |
+| OpenRouter | Perplexity Sonar | Acceso internet | Gratis |
+| Google AI Studio | Gemini 2.0 Flash | Chat alternativo | Gratis (1M/mes) |
+| Anthropic | Claude Sonnet 4.5 | Conversación premium | ~$0.001/msg |
+
+> Para añadir cualquiera: solo añadir su API key al `.env` y actualizar `groq_router.py`
+
+---
+
+## Próximos pasos ordenados
+
+### Paso 1 — Probar NLP (ahora, 30 minutos)
+```
+[ ] Conseguir GROQ_API_KEY en console.groq.com
+[ ] Añadir al .env + pip install groq
+[ ] Probar los 4 casos de uso en Telegram
+[ ] Añadir groq a requirements.txt y commitear
+```
+
+### Paso 2 — Mejorar NLP (cuando Paso 1 funcione)
+```
+[ ] Intent editar_cita y borrar_cita
+[ ] Consultas con datos reales (inject resumen del día en el prompt)
+[ ] Persistir historial en SQLite (no perder contexto al reiniciar)
+[ ] Soporte voz con Whisper (ver docs/NLP_ARQUITECTURA.md)
+```
+
+### Paso 3 — Docker 24/7 (F10)
+```
+[ ] Dockerfile + docker-compose.yml
+[ ] Desplegar en VPS o Raspberry Pi
+[ ] El bot siempre activo sin tener el portátil encendido
+```
+
+### Paso 4 — Multi-usuario (F11)
+```
+[ ] user_id en todas las tablas
+[ ] Varias personas usando el mismo bot
+```
+
+---
+
+## Variables de entorno
+
+```bash
+# Obligatorias
+TELEGRAM_BOT_TOKEN=xxx   # token de @BotFather
+GROQ_API_KEY=gsk_xxx     # console.groq.com — gratis
+
+# Opcionales (para cuando se quiera expandir)
+OPENROUTER_API_KEY=xxx   # openrouter.ai — gratis
+ANTHROPIC_API_KEY=xxx    # anthropic.com — de pago
+GEMINI_API_KEY=xxx       # aistudio.google.com — gratis
+
+# Configuración
+THDORA_API_URL=http://localhost:8000  # por defecto
+```
+
+---
+
+## Estructura de ficheros relevantes
+
+```
+thdora/
+├── src/bot/
+│   ├── main.py              ← entrypoint bot
+│   ├── api_client.py        ← llamadas HTTP a FastAPI
+│   ├── groq_router.py       ← 🆕 orquestador NLP
+│   ├── scheduler.py         ← APScheduler F12
+│   ├── keyboards.py         ← teclados Telegram
+│   └── handlers/
+│       ├── __init__.py
+│       ├── nlp.py           ← 🆕 handler texto libre
+│       ├── menu.py
+│       ├── citas.py
+│       ├── habitos.py
+│       ├── semana.py
+│       ├── config.py
+│       └── common.py
+├── src/api/                 ← FastAPI
+├── src/db/                  ← SQLAlchemy + SQLite
+├── docs/
+│   ├── NLP_ARQUITECTURA.md  ← 🆕 decisiones IA
+│   ├── INDEX.md
+│   ├── FLUJOS_DETALLADOS.md
+│   ├── API_REFERENCE.md
+│   └── CONVENCIONES.md
+├── ROADMAP.md
+├── CHANGELOG.md
+└── COMO_PROCEDER.md         ← estás aquí
+```
+
+---
+
+_Actualizado: 14 abril 2026 — después de implementar groq_router.py y handlers/nlp.py_
