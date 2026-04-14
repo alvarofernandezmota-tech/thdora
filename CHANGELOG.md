@@ -4,6 +4,80 @@
 
 ---
 
+## [v0.15.1] — 14 abril 2026
+
+### 🔧 Fix — Conflicto de cita alineado entre API, bot /nueva y editar hora
+
+#### Problema que resuelve
+Aunque la API ya detectaba solapamiento real (v0.15.0), el bot mostraba un mensaje
+genérico sin información del bloque existente (`⚠️ Ya tienes una cita a las 17:30`).
+Además, el flujo de *editar hora* no comprobaba solapamiento en absoluto.
+
+#### Solución
+Nuevo helper centralizado `_check_and_show_conflict` que usa el dato devuelto
+por la API para montar un mensaje rico y mostrar el horario visual del día.
+
+---
+
+#### `src/bot/handlers/citas.py`
+
+**`_check_and_show_conflict(obj, context, date_str, time_str, is_message)`** — nuevo helper
+- Llama a `api.check_appointment_conflict` (solapamiento real, 60 min).
+- Si hay conflicto, obtiene nombre y rango de la cita existente:
+  `_end_time(ct, 60)` → `Dentista (17:00–18:00)`.
+- Obtiene las citas del día y renderiza el horario visual con
+  `_build_day_schedule(..., highlight_time=time_str)` (slot solicitado marcado ⚠️).
+- Muestra el mensaje con `_kb_conflict_apt()` y retorna `NUEVA_CONFLICT`.
+- Degradación elegante: si la API falla, devuelve `None` y el flujo continúa.
+
+**`_after_time_selected`** — simplificado
+- Sustituye el bloque `try/except` manual por una llamada a `_check_and_show_conflict`.
+- Comportamiento externo idéntico, código deduplicado.
+
+**`cb_apt_edit_time`** — nuevo (fix P4)
+- Al editar la hora de una cita, ahora comprueba solapamiento antes de guardar.
+- Usa `_check_and_show_conflict` — misma UX que /nueva.
+- Si hay conflicto, guarda `edit_conflict_pending=True` en `user_data`
+  y retorna `NUEVA_CONFLICT` para que el usuario decida.
+
+**`cb_apt_edit_conflict_response`** — nuevo
+- Gestiona la respuesta del usuario tras el conflicto en edición.
+- `aptconf_ok` → llama a `_do_update_apt_from_query` y guarda el cambio.
+- `aptconf_cambiar` → vuelve al estado `EDIT_APT_TIME` para reintentar.
+
+**`build_edit_apt_handler`** — actualizado
+- Añade el estado `NUEVA_CONFLICT` con handler `cb_apt_edit_conflict_response`
+  para que el ConversationHandler de edición gestione el conflicto correctamente.
+
+**Docstring del módulo** — actualizado
+- Sección nueva “Detalle del estado NUEVA_CONFLICT (v0.15.1)”.
+- Sección nueva “Comprobación de solapamiento (v0.15.1)” con el flujo completo.
+- Nota actualizada en “Flujo editar cita”.
+
+---
+
+#### Mensaje de conflicto antes vs después
+
+| Antes (v0.15.0) | Después (v0.15.1) |
+|---|---|
+| `⚠️ Ya tienes una cita a las 17:30: Dentista` | `⚠️ Las 17:30 solapan con Dentista (17:00–18:00)` |
+| Sin horario del día | Horario visual con slot marcado como ⚠️ |
+| Solo en /nueva | En /nueva y en editar hora |
+
+---
+
+### 📦 Archivos modificados
+
+| Archivo | Cambio |
+|---|---|
+| `src/bot/handlers/citas.py` | 🔧 Fix + nuevo helper + fix editar hora |
+| `CHANGELOG.md` | 📝 Esta entrada |
+
+### ⚠️ Nota de despliegue
+No requiere cambios en `.env` ni en dependencias. `git pull` + reiniciar bot.
+
+---
+
 ## [v0.15.0] — 14 abril 2026
 
 ### ✨ Mejoras de calidad — Solapamiento real, horario visual, rendimiento y tests
@@ -70,20 +144,14 @@ en serie — ~14 round-trips para renderizar la vista semanal.
 
 #### 4. `tests/unit/test_appointments_overlap.py` — 18 tests nuevos
 
-Cobertura completa de `_find_overlap` y `_time_to_minutes`:
-
 | Clase | Tests | Qué cubre |
 |---|---|---|
 | `TestTimeToMinutes` | 5 | Medianoche, hora exacta, minutos, cero izquierda |
 | `TestFindOverlap` | 13 | Día vacío, hora libre, contigua antes/después, hora exacta, inicio dentro, nueva tapa inicio, duración personalizada |
 
-No requieren API ni base de datos. Corren con `pytest tests/unit/ -v`.
-
 ---
 
 #### 5. `tests/unit/bot/test_nlp_schedule.py` — 14 tests nuevos
-
-Cobertura de `_build_day_schedule`, `_end_time` y `_time_to_min`:
 
 | Clase | Tests | Qué cubre |
 |---|---|---|
@@ -97,25 +165,23 @@ Cobertura de `_build_day_schedule`, `_end_time` y `_time_to_min`:
 
 - Badges de CI, Python, FastAPI y License en la cabecera.
 - Tabla de stack técnico con justificación de cada decisión.
-- Diagrama ASCII de arquitectura (Usuario → Bot → API → SQLite).
-- Sección "Decisiones de diseño destacadas" con las 4 decisiones clave del proyecto.
-- Estructura de tests actualizada con los ficheros nuevos.
-- Sección de texto libre con ejemplos de uso natural.
+- Diagrama ASCII de arquitectura.
+- Sección "Decisiones de diseño destacadas" con las 4 decisiones clave.
+- Estructura de tests actualizada.
 
 ---
 
-### 📦 Archivos modificados
+### 📦 Archivos modificados en v0.15.0
 
 | Archivo | Tipo de cambio |
 |---|---|
-| `src/api/routers/appointments.py` | 🔧 Fix + mejora (solapamiento real) |
-| `src/bot/handlers/nlp.py` | 🔧 Fix + mejora (horario visual) |
-| `src/bot/handlers/semana.py` | ⚡ Optimización rendimiento |
+| `src/api/routers/appointments.py` | 🔧 Fix + mejora |
+| `src/bot/handlers/nlp.py` | 🔧 Fix + mejora |
+| `src/bot/handlers/semana.py` | ⚡ Optimización |
 | `tests/unit/test_appointments_overlap.py` | ✨ Nuevo |
 | `tests/unit/bot/__init__.py` | ✨ Nuevo |
 | `tests/unit/bot/test_nlp_schedule.py` | ✨ Nuevo |
 | `README.md` | 📝 Documentación |
-| `CHANGELOG.md` | 📝 Esta entrada |
 
 ### ⚠️ Nota de despliegue
 No requiere cambios en `.env` ni en dependencias. `git pull` + reiniciar API y bot.
@@ -133,38 +199,19 @@ Además, para intents `consulta` y `chat`, el modelo recibe los datos reales
 de la agenda antes de responder, no inventa ni dice que no tiene información.
 
 #### `src/bot/groq_router.py`
-- `route()` acepta nuevo parámetro `api_context: Optional[Dict]`
-  con citas de hoy, citas de mañana y hábitos del día.
-- `_build_chat_system(api_context)` — construye el system prompt
-  inyectando el contexto real. Si la API falla, usa el prompt base
-  (degradación elegante, el bot sigue funcionando).
-- `chat_response()` recibe `api_context` y lo pasa a `_build_chat_system`.
-- Intent `desconocido` → `show_menu=True` en el resultado.
-  El handler es responsable de mostrar el menú, el router no genera texto.
-- Docstring del módulo actualizado con sección "Contexto real (modo Toki)".
+- `route()` acepta nuevo parámetro `api_context: Optional[Dict]`.
+- `_build_chat_system(api_context)` — inyecta contexto real en el system prompt.
+- Intent `desconocido` → `show_menu=True`.
 
 #### `src/bot/handlers/nlp.py`
-- `_get_api_context(today, tomorrow)` — función nueva que hace 3 llamadas
-  en paralelo con `asyncio.gather`:
-  - `get_appointments(today)` — citas de hoy
-  - `get_appointments(tomorrow)` — citas de mañana
-  - `get_habits(today)` — hábitos de hoy
-  Cada llamada está envuelta en `_safe()` — si falla no rompe el bot.
-- `nlp_handler()` llama a `_get_api_context()` antes de llamar a `route()`
-  y pasa el resultado como `api_context`.
-- Intent `desconocido` → muestra `_MSG_MENU` + teclado `_kb_start()`.
-  Ya NO responde con texto suelto genérico.
-- Docstring del módulo actualizado con sección "Diseño Toki".
+- `_get_api_context(today, tomorrow)` — 3 llamadas en paralelo con `asyncio.gather`.
+- Intent `desconocido` → muestra menú en lugar de texto genérico.
 
 ### 📦 Archivos modificados
 | Archivo | Cambio principal |
 |---|---|
 | `src/bot/groq_router.py` | `api_context` + `_build_chat_system` + `show_menu` |
 | `src/bot/handlers/nlp.py` | `_get_api_context` paralelo + menú en desconocido |
-| `CHANGELOG.md` | Esta entrada |
-
-### ⚠️ Nota de despliegue
-No requiere cambios en `.env` ni en dependencias. Pull + reiniciar bot.
 
 ---
 
@@ -172,50 +219,38 @@ No requiere cambios en `.env` ni en dependencias. Pull + reiniciar bot.
 
 ### ✨ Añadido / Mejorado — UX, Persistencia y Personalidad (Auditoría abr-2026)
 
-#### 1. `src/bot/handlers/nlp.py` — Indicador visual y fix hora 00:00
-- **`⏳ Procesando...`**: se envía un mensaje temporal mientras Groq trabaja
-  y se borra automáticamente al recibir la respuesta.
-- **Fix hora 00:00**: si Groq no detecta la hora y devuelve `"00:00"`, ahora
-  se pide confirmación al usuario en lugar de crear una cita a medianoche.
-
-#### 2. `src/bot/handlers/menu.py` — /start explica los dos modos
-- El mensaje de bienvenida incluye `_AYUDA_NLP` con ejemplos de lenguaje natural.
-
-#### 3. `src/bot/main.py` — PicklePersistence (v4.0 → v4.1)
+- `⏳ Procesando...` temporal mientras Groq trabaja + fix hora 00:00.
+- `/start` explica los dos modos con ejemplos NLP.
 - `PicklePersistence` activa → `nlp_history` sobrevive reinicios.
-
-#### 4. `src/bot/groq_router.py` — Personalidad THDORA refinada
-- `_CHAT_SYSTEM` reescrito: 2 frases máx, sin florituras, no inventa datos.
+- `_CHAT_SYSTEM` reescrito: 2 frases máx, sin florituras.
 
 ---
 
 ## [v0.12.0] — 14 abril 2026
-
-### ✨ Añadido — NLP con Groq (F13-base)
-- `groq_router.py` completo: clasificador + extractor citas/hábitos + chat
-- `handlers/nlp.py` con detección de conflicto de hora
-- `docs/NLP_ARQUITECTURA.md` creado
+- `groq_router.py` completo: clasificador + extractor + chat.
+- `handlers/nlp.py` con detección de conflicto de hora.
+- `docs/NLP_ARQUITECTURA.md` creado.
 
 ---
 
 ## [v0.11.0] — 13 abril 2026
-- `UserConfig` en SQLite, APScheduler, `/config` con notificaciones
+- `UserConfig` en SQLite, APScheduler, `/config` con notificaciones.
 
 ---
 
 ## [v0.10.0] — Abril 2026
-- Bot v4 modular + UX avanzada
+- Bot v4 modular + UX avanzada.
 
 ---
 
 ## [v0.9.0] — Marzo 2026
-- `SQLiteLifeManager` CRUD + FastAPI 14 endpoints
+- `SQLiteLifeManager` CRUD + FastAPI 14 endpoints.
 
 ---
 
 ## [v0.1–0.8] — Febrero–Marzo 2026
-- Arquitectura base, FastAPI REST, Bot Telegram v1–v3
+- Arquitectura base, FastAPI REST, Bot Telegram v1–v3.
 
 ---
 
-_Última actualización: 14 abril 2026 — 18:21 CEST_
+_Última actualización: 14 abril 2026 — 18:28 CEST_
