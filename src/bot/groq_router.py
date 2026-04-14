@@ -30,8 +30,18 @@ from groq import AsyncGroq
 
 logger = logging.getLogger(__name__)
 
-_GROQ_KEY = os.getenv("GROQ_API_KEY", "")
-_CLIENT   = AsyncGroq(api_key=_GROQ_KEY) if _GROQ_KEY else None
+# Cliente lazy — se inicializa la primera vez que se usa, no al importar.
+# Esto garantiza que load_dotenv() ya haya ejecutado antes de leer la key.
+_CLIENT: Optional[AsyncGroq] = None
+
+def _get_client() -> Optional[AsyncGroq]:
+    global _CLIENT
+    if _CLIENT is None:
+        key = os.getenv("GROQ_API_KEY", "")
+        if key:
+            _CLIENT = AsyncGroq(api_key=key)
+    return _CLIENT
+
 
 MODEL_FAST   = "llama-3.1-8b-instant"       # clasificador
 MODEL_STRONG = "llama-3.3-70b-versatile"    # extracción + chat
@@ -75,11 +85,12 @@ Responde ÚNICAMENTE con una de esas palabras exactas.
 """
 
 async def classify_intent(text: str) -> str:
-    if not _CLIENT:
+    client = _get_client()
+    if not client:
         logger.warning("GROQ_API_KEY no configurada — intent desconocido")
         return "desconocido"
     try:
-        resp = await _CLIENT.chat.completions.create(
+        resp = await client.chat.completions.create(
             model=MODEL_FAST,
             messages=[
                 {"role": "system", "content": _CLASSIFY_SYSTEM},
@@ -98,7 +109,12 @@ async def classify_intent(text: str) -> str:
 
 # ── Paso 2a: Extraer entidades para nueva_cita ────────────────────────
 
-_CITA_SYSTEM = f"""
+async def extract_cita(text: str, history: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    client = _get_client()
+    if not client:
+        return None
+
+    cita_system = f"""
 Eres un extractor de datos para crear citas en un asistente personal.
 Hoy es {_today()} y mañana es {_tomorrow()}.
 Extraes los datos del mensaje y devuelves SOLO un JSON válido con este formato exacto:
@@ -114,17 +130,13 @@ Reglas:
 
 Devuelve SOLO el JSON, sin texto adicional.
 """
-
-async def extract_cita(text: str, history: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
-    if not _CLIENT:
-        return None
     try:
         messages = [
-            {"role": "system", "content": _CITA_SYSTEM},
+            {"role": "system", "content": cita_system},
             *history[-6:],
             {"role": "user", "content": text},
         ]
-        resp = await _CLIENT.chat.completions.create(
+        resp = await client.chat.completions.create(
             model=MODEL_STRONG,
             messages=messages,
             max_tokens=150,
@@ -139,7 +151,12 @@ async def extract_cita(text: str, history: List[Dict[str, str]]) -> Optional[Dic
 
 # ── Paso 2b: Extraer entidades para log_habito ────────────────────────
 
-_HABITO_SYSTEM = f"""
+async def extract_habito(text: str, history: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
+    client = _get_client()
+    if not client:
+        return None
+
+    habito_system = f"""
 Eres un extractor de datos para registrar hábitos en un asistente personal.
 Hoy es {_today()}.
 Extraes los datos del mensaje y devuelves SOLO un JSON válido con este formato exacto:
@@ -153,17 +170,13 @@ Reglas:
 
 Devuelve SOLO el JSON, sin texto adicional.
 """
-
-async def extract_habito(text: str, history: List[Dict[str, str]]) -> Optional[Dict[str, Any]]:
-    if not _CLIENT:
-        return None
     try:
         messages = [
-            {"role": "system", "content": _HABITO_SYSTEM},
+            {"role": "system", "content": habito_system},
             *history[-6:],
             {"role": "user", "content": text},
         ]
-        resp = await _CLIENT.chat.completions.create(
+        resp = await client.chat.completions.create(
             model=MODEL_STRONG,
             messages=messages,
             max_tokens=100,
@@ -187,7 +200,8 @@ Si quiere registrar un hábito di: "Puedes decirme algo como: dormí 7 horas"
 """
 
 async def chat_response(text: str, history: List[Dict[str, str]]) -> str:
-    if not _CLIENT:
+    client = _get_client()
+    if not client:
         return "⚠️ El asistente IA no está configurado. Verifica GROQ_API_KEY."
     try:
         messages = [
@@ -195,7 +209,7 @@ async def chat_response(text: str, history: List[Dict[str, str]]) -> str:
             *history[-MAX_HISTORY:],
             {"role": "user", "content": text},
         ]
-        resp = await _CLIENT.chat.completions.create(
+        resp = await client.chat.completions.create(
             model=MODEL_STRONG,
             messages=messages,
             max_tokens=300,
