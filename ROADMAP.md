@@ -40,6 +40,7 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
   - 3 llamadas API en paralelo (asyncio.gather) para mínima latencia
   - ⏳ Procesando... feedback inmediato al usuario
   - Fix hora 00:00 → pide confirmación antes de crear
+  - **Desambiguación borrar/editar** → botones inline cuando hay varias citas candidatas ✅
 
 ---
 
@@ -58,85 +59,66 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 - Intent `desconocido` → menú del bot, no texto inventado
 - Probado en vivo: todos los casos funcionan ✅
 
----
-
-## 🔶 Siguiente — F13-v2: Mejorar NLP
-
-> El NLP base funciona. Ahora toca expandirlo y pulirlo.
-
-### Prioridad 1 — Personalidad y comprensión (impacto inmediato)
-- [ ] Reescribir `_CHAT_SYSTEM_BASE` con personalidad más rica
-- [ ] Instrucciones de tono: directo, cercano, proactivo
-- [ ] Que sugiera acciones cuando detecte contexto relevante
-- [ ] Que recuerde el nombre del usuario en respuestas
-
-### Prioridad 2 — Nuevos intents de acción
-- [ ] `borrar_cita` → "cancela el gym de hoy"
-- [ ] `editar_cita` → "mueve la peluquería a las 18"
-- [ ] `consulta_semana` → "¿qué tengo esta semana?"
-- [ ] `borrar_habito` → "quita el registro de agua de hoy"
-
-### Prioridad 3 — Contexto más rico
-- [ ] Inyectar también citas de la semana en consultas semanales
-- [ ] Historial de hábitos de los últimos 7 días en el contexto
-- [ ] Persistir `nlp_history` en SQLite (sobrevive reinicios con más datos)
-
-### Prioridad 4 — Modelos opcionales
-| Variable | Proveedor | Modelo | Para qué |
-|---|---|---|---|
-| `OPENROUTER_API_KEY` | OpenRouter | DeepSeek R1 | Chat mejorado (gratis) |
-| `GEMINI_API_KEY` | Google | Gemini 2.0 Flash | Alternativa (gratis 1M/mes) |
-| `ANTHROPIC_API_KEY` | Anthropic | Claude Sonnet | Premium (de pago) |
+### F13-v2a — NLP acciones + desambiguación ✅ (14 abril 2026)
+- Cache TTL 2 min con invalidación automática
+- Contexto semana completa en borrar/editar
+- `nlp_disambig.py` — handler de resolución de cita ambigua con botones inline
 
 ---
 
-## 🔜 F15 — Voz (Whisper)
+## 🔶 TRABAJO INMEDIATO — Bloques priorizados
 
-> Groq ya ofrece `whisper-large-v3-turbo` a $0.04/hora.
-> Una vez el NLP texto esté pulido, añadir soporte de audio.
+> Aquí es donde ponemos el foco ahora. Un bloque a la vez, en orden.
 
+### 🔴 Bloque 1 — Citas (continuación)
+
+| # | Tarea | Estado |
+|---|---|---|
+| 1.1 | Desambiguación borrar/editar cita | ✅ Hecho |
+| 1.2 | Mostrar horario disponible antes de mover una cita | 🔲 Siguiente |
+| 1.3 | Flujo cancelar cita: confirmación + mostrar exactamente qué cita se borra | 🔲 Pendiente |
+
+### 🟡 Bloque 2 — Menú e interfaz
+
+| # | Tarea | Estado |
+|---|---|---|
+| 2.1 | Vista semana/días navegable completa desde el menú | 🔲 Pendiente |
+| 2.2 | Texto intuitivo y profesional en todos los menús y respuestas | 🔲 Pendiente |
+| 2.3 | Consistencia visual — mismo patrón de respuesta en todos los flujos | 🔲 Pendiente |
+
+### 🟠 Bloque 3 — Auditoría y documentación
+
+| # | Tarea | Estado |
+|---|---|---|
+| 3.1 | Auditoría archivo a archivo — revisar, limpiar y documentar | 🔲 Pendiente |
+| 3.2 | Crear `ARCHITECTURE.md` — patrón de handlers, router, API client | 🔲 Pendiente |
+
+### 🔵 Bloque 4 — Multiusuario y despliegue
+
+| # | Tarea | Estado |
+|---|---|---|
+| 4.1 | Multiusuario — API con `user_id` de Telegram en todos los endpoints | 🔲 Pendiente |
+| 4.2 | CD automático — bot siempre corriendo + actualizaciones sin tocar nada (Railway / VPS + systemd + GitHub Actions) | 🔲 Pendiente |
+| 4.3 | Beta cerrada — compartir con usuarios cercanos | 🔲 Pendiente |
+
+---
+
+## 🔜 Backlog a largo plazo
+
+### F15 — Voz (Whisper)
 - [ ] Handler de mensajes de voz (`filters.VOICE`)
-- [ ] Descargar audio → transcribir con Groq Whisper
+- [ ] Descargar audio → transcribir con Groq `whisper-large-v3-turbo`
 - [ ] Pasar transcripción a `groq_router.route()` como texto normal
-- [ ] Sin cambios en la lógica de intents
 
----
+### F14 — Tracking personal
+- [ ] `sueño`, `sustancias`, `estado`, `estudio`, `proyecto`
+- [ ] Tabla `daily_tracking` en SQLite + endpoints CRUD
+- [ ] Puntuación diaria (0–10)
 
-## 🔜 F10 — Docker + despliegue 24/7
-
-- [ ] `Dockerfile` + `docker-compose.yml`
-- [ ] Health checks y reinicio automático
-- [ ] Desplegar en VPS (Railway / DigitalOcean / Raspberry Pi)
-- [ ] Backup automático de `thdora.db`
-
----
-
-## 🔜 F11 — Multi-usuario
-
-- [ ] `user_id` en todas las tablas SQLite
-- [ ] Middleware en API para `X-User-Id`
-- [ ] Onboarding: primer `/start` → configura perfil
-
-> ⚠️ `user_id` ya está pre-modelado en `UserConfig`. Facilita la migración.
-
----
-
-## 🔜 F14 — Tracking personal
-
-> sueño, sustancias, estado, estudio, proyecto
-
-- [ ] Tabla `daily_tracking` en SQLite
-- [ ] Endpoints CRUD en FastAPI
-- [ ] Formulario guiado en bot
-- [ ] Sistema de puntuación diaria (0–10)
-
----
-
-## 🔜 F16–F19 — Gamificación, Mini App, PWA, React Native
-
-- F16: XP + niveles + rachas (campo `xp_rule` ya modelado)
-- F17: Telegram Mini App (HTML5 + WebApp SDK)
-- F18: PWA instalable, offline-first
+### F16–F19 — Gamificación, Mini App, PWA, React Native
+- F16: XP + niveles + rachas
+- F17: Telegram Mini App
+- F18: PWA offline-first
 - F19: React Native
 
 ---
@@ -144,12 +126,11 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 ## Orden recomendado
 
 ```
-F13-v2 (mejorar NLP) → F15 (Voz Whisper)
-    → F10 (Docker 24/7) → F11 (Multi-usuario)
-    → F14 (Tracking) → F16 (Gamificación)
-    → F17/F18/F19 (Apps)
+Bloque 1 (Citas) → Bloque 2 (Menú)
+    → Bloque 3 (Auditoría) → Bloque 4 (Multi-usuario + CD)
+    → F15 (Voz) → F14 (Tracking) → F16–F19 (Apps)
 ```
 
 ---
 
-_Última actualización: 14 abril 2026 — 16:14 CEST_
+_Última actualización: 14 abril 2026 — 19:05 CEST_
