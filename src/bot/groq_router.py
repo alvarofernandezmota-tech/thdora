@@ -7,7 +7,7 @@ Flujo:
 
 Intents soportados:
     - nueva_cita      → crear cita en la API
-    - borrar_cita     → borrar cita existente (resuelve por nombre/hora)
+    - borrar_cita     → borrar cita existente (resuelve por nombre/hora → id real)
     - editar_cita     → editar hora/nombre/tipo de cita existente
     - log_habito      → registrar hábito en la API
     - borrar_habito   → borrar registro de hábito del día
@@ -19,20 +19,11 @@ Intents soportados:
 Contexto real (modo Toki):
     route() acepta api_context: dict con citas y hábitos reales del día.
     chat_response() inyecta ese contexto en el system prompt para que el
-    modelo responda con datos reales: ¿qué tengo hoy?, ¿apunté el gym?, etc.
-    El contexto se obtiene en nlp.py antes de llamar a route(), usando la
-    API REST de THDORA. Si la API falla, el contexto es vacío y el bot
-    sigue funcionando (degradación elegante).
+    modelo responda con datos reales.
 
 Memoria:
     Los últimos MAX_HISTORY mensajes se guardan en context.user_data["nlp_history"]
-    y se envían a Groq para mantener contexto conversacional.
-    Con PicklePersistence activo en main.py, este historial sobrevive
-    reinicios del proceso bot.
-
-Personalidad de THDORA (_CHAT_SYSTEM_BASE):
-    Edita _CHAT_SYSTEM_BASE para cambiar tono, estilo o instrucciones de respuesta.
-    El cambio tiene efecto inmediato sin reiniciar ningún otro módulo.
+    con PicklePersistence activo en main.py.
 
 Variables de entorno:
     GROQ_API_KEY   → obligatoria
@@ -68,9 +59,9 @@ _TIPO_MAP = {
     "medica": "médica", "médica": "médica",
     "personal": "personal",
     "trabajo": "trabajo",
-    "otro": "otro", "otra": "otro",
+    "otro": "otra", "otra": "otra", "other": "otra",
 }
-_TIPO_DEFAULT = "otro"
+_TIPO_DEFAULT = "otra"
 
 
 # ── Paso 1: Clasificador de intents ──────────────────────────────────
@@ -121,16 +112,16 @@ async def classify_intent(text: str) -> str:
         return "desconocido"
 
 
-# ── Paso 2a: Extracción de entidades para nueva_cita ───────────────────
+# ── Paso 2a: Extracción nueva_cita ────────────────────────────────────
 
 def _build_cita_system(today: str) -> str:
     return f"""Hoy es {today}.
 Extrae del mensaje del usuario los datos de la cita y devuelve JSON válido.
-Campos obligatorios: name (str), date (YYYY-MM-DD), time (HH:MM), type (medica/personal/trabajo/otro).
+Campos obligatorios: name (str), date (YYYY-MM-DD), time (HH:MM), type (médica/personal/trabajo/otra).
 Campos opcionales: notes (str, puede ser vacío).
 Si no se menciona la fecha asume hoy ({today}). Si no se menciona la hora devuelve "09:00".
 Devuelve ÚNICAMENTE el JSON, sin texto adicional, sin markdown, sin bloques de código.
-Ejemplo de salida válida: {{"name":"Dentista","date":"{today}","time":"17:00","type":"medica","notes":""}}
+Ejemplo de salida válida: {{"name":"Dentista","date":"{today}","time":"17:00","type":"médica","notes":""}}
 """
 
 
@@ -160,14 +151,14 @@ async def extract_cita(text: str, today: str) -> Optional[Dict]:
         data["type"] = _TIPO_MAP.get(tipo_raw, _TIPO_DEFAULT)
         return data
     except (json.JSONDecodeError, ValueError) as e:
-        logger.warning("extract_cita JSON error: %s — raw: %r", e, raw if 'raw' in dir() else '')
+        logger.warning("extract_cita JSON error: %s", e)
         return None
     except Exception as e:
         logger.error("extract_cita error inesperado: %s", e)
         return None
 
 
-# ── Paso 2b: Extracción de entidades para log_habito ────────────────────
+# ── Paso 2b: Extracción log_habito ────────────────────────────────────
 
 def _build_habito_system(today: str) -> str:
     return f"""Hoy es {today}.
@@ -198,32 +189,29 @@ async def extract_habito(text: str, today: str) -> Optional[Dict]:
         raw = re.sub(r"\n?```$", "", raw)
         m = re.search(r"\{.*\}", raw, re.DOTALL)
         if not m:
-            logger.warning("extract_habito: no JSON encontrado en: %r", raw)
             return None
         return json.loads(m.group())
-    except (json.JSONDecodeError, ValueError) as e:
-        logger.warning("extract_habito JSON error: %s", e)
-        return None
     except Exception as e:
-        logger.error("extract_habito error inesperado: %s", e)
+        logger.error("extract_habito error: %s", e)
         return None
 
 
-# ── Paso 2c: Extracción para borrar_cita ─────────────────────────────────
+# ── Paso 2c: Extracción borrar_cita ────────────────────────────────────
+# Devuelve {date, id, name} donde id es el ID real de la BD (no el index)
 
 def _build_borrar_cita_system(today: str, citas_hoy: List[Dict]) -> str:
     citas_str = "\n".join(
-        f"  índice {i}: {c.get('time','?')} — {c.get('name','?')}"
-        for i, c in enumerate(citas_hoy)
+        f"  id={c.get('id','?')} index={c.get('index','?')}: {c.get('time','?')} — {c.get('name','?')}"
+        for c in citas_hoy
     ) or "  (ninguna)"
     return f"""Hoy es {today}.
-El usuario quiere borrar una cita. Estas son las citas del día mencionado:
+El usuario quiere borrar una cita. Lista de citas con su ID real y su índice:
 {citas_str}
 
 Identifica cuál cita quiere borrar (por nombre o por hora) y devuelve JSON:
-{{"date": "YYYY-MM-DD", "index": <número entero del índice>, "name": "<nombre de la cita>"}}
+{{"date": "YYYY-MM-DD", "id": <ID real entero>, "index": <índice entero>, "name": "<nombre>"}}
 Si no se menciona fecha asume hoy ({today}).
-Si no puedes identificar la cita con certeza, devuelve: {{"date": "{today}", "index": -1, "name": ""}}
+Si no puedes identificar la cita con certeza devuelve: {{"date": "{today}", "id": -1, "index": -1, "name": ""}}
 Devuelve ÚNICAMENTE el JSON, sin texto adicional, sin markdown.
 """
 
@@ -256,22 +244,23 @@ async def extract_borrar_cita(
         return None
 
 
-# ── Paso 2d: Extracción para editar_cita ─────────────────────────────────
+# ── Paso 2d: Extracción editar_cita ────────────────────────────────────
 
 def _build_editar_cita_system(today: str, citas_hoy: List[Dict]) -> str:
     citas_str = "\n".join(
-        f"  índice {i}: {c.get('time','?')} — {c.get('name','?')}"
-        for i, c in enumerate(citas_hoy)
+        f"  id={c.get('id','?')} index={c.get('index','?')}: {c.get('time','?')} — {c.get('name','?')}"
+        for c in citas_hoy
     ) or "  (ninguna)"
     return f"""Hoy es {today}.
-El usuario quiere editar una cita. Estas son las citas del día mencionado:
+El usuario quiere editar una cita. Lista de citas con su ID real y su índice:
 {citas_str}
 
 Identifica cuál cita quiere editar y qué campos cambiar. Devuelve JSON:
-{{"date": "YYYY-MM-DD", "index": <número entero>, "name": "<nombre>", "new_time": "HH:MM o null", "new_name": "str o null", "new_type": "str o null", "new_notes": "str o null"}}
+{{"date": "YYYY-MM-DD", "id": <ID real entero>, "index": <índice entero>, "name": "<nombre actual>",
+  "new_time": "HH:MM o null", "new_name": "str o null", "new_type": "str o null", "new_notes": "str o null"}}
 Solo incluye los campos que el usuario quiere cambiar (el resto como null).
 Si no se menciona fecha asume hoy ({today}).
-Si no puedes identificar la cita, devuelve: {{"date": "{today}", "index": -1}}
+Si no puedes identificar la cita devuelve: {{"date": "{today}", "id": -1, "index": -1}}
 Devuelve ÚNICAMENTE el JSON, sin texto adicional, sin markdown.
 """
 
@@ -304,20 +293,20 @@ async def extract_editar_cita(
         return None
 
 
-# ── Paso 2e: Extracción para borrar_habito ───────────────────────────────
+# ── Paso 2e: Extracción borrar_habito ────────────────────────────────────
 
 def _build_borrar_habito_system(today: str, habitos_hoy: Dict) -> str:
     habs_str = "\n".join(
         f"  • {k}: {v}" for k, v in habitos_hoy.items()
     ) or "  (ninguno registrado)"
     return f"""Hoy es {today}.
-El usuario quiere borrar un hábito registrado. Estos son los hábitos de hoy:
+El usuario quiere borrar un hábito registrado. Hábitos de hoy:
 {habs_str}
 
 Identifica cuál hábito quiere borrar y devuelve JSON:
 {{"date": "YYYY-MM-DD", "habit": "<nombre exacto del hábito>"}}
 Si no se menciona fecha asume hoy ({today}).
-Si no puedes identificar el hábito, devuelve: {{"date": "{today}", "habit": ""}}
+Si no puedes identificar el hábito devuelve: {{"date": "{today}", "habit": ""}}
 Devuelve ÚNICAMENTE el JSON, sin texto adicional, sin markdown.
 """
 
@@ -350,7 +339,7 @@ async def extract_borrar_habito(
         return None
 
 
-# ── Paso 2f: Respuesta contextual (consulta / chat / consulta_semana) ──────
+# ── Paso 2f: Respuesta contextual ────────────────────────────────────
 
 _CHAT_SYSTEM_BASE = """
 Eres THDORA, la asistente personal de Álvaro. Tu objetivo es ayudarle a gestionar
@@ -378,16 +367,16 @@ def _build_chat_system(api_context: Optional[Dict], username: Optional[str] = No
     if not api_context:
         return base
 
-    citas = api_context.get("citas", [])
-    habitos = api_context.get("habitos", {})
+    citas        = api_context.get("citas", [])
+    habitos      = api_context.get("habitos", {})
     manana_citas = api_context.get("citas_manana", [])
-    semana_citas = api_context.get("citas_semana", [])
+    semana_citas = api_context.get("citas_semana", "")
 
     ctx_lines = []
 
     if citas:
         citas_str = ", ".join(
-            f"{c.get('time', '?')} {c.get('name', '?')}" for c in citas
+            f"{c.get('time','?')} {c.get('name','?')}" for c in citas
         )
         ctx_lines.append(f"Citas de hoy: {citas_str}")
     else:
@@ -395,12 +384,12 @@ def _build_chat_system(api_context: Optional[Dict], username: Optional[str] = No
 
     if manana_citas:
         manana_str = ", ".join(
-            f"{c.get('time', '?')} {c.get('name', '?')}" for c in manana_citas
+            f"{c.get('time','?')} {c.get('name','?')}" for c in manana_citas
         )
         ctx_lines.append(f"Citas de mañana: {manana_str}")
 
     if semana_citas:
-        ctx_lines.append(f"Citas próximos 7 días: {semana_citas}")
+        ctx_lines.append(f"Citas próximos días:\n{semana_citas}")
 
     if habitos:
         habs_str = ", ".join(f"{k}: {v}" for k, v in habitos.items())
@@ -454,14 +443,7 @@ async def route(
     Parámetros:
         text        — mensaje del usuario
         user_data   — context.user_data de PTB (historial NLP)
-        api_context — datos reales de la API inyectados desde nlp.py:
-                       {
-                           "citas":        List[Dict],   # citas de hoy
-                           "citas_manana": List[Dict],   # citas de mañana
-                           "citas_semana": str,           # resumen semana (texto)
-                           "habitos":      Dict[str,str]  # hábitos de hoy
-                       }
-                       Si es None o vacío, el bot sigue funcionando sin contexto.
+        api_context — datos reales de la API inyectados desde nlp.py
         username    — nombre del usuario Telegram (para personalizar respuestas)
 
     Devuelve un dict con:
@@ -486,7 +468,7 @@ async def route(
     reply     = None
     show_menu = False
 
-    citas_hoy  = (api_context or {}).get("citas", [])
+    citas_hoy   = (api_context or {}).get("citas", [])
     habitos_hoy = (api_context or {}).get("habitos", {})
 
     # ── nueva_cita ────────────────────────────────────────────────────
@@ -498,7 +480,7 @@ async def route(
     # ── borrar_cita ───────────────────────────────────────────────────
     elif intent == "borrar_cita":
         data = await extract_borrar_cita(text, today, citas_hoy)
-        if not data or data.get("index", -1) == -1:
+        if not data or data.get("id", -1) == -1:
             reply = (
                 "No encontré la cita que quieres borrar. "
                 "Prueba: \"cancela el dentista de hoy\" o usa /citas para verlas."
@@ -508,7 +490,7 @@ async def route(
     # ── editar_cita ───────────────────────────────────────────────────
     elif intent == "editar_cita":
         data = await extract_editar_cita(text, today, citas_hoy)
-        if not data or data.get("index", -1) == -1:
+        if not data or data.get("id", -1) == -1:
             reply = (
                 "No encontré la cita que quieres editar. "
                 "Prueba: \"mueve el gym de hoy a las 18\" o usa /citas para verlas."
@@ -540,7 +522,6 @@ async def route(
 
     # ── consulta_semana ───────────────────────────────────────────────
     elif intent == "consulta_semana":
-        # El contexto de semana viene ya enriquecido desde nlp.py
         reply = await chat_response(text, history[:-1], api_context=api_context, username=username)
 
     # ── chat ──────────────────────────────────────────────────────────

@@ -15,6 +15,7 @@ Métodos disponibles::
 
     # Citas
     await api.get_appointments("2026-03-27")                       → List[Dict]
+    await api.get_appointments_week("2026-03-27")                  → Dict[str, List[Dict]]
     await api.create_appointment(date, time, name, type, notes)    → Dict
     await api.delete_appointment(date, index)                      → bool
     await api.update_appointment(date, index, ...)                 → Dict
@@ -93,6 +94,10 @@ class ThdoraApiClient:
 
     async def get_appointments(self, date_str: str) -> List[Dict[str, Any]]:
         return await self._get(f"/appointments/{date_str}")
+
+    async def get_appointments_week(self, date_str: str) -> Dict[str, List[Dict[str, Any]]]:
+        """Devuelve citas de la semana (lun-dom) que contiene date_str, agrupadas por fecha."""
+        return await self._get(f"/appointments/week/{date_str}")
 
     async def create_appointment(
         self, date_str: str, time: str, name: str, apt_type: str, notes: str = ""
