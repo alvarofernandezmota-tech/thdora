@@ -21,6 +21,16 @@ Contexto real (modo Toki):
     chat_response() inyecta ese contexto en el system prompt para que el
     modelo responda con datos reales.
 
+Desambiguación:
+    extract_borrar_cita y extract_editar_cita ahora reciben TODAS las citas
+    de la semana (no solo las de hoy). Si el modelo encuentra más de una
+    candidata, devuelve {"candidates": [...]} en vez de un solo resultado.
+    nlp.py detecta eso y muestra botones inline para que el usuario elija.
+
+Cache TTL:
+    route() admite un api_context ya cacheado desde nlp.py. El cacheo real
+    vive en nlp.py para no mezclar responsabilidades.
+
 Memoria:
     Los últimos MAX_HISTORY mensajes se guardan en context.user_data["nlp_history"]
     con PicklePersistence activo en main.py.
@@ -197,27 +207,31 @@ async def extract_habito(text: str, today: str) -> Optional[Dict]:
 
 
 # ── Paso 2c: Extracción borrar_cita ────────────────────────────────────
-# Devuelve {date, id, name} donde id es el ID real de la BD (no el index)
+# Recibe TODAS las citas de la semana. Devuelve un único match o {"candidates": [...]}
 
-def _build_borrar_cita_system(today: str, citas_hoy: List[Dict]) -> str:
+def _build_borrar_cita_system(today: str, todas_citas: List[Dict]) -> str:
     citas_str = "\n".join(
-        f"  id={c.get('id','?')} index={c.get('index','?')}: {c.get('time','?')} — {c.get('name','?')}"
-        for c in citas_hoy
+        f"  id={c.get('id','?')} date={c.get('date', today)} index={c.get('index','?')}: {c.get('time','?')} — {c.get('name','?')}"
+        for c in todas_citas
     ) or "  (ninguna)"
     return f"""Hoy es {today}.
-El usuario quiere borrar una cita. Lista de citas con su ID real y su índice:
+El usuario quiere borrar una cita. Lista COMPLETA de citas de los próximos días:
 {citas_str}
 
-Identifica cuál cita quiere borrar (por nombre o por hora) y devuelve JSON:
-{{"date": "YYYY-MM-DD", "id": <ID real entero>, "index": <índice entero>, "name": "<nombre>"}}
-Si no se menciona fecha asume hoy ({today}).
-Si no puedes identificar la cita con certeza devuelve: {{"date": "{today}", "id": -1, "index": -1, "name": ""}}
+REGLAS:
+1. Si identificas UNA sola cita con certeza, devuelve:
+   {{"date": "YYYY-MM-DD", "id": <ID entero>, "index": <índice entero>, "name": "<nombre>"}}
+2. Si hay VARIAS citas que coinciden (mismo nombre en distintos días u horas), devuelve:
+   {{"candidates": [{{"date": "YYYY-MM-DD", "id": <int>, "index": <int>, "name": "<str>", "time": "HH:MM"}}, ...]}}
+3. Si no puedes identificar ninguna con certeza devuelve:
+   {{"date": "{today}", "id": -1, "index": -1, "name": ""}}
+Si no se menciona fecha, busca en TODAS las fechas.
 Devuelve ÚNICAMENTE el JSON, sin texto adicional, sin markdown.
 """
 
 
 async def extract_borrar_cita(
-    text: str, today: str, citas_hoy: List[Dict]
+    text: str, today: str, todas_citas: List[Dict]
 ) -> Optional[Dict]:
     client = _get_client()
     if not client:
@@ -226,10 +240,10 @@ async def extract_borrar_cita(
         resp = await client.chat.completions.create(
             model=MODEL_STRONG,
             messages=[
-                {"role": "system", "content": _build_borrar_cita_system(today, citas_hoy)},
+                {"role": "system", "content": _build_borrar_cita_system(today, todas_citas)},
                 {"role": "user",   "content": text},
             ],
-            max_tokens=100,
+            max_tokens=300,
             temperature=0.0,
         )
         raw = resp.choices[0].message.content.strip()
@@ -245,28 +259,34 @@ async def extract_borrar_cita(
 
 
 # ── Paso 2d: Extracción editar_cita ────────────────────────────────────
+# Recibe TODAS las citas de la semana. Devuelve un único match o {"candidates": [...]}
 
-def _build_editar_cita_system(today: str, citas_hoy: List[Dict]) -> str:
+def _build_editar_cita_system(today: str, todas_citas: List[Dict]) -> str:
     citas_str = "\n".join(
-        f"  id={c.get('id','?')} index={c.get('index','?')}: {c.get('time','?')} — {c.get('name','?')}"
-        for c in citas_hoy
+        f"  id={c.get('id','?')} date={c.get('date', today)} index={c.get('index','?')}: {c.get('time','?')} — {c.get('name','?')}"
+        for c in todas_citas
     ) or "  (ninguna)"
     return f"""Hoy es {today}.
-El usuario quiere editar una cita. Lista de citas con su ID real y su índice:
+El usuario quiere editar una cita. Lista COMPLETA de citas de los próximos días:
 {citas_str}
 
-Identifica cuál cita quiere editar y qué campos cambiar. Devuelve JSON:
-{{"date": "YYYY-MM-DD", "id": <ID real entero>, "index": <índice entero>, "name": "<nombre actual>",
-  "new_time": "HH:MM o null", "new_name": "str o null", "new_type": "str o null", "new_notes": "str o null"}}
-Solo incluye los campos que el usuario quiere cambiar (el resto como null).
-Si no se menciona fecha asume hoy ({today}).
-Si no puedes identificar la cita devuelve: {{"date": "{today}", "id": -1, "index": -1}}
+REGLAS:
+1. Si identificas UNA sola cita con certeza, devuelve:
+   {{"date": "YYYY-MM-DD", "id": <int>, "index": <int>, "name": "<str>",
+     "new_time": "HH:MM o null", "new_name": "str o null", "new_type": "str o null", "new_notes": "str o null"}}
+2. Si hay VARIAS citas que coinciden, devuelve:
+   {{"candidates": [{{"date": "YYYY-MM-DD", "id": <int>, "index": <int>, "name": "<str>", "time": "HH:MM"}}, ...],
+     "new_time": "HH:MM o null", "new_name": "str o null", "new_type": "str o null", "new_notes": "str o null"}}
+   (incluye los cambios pedidos junto a los candidatos para aplicarlos tras la elección)
+3. Si no puedes identificar ninguna devuelve:
+   {{"date": "{today}", "id": -1, "index": -1}}
+Si no se menciona fecha, busca en TODAS las fechas.
 Devuelve ÚNICAMENTE el JSON, sin texto adicional, sin markdown.
 """
 
 
 async def extract_editar_cita(
-    text: str, today: str, citas_hoy: List[Dict]
+    text: str, today: str, todas_citas: List[Dict]
 ) -> Optional[Dict]:
     client = _get_client()
     if not client:
@@ -275,10 +295,10 @@ async def extract_editar_cita(
         resp = await client.chat.completions.create(
             model=MODEL_STRONG,
             messages=[
-                {"role": "system", "content": _build_editar_cita_system(today, citas_hoy)},
+                {"role": "system", "content": _build_editar_cita_system(today, todas_citas)},
                 {"role": "user",   "content": text},
             ],
-            max_tokens=200,
+            max_tokens=400,
             temperature=0.0,
         )
         raw = resp.choices[0].message.content.strip()
@@ -429,6 +449,45 @@ async def chat_response(
         return "⚠️ Error al conectar con el asistente. Inténtalo de nuevo."
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────
+
+def build_todas_citas(api_context: Dict) -> List[Dict]:
+    """
+    Construye una lista plana de TODAS las citas disponibles en api_context
+    (hoy + mañana + semana) añadiendo el campo 'date' a cada cita si no lo tiene.
+    Usada por extract_borrar_cita y extract_editar_cita para desambiguación.
+    """
+    today    = date.today().isoformat()
+    tomorrow = (date.today() + timedelta(days=1)).isoformat()
+
+    resultado: List[Dict] = []
+
+    for c in api_context.get("citas", []):
+        resultado.append({**c, "date": c.get("date", today)})
+
+    for c in api_context.get("citas_manana", []):
+        resultado.append({**c, "date": c.get("date", tomorrow)})
+
+    # semana_raw contiene el dict date_str → [citas] completo
+    for day_str, day_citas in api_context.get("semana_raw", {}).items():
+        if day_str in (today, tomorrow):
+            continue
+        for c in day_citas:
+            resultado.append({**c, "date": day_str})
+
+    # Dedup por id para no repetir si hoy/mañana ya están en semana_raw
+    seen: set = set()
+    dedup = []
+    for c in resultado:
+        cid = c.get("id")
+        if cid is not None and cid not in seen:
+            seen.add(cid)
+            dedup.append(c)
+        elif cid is None:
+            dedup.append(c)
+    return dedup
+
+
 # ── Orquestador principal ────────────────────────────────────────────────
 
 async def route(
@@ -443,14 +502,17 @@ async def route(
     Parámetros:
         text        — mensaje del usuario
         user_data   — context.user_data de PTB (historial NLP)
-        api_context — datos reales de la API inyectados desde nlp.py
+        api_context — datos reales de la API inyectados desde nlp.py (con cache)
         username    — nombre del usuario Telegram (para personalizar respuestas)
 
     Devuelve un dict con:
-        intent    (str)        — intent clasificado
-        data      (dict|None)  — entidades extraídas si aplica
-        reply     (str|None)   — respuesta para el usuario
-        show_menu (bool)       — True si el handler debe mostrar el menú del bot
+        intent      (str)        — intent clasificado
+        data        (dict|None)  — entidades extraídas si aplica
+        candidates  (list|None)  — lista de candidatas si hay ambigüedad
+        reply       (str|None)   — respuesta para el usuario
+        show_menu   (bool)       — True si el handler debe mostrar el menú del bot
+        pending_action (str|None)— 'borrar_cita' o 'editar_cita' si hay candidates
+        pending_changes (dict|None) — cambios pendientes de aplicar tras desambiguación (editar)
     """
     today    = date.today().isoformat()
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -464,11 +526,14 @@ async def route(
     if len(history) > MAX_HISTORY * 2:
         history[:] = history[-(MAX_HISTORY * 2):]
 
-    data      = None
-    reply     = None
-    show_menu = False
+    data           = None
+    candidates     = None
+    reply          = None
+    show_menu      = False
+    pending_action = None
+    pending_changes = None
 
-    citas_hoy   = (api_context or {}).get("citas", [])
+    todas_citas = build_todas_citas(api_context or {})
     habitos_hoy = (api_context or {}).get("habitos", {})
 
     # ── nueva_cita ────────────────────────────────────────────────────
@@ -479,23 +544,35 @@ async def route(
 
     # ── borrar_cita ───────────────────────────────────────────────────
     elif intent == "borrar_cita":
-        data = await extract_borrar_cita(text, today, citas_hoy)
-        if not data or data.get("id", -1) == -1:
+        result = await extract_borrar_cita(text, today, todas_citas)
+        if result and "candidates" in result:
+            candidates     = result["candidates"]
+            pending_action = "borrar_cita"
+        elif result and result.get("id", -1) != -1:
+            data = result
+        else:
             reply = (
                 "No encontré la cita que quieres borrar. "
                 "Prueba: \"cancela el dentista de hoy\" o usa /citas para verlas."
             )
-            data = None
 
     # ── editar_cita ───────────────────────────────────────────────────
     elif intent == "editar_cita":
-        data = await extract_editar_cita(text, today, citas_hoy)
-        if not data or data.get("id", -1) == -1:
+        result = await extract_editar_cita(text, today, todas_citas)
+        if result and "candidates" in result:
+            candidates      = result["candidates"]
+            pending_action  = "editar_cita"
+            pending_changes = {
+                k: result.get(k)
+                for k in ("new_time", "new_name", "new_type", "new_notes")
+            }
+        elif result and result.get("id", -1) != -1:
+            data = result
+        else:
             reply = (
                 "No encontré la cita que quieres editar. "
                 "Prueba: \"mueve el gym de hoy a las 18\" o usa /citas para verlas."
             )
-            data = None
 
     # ── log_habito ────────────────────────────────────────────────────
     elif intent == "log_habito":
@@ -536,4 +613,12 @@ async def route(
     if reply:
         history.append({"role": "assistant", "content": reply})
 
-    return {"intent": intent, "data": data, "reply": reply, "show_menu": show_menu}
+    return {
+        "intent":          intent,
+        "data":            data,
+        "candidates":      candidates,
+        "reply":           reply,
+        "show_menu":       show_menu,
+        "pending_action":  pending_action,
+        "pending_changes": pending_changes,
+    }
