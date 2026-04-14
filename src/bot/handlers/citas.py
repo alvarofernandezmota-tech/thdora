@@ -3,7 +3,7 @@ Handlers de citas: /citas, /nueva (con franjas horarias), editar, borrar, detall
 
 Flujo /nueva con franjas:
     NUEVA_DATE       → fecha (texto libre)
-    NUEVA_FRANJA     → 🌅 Mañana / 🌆 Tarde / 🌙 Noche / ✏️ Exacta
+    NUEVA_FRANJA     → 🌅 Mañana / 🏆 Tarde / 🌙 Noche / ✏️ Exacta
     NUEVA_HORA_PUNTO → hora en punto con botones de la franja
     NUEVA_HORA_CUARTO→ (opcional) :00 :15 :30 :45
     NUEVA_TIME       → hora exacta si el usuario quiere escribirla
@@ -12,19 +12,33 @@ Flujo /nueva con franjas:
     NUEVA_TYPE       → tipo [médica / personal / trabajo / otra]
     NUEVA_NOTES      → notas o /skip
 
+Detalle del estado NUEVA_CONFLICT (v0.15.1):
+    Cuando la API detecta solapamiento (check_appointment_conflict devuelve
+    la cita existente), el bot muestra:
+      1. Nombre y rango completo de la cita que bloquea: Dentista (17:00–18:00)
+      2. Horario visual del día mediante _build_day_schedule (importado de nlp.py)
+         con el slot solicitado marcado como ⚠️.
+    El usuario puede entonces elegir cambiar hora o crear de todas formas.
+
 Flujo editar cita (build_edit_apt_handler):
     Entrada: callback ae_{date_str}_{index}
     EDIT_APT_FIELD   → el usuario elige qué campo editar (botones)
-    EDIT_APT_TIME    → nueva hora (HH:MM)
+    EDIT_APT_TIME    → nueva hora (HH:MM) — comprueba conflicto igual que /nueva
     EDIT_APT_NOMBRE  → nuevo nombre
     EDIT_APT_TYPE    → nuevo tipo (botones)
     EDIT_APT_NOTES   → nuevas notas
     Guarda y vuelve al día.
 
+Comprobación de solapamiento (v0.15.1):
+    Tanto /nueva como editar hora usan la misma función _check_and_show_conflict.
+    Esta función llama a api.check_appointment_conflict (que a su vez usa
+    _find_overlap en appointments.py con duración real de 60 min) y, si hay
+    conflicto, monta el mensaje con nombre + rango + horario visual del día.
+
 Scheduler (F12):
-    Al crear una cita → schedule_apt_reminders()
+    Al crear una cita  → schedule_apt_reminders()
     Al borrar una cita → cancel_apt_reminders()
-    Al editar la hora de una cita → cancel + re-schedule
+    Al editar la hora  → cancel + re-schedule
 
 Nota sobre callback_data con fechas:
     Los prefijos ae_, ad_, adc_ usan el patrón {prefix}{date_str}_{index}.
@@ -55,11 +69,13 @@ from src.bot.keyboards import (
 )
 from src.bot.utils.dates import _parse_date_flex, _parse_date_arg, _date_label, _date_short
 from src.bot.scheduler import schedule_apt_reminders, cancel_apt_reminders
+from src.bot.handlers.nlp import _build_day_schedule, _end_time
 
 logger = logging.getLogger(__name__)
 api    = ThdoraApiClient()
 
 _RE_TIME = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
+_DEFAULT_DURATION = 60  # minutos, igual que en appointments.py
 
 # ── Estados ConversationHandler /nueva ───────────────────────────────
 (
@@ -89,6 +105,61 @@ def _parse_apt_callback(prefix: str, data: str):
     rest = data[len(prefix):]
     date_str, idx_str = rest.rsplit("_", 1)
     return date_str, int(idx_str)
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# HELPER DE CONFLICTO (v0.15.1)
+# ═══════════════════════════════════════════════════════════════════════
+
+async def _check_and_show_conflict(
+    obj,
+    context: ContextTypes.DEFAULT_TYPE,
+    date_str: str,
+    time_str: str,
+    is_message: bool = False,
+) -> Optional[int]:
+    """
+    Comprueba solapamiento llamando a la API y, si lo hay, muestra:
+      - Nombre y rango de la cita existente (ej: Dentista 17:00–18:00)
+      - Horario visual del día con el slot solicitado marcado como ⚠️
+
+    Devuelve NUEVA_CONFLICT si hay conflicto, None si no.
+    Usado tanto en /nueva como en editar hora para mantener consistencia.
+
+    Diseño de degradación elegante:
+      Si la API falla, devuelve None y el flujo continúa sin bloquear al usuario.
+    """
+    try:
+        conflict = await api.check_appointment_conflict(date_str, time_str)
+    except Exception:
+        return None
+
+    if not conflict:
+        return None
+
+    # Nombre de la cita que bloquea el slot
+    nc       = conflict.get("name") or conflict.get("type", "cita")
+    ct       = conflict.get("time", "?")
+    ct_end   = _end_time(ct, _DEFAULT_DURATION)
+
+    # Horario visual del día con el slot solicitado marcado como ⚠️
+    try:
+        apts  = await api.get_appointments(date_str)
+        sched = _build_day_schedule(apts, date_str, highlight_time=time_str, duration=_DEFAULT_DURATION)
+        sched_block = f"\n\n{sched}"
+    except Exception:
+        sched_block = ""
+
+    txt = (
+        f"⚠️ *Las {time_str} solapan con _{nc}_ ({ct}–{ct_end})*\n"
+        f"Esa franja ya está ocupada.{sched_block}\n\n"
+        f"¿Crear de todas formas o cambiar hora?"
+    )
+    if is_message:
+        await obj.message.reply_text(txt, parse_mode="Markdown", reply_markup=_kb_conflict_apt())
+    else:
+        await obj.edit_message_text(txt, parse_mode="Markdown", reply_markup=_kb_conflict_apt())
+    return NUEVA_CONFLICT
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -270,7 +341,7 @@ async def nueva_recv_franja(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return NUEVA_TIME
     franja_key = data.replace("franja_", "")
     context.user_data["nueva_franja"] = franja_key
-    franja_labels = {"manana": "🌅 Mañana", "tarde": "🌆 Tarde", "noche": "🌙 Noche"}
+    franja_labels = {"manana": "🌅 Mañana", "tarde": "🏆 Tarde", "noche": "🌙 Noche"}
     label = franja_labels.get(franja_key, "")
     await query.edit_message_text(
         f"✅ Franja: *{label}*\n\n"
@@ -335,23 +406,21 @@ async def nueva_recv_time(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _after_time_selected(obj, context, time_str: str, is_message: bool = False) -> int:
+    """
+    Punto de entrada común tras elegir hora (botón o texto libre).
+
+    1. Guarda la hora en user_data.
+    2. Llama a _check_and_show_conflict.
+       - Si hay conflicto → muestra nombre + rango + horario visual → NUEVA_CONFLICT.
+       - Si no hay conflicto → pide nombre → NUEVA_NOMBRE.
+    """
     context.user_data["nueva_time"] = time_str
     date_str = context.user_data.get("nueva_date", str(date.today()))
-    try:
-        conflict = await api.check_appointment_conflict(date_str, time_str)
-        if conflict:
-            nc  = conflict.get("name") or conflict.get("type", "cita")
-            txt = (
-                f"⚠️ *Ya tienes una cita a las {time_str}:* _{nc}_\n\n"
-                f"¿Crear de todas formas o cambiar hora?"
-            )
-            if is_message:
-                await obj.message.reply_text(txt, parse_mode="Markdown", reply_markup=_kb_conflict_apt())
-            else:
-                await obj.edit_message_text(txt, parse_mode="Markdown", reply_markup=_kb_conflict_apt())
-            return NUEVA_CONFLICT
-    except Exception:
-        pass
+
+    result = await _check_and_show_conflict(obj, context, date_str, time_str, is_message=is_message)
+    if result is not None:
+        return result
+
     txt = f"✅ Hora: *{time_str}*\n\n📝 *Paso 3/5* — ¿Cómo se llama la cita?"
     if is_message:
         await obj.message.reply_text(txt, parse_mode="Markdown")
@@ -420,7 +489,6 @@ async def _save_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE, 
         user_id = str(update.effective_user.id)
         try:
             cfg = await api.get_user_config(user_id)
-            # La API devuelve la cita con 'date_str', normalizamos a 'date'
             if "date" not in result:
                 result["date"] = result.get("date_str", d)
             schedule_apt_reminders(update.get_bot(), user_id, result, cfg)
@@ -447,10 +515,15 @@ async def _save_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 # EDITAR CITA — flujo con botones (sin /skip)
 #
 # Flujo:
-#   1. cb_apt_edit_start   → muestra los campos actuales + botones para elegir
+#   1. cb_apt_edit_start       → muestra los campos actuales + botones para elegir
 #   2. El usuario pulsa qué quiere editar
-#   3. Se pide el nuevo valor (hora con teclado, tipo con botones, resto texto)
+#   3. Se pide el nuevo valor (hora con validación de solapamiento, tipo con botones, resto texto)
 #   4. Se guarda y vuelve al día
+#
+# Nota (v0.15.1): editar hora ahora comprueba solapamiento igual que /nueva.
+# Si la nueva hora solapa con una cita existente, se muestra el mismo mensaje
+# con rango + horario visual que en el flujo de creación.
+# El usuario puede confirmar o cancelar desde el mismo teclado _kb_conflict_apt.
 # ═══════════════════════════════════════════════════════════════════════
 
 def _kb_edit_apt_fields(date_str: str, idx: int) -> InlineKeyboardMarkup:
@@ -470,7 +543,6 @@ async def cb_apt_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     date_str, idx = _parse_apt_callback("ae_", query.data)
     context.user_data["edit_apt_date"]  = date_str
     context.user_data["edit_apt_index"] = idx
-    # Cargar datos actuales de la cita para mostrarlos
     try:
         apts = await api.get_appointments(date_str)
         apt  = next((a for a in apts if a.get("index") == idx), None)
@@ -499,7 +571,6 @@ async def cb_apt_edit_field_chosen(update: Update, context: ContextTypes.DEFAULT
     query = update.callback_query
     await query.answer()
     data  = query.data  # aedit_{field}_{date_str}_{idx}
-    # Extraer field: segundo token tras 'aedit_'
     rest  = data[len("aedit_"):]
     field, rest2 = rest.split("_", 1)
     date_str, idx = rest2.rsplit("_", 1)
@@ -531,6 +602,19 @@ async def cb_apt_edit_field_chosen(update: Update, context: ContextTypes.DEFAULT
 
 
 async def cb_apt_edit_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Recibe la nueva hora para una cita existente.
+
+    v0.15.1: comprueba solapamiento antes de guardar.
+    Si la nueva hora solapa, muestra nombre + rango + horario visual
+    y retorna NUEVA_CONFLICT para que el usuario decida.
+    Si confirma de todas formas (aptconf_ok), el flujo sigue con
+    nueva_conflict_response → NUEVA_NOMBRE, pero en este contexto
+    se usa _do_update_apt directamente desde el estado EDIT_APT_TIME.
+
+    Diseño: reutiliza _check_and_show_conflict y _kb_conflict_apt
+    para mantener la UX idéntica a /nueva.
+    """
     text = update.message.text.strip()
     if not _RE_TIME.match(text):
         await update.message.reply_text(
@@ -538,8 +622,40 @@ async def cb_apt_edit_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             parse_mode="Markdown",
         )
         return EDIT_APT_TIME
+
+    date_str = context.user_data.get("edit_apt_date", "")
     context.user_data["edit_apt_time"] = text
+
+    result = await _check_and_show_conflict(
+        update, context, date_str, text, is_message=True
+    )
+    if result is not None:
+        # Hay conflicto: guardamos que estamos en flujo editar
+        context.user_data["edit_conflict_pending"] = True
+        return NUEVA_CONFLICT
+
     return await _do_update_apt(update, context)
+
+
+async def cb_apt_edit_conflict_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """
+    Respuesta al conflicto durante edición de hora.
+
+    Si el usuario confirma (aptconf_ok) → guarda la nueva hora.
+    Si cancela (aptconf_cambiar) → vuelve a pedir hora.
+    Solo se activa cuando edit_conflict_pending está en user_data.
+    """
+    query = update.callback_query
+    await query.answer()
+    context.user_data.pop("edit_conflict_pending", None)
+
+    if query.data == "aptconf_ok":
+        return await _do_update_apt_from_query(query, context)
+
+    await query.edit_message_text(
+        "⏰ *Nueva hora* \\(HH:MM, 24h\\):", parse_mode="Markdown"
+    )
+    return EDIT_APT_TIME
 
 
 async def cb_apt_edit_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -657,10 +773,14 @@ def build_edit_apt_handler() -> ConversationHandler:
     Entrada: callback ae_{date_str}_{index}
     Estados:
         EDIT_APT_FIELD  → botones para elegir qué campo editar
-        EDIT_APT_TIME   → texto HH:MM
+        EDIT_APT_TIME   → texto HH:MM + comprobación solapamiento (v0.15.1)
         EDIT_APT_NOMBRE → texto libre
         EDIT_APT_TYPE   → botones de tipo
         EDIT_APT_NOTES  → texto libre
+
+    Si al editar la hora hay conflicto, el ConversationHandler pasa al
+    estado NUEVA_CONFLICT donde cb_apt_edit_conflict_response gestiona
+    la respuesta del usuario (confirmar o volver a pedir hora).
     """
     return ConversationHandler(
         entry_points=[CallbackQueryHandler(cb_apt_edit_start, pattern=r"^ae_")],
@@ -672,6 +792,7 @@ def build_edit_apt_handler() -> ConversationHandler:
             EDIT_APT_NOMBRE: [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_apt_edit_nombre)],
             EDIT_APT_TYPE:   [CallbackQueryHandler(cb_apt_edit_type, pattern=r"^etipo_")],
             EDIT_APT_NOTES:  [MessageHandler(filters.TEXT & ~filters.COMMAND, cb_apt_edit_notes)],
+            NUEVA_CONFLICT:  [CallbackQueryHandler(cb_apt_edit_conflict_response, pattern=r"^aptconf_")],
         },
         fallbacks=[CommandHandler("cancelar", _cmd_cancelar_inline)],
         name="editar_cita", persistent=False, per_message=False,
