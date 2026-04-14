@@ -4,6 +4,65 @@
 
 ---
 
+## [v0.13.0] — 14 abril 2026
+
+### ✨ Añadido / Mejorado — UX, Persistencia y Personalidad (Auditoría abr-2026)
+
+#### 1. `src/bot/handlers/nlp.py` — Indicador visual y fix hora 00:00
+- **`⏳ Procesando...`**: se envía un mensaje temporal mientras Groq trabaja
+  y se borra automáticamente al recibir la respuesta. El usuario ve feedback
+  inmediato y no cree que el bot está caído durante el llamado LLM (~1-2s).
+- **Fix hora 00:00**: si Groq no detecta la hora y devuelve `"00:00"`, ahora
+  se pide confirmación al usuario en lugar de crear una cita a medianoche.
+  Ref: auditoría UX-1 (hora inválida sin aviso).
+
+#### 2. `src/bot/handlers/menu.py` — /start explica los dos modos
+- El mensaje de bienvenida en `/start` y en el botón 🏠 Menú incluye ahora
+  una sección `_AYUDA_NLP` que muestra dos ejemplos de uso de lenguaje natural:
+  `"mañana dentista a las 5"` y `"dormí 7 horas"`.
+- Antes el usuario tenía que descubrir por sí solo que podía escribir en
+  lenguaje natural. Ahora se explica en la primera pantalla.
+  Ref: auditoría UX-2 (onboarding incompleto).
+
+#### 3. `src/bot/main.py` — PicklePersistence (v4.0 → v4.1)
+- **`PicklePersistence`** activa con `filepath=data/bot_persistence.pkl`.
+- Persiste `user_data` completo entre reinicios del proceso bot:
+  - `nlp_history` (contexto conversacional de Groq)
+  - `acum_hab_nombre` (flujo de acumulación de hábito en curso)
+- `store_bot_data=False` y `store_chat_data=False` para mantener el pkl pequeño.
+- El directorio `data/` se crea automáticamente si no existe.
+- Documentación del bloque de persistencia añadida al docstring del módulo.
+  Ref: auditoría UX-3 (contexto NLP se pierde en cada reinicio).
+
+#### 4. `src/bot/groq_router.py` — Personalidad THDORA refinada
+- **`_CHAT_SYSTEM`** reescrito:
+  - Nombre explícito: `"Eres THDORA, asistente personal de Álvaro"`
+  - Límite de 2 frases (antes 3), sin florituras ni saludos innecesarios
+  - Instrucción explícita de no inventar datos de citas o hábitos
+  - Ejemplos de respuesta mejorados y más naturales
+- Añadido comentario en el docstring del módulo indicando que `_CHAT_SYSTEM`
+  es el punto de control de la personalidad del bot y que se puede editar
+  sin tocar ningún otro módulo.
+  Ref: auditoría PERS-1 (personalidad sin documentar).
+
+### 📁 Archivos modificados
+| Archivo | Cambio principal |
+|---|---|
+| `src/bot/handlers/nlp.py` | ⏳ Procesando + fix hora 00:00 |
+| `src/bot/handlers/menu.py` | /start explica lenguaje natural |
+| `src/bot/main.py` | PicklePersistence activa |
+| `src/bot/groq_router.py` | _CHAT_SYSTEM refinado |
+| `CHANGELOG.md` | Este registro |
+
+### ⚠️ Nota de despliegue
+```
+# El archivo data/bot_persistence.pkl se crea automáticamente.
+# Añadir a .gitignore si aún no está:
+data/bot_persistence.pkl
+```
+
+---
+
 ## [v0.12.0] — 14 abril 2026
 
 ### ✨ Añadido — NLP con Groq (F13-base)
@@ -90,4 +149,4 @@ pip install groq        ← instalar dependencia
 
 ---
 
-_Última actualización: 14 abril 2026 — 11:46 CEST_
+_Última actualización: 14 abril 2026 — 12:25 CEST_
