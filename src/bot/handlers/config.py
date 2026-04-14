@@ -341,8 +341,9 @@ async def notif_recv_time(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         cfg = await api.update_user_config(user_id, evening_log_time=hora)
     context.user_data["notif_cfg"] = cfg
     # Reprogramar jobs solo cuando cambia la hora real
+    # FIX: usar context.bot en vez de query.get_bot() (deprecated en PTB v20+)
     try:
-        schedule_user_jobs(query.get_bot(), user_id, cfg)
+        schedule_user_jobs(context.bot, user_id, cfg)
     except Exception as e:
         logger.warning("No se pudieron reprogramar jobs para %s: %s", user_id, e)
     tipo_str = "resumen diario" if which == "summary" else "evening log"

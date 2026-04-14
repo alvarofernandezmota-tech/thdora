@@ -58,9 +58,10 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         citas_txt = ""
 
     # Programar jobs diarios del scheduler para este usuario
+    # FIX: usar context.bot en vez de update.get_bot() (deprecated en PTB v20+)
     try:
         cfg = await api.get_user_config(user_id)
-        schedule_user_jobs(update.get_bot(), user_id, cfg)
+        schedule_user_jobs(context.bot, user_id, cfg)
     except Exception as e:
         logger.warning("No se pudieron programar jobs para %s: %s", user_id, e)
 
@@ -86,8 +87,10 @@ async def cb_menu_home(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         citas_txt = f"\n⏰ Tienes *{n} cita{'s' if n != 1 else ''}* hoy" if n else ""
     except Exception:
         citas_txt = ""
+    # FIX: texto alineado con cmd_start (incluye '_Tu asistente personal...')
     await query.message.reply_text(
         f"{greeting}, soy *THDORA* — {date_short}{citas_txt}\n"
+        f"_Tu asistente personal de gestión de vida_"
         f"{_AYUDA_NLP}",
         parse_mode="Markdown",
         reply_markup=_kb_start(),

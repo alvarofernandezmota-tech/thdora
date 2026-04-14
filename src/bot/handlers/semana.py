@@ -2,9 +2,10 @@
 Handlers de la vista semanal — /semana y navegación entre semanas.
 
 Optimización de rendimiento (v2):
-  - Una sola llamada a get_appointments_week para obtener todas las citas.
+  - Una sola llamada a get_appointments_week para obtener todas las citas de la semana.
   - Las 7 llamadas a get_habits se lanzan en paralelo con asyncio.gather.
-  Total: 2 llamadas concurrentes en vez de 14 en serie.
+  - asyncio.gather agrupa ambas ramas: 1 llamada a week_apts + 7 a habits en paralelo.
+  En total 8 peticiones HTTP concurrentes vs 14 en serie (7 apts + 7 habits por separado).
 """
 
 import asyncio
@@ -51,7 +52,8 @@ async def _show_semana(msg, monday_str: str) -> None:
     sunday = monday + timedelta(days=6)
     today  = date.today()
 
-    # 2 llamadas concurrentes en vez de 14 en serie
+    # 2 gather concurrentes: 1 llamada a week_apts + 7 llamadas a habits en paralelo
+    # En total 8 peticiones HTTP vs 14 en serie (7 apts + 7 habits)
     week_apts_raw, week_habits = await asyncio.gather(
         _safe_week_apts(monday_str),
         _get_week_habits(monday),

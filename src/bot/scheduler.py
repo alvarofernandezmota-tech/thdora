@@ -214,8 +214,8 @@ async def _send_evening_log(bot, user_id: str) -> None:
         from datetime import date
         today  = str(date.today())
         habits = await api.get_habits(today)
-        n      = len(habits)
-        if n == 0:
+        # FIX: usar `if not habits` en vez de `if n == 0` para consistencia con _send_daily_summary
+        if not habits:
             text = (
                 f"🌙 *Última llamada del día\!*\n\n"
                 f"Todavía no has registrado ningún hábito hoy\."

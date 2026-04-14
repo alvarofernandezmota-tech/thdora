@@ -22,6 +22,8 @@ Métodos disponibles::
     await api.check_appointment_conflict(date, time)               → Dict | None
 
     # Hábitos
+    # Nota: el endpoint /habits/{date} devuelve List[{habit, value}];
+    #       get_habits() lo transforma internamente a Dict[str, str].
     await api.get_habits("2026-03-27")                             → Dict[str, str]
     await api.log_habit(date, habit, value)                        → bool
     await api.delete_habit(date, habit)                            → bool
@@ -151,6 +153,7 @@ class ThdoraApiClient:
     # ── Hábitos ────────────────────────────────────────────────
 
     async def get_habits(self, date_str: str) -> Dict[str, str]:
+        # El endpoint devuelve List[{habit, value}]; transformamos a Dict[str, str]
         raw: List[Dict[str, str]] = await self._get(f"/habits/{date_str}")
         return {item["habit"]: item["value"] for item in raw}
 
