@@ -4,6 +4,102 @@
 
 ---
 
+## [v0.16.0] — 23 abril 2026 (tarde)
+
+### 🔧 UX — Confirmación de borrado de cita muestra nombre + hora
+
+#### Resumen de sesión
+Sesión corta pero limpia. Un fix de UX real (tarea 1.3 del Bloque 1) y
+documentación al día. El bot ya muestra exactamente qué cita vas a borrar
+antes de pedirte confirmación.
+
+---
+
+#### `src/bot/handlers/citas.py` — `cb_apt_delete` mejorado
+
+**Antes (v0.15.x):**
+Al pulsar 🗑️ en una cita, el bot editaba directamente el mensaje con los
+botones de confirmación sin decirte qué cita ibas a borrar.
+
+**Ahora (v0.16.0):**
+- Hace GET de la cita antes de mostrar la confirmación.
+- Muestra nombre + hora + tipo:
+  ```
+  🗑️ ¿Borrar esta cita?
+
+    ⏰ 17:00 — Dentista [médica]
+
+  ⚠️ Esta acción no se puede deshacer.
+  ```
+- Degradación elegante: si la API falla al obtener los datos, muestra
+  igualmente la confirmación (el borrado puede continuar).
+
+---
+
+#### ROADMAP actualizado
+
+- Bloque 1 — tarea 1.3 marcada ✅ (23-abr)
+- Versión bumpeada a v0.16.0
+- Siguiente foco: **tarea 1.2** — Mostrar huecos disponibles antes de mover una cita
+
+---
+
+### 📦 Archivos de esta sesión
+
+| Archivo | Cambio |
+|---|---|
+| `src/bot/handlers/citas.py` | 🔧 cb_apt_delete muestra nombre+hora antes de confirmar |
+| `ROADMAP.md` | 📝 1.3 ✅, versión v0.16.0, siguiente → 1.2 |
+| `CHANGELOG.md` | 📝 Esta entrada |
+
+### ⚠️ Nota de despliegue
+`git pull` + reiniciar bot. No requiere cambios en `.env` ni dependencias.
+
+### 🧪 Checklist de prueba para esta versión
+
+```
+1. FLUJO BORRAR CITA (tarea 1.3 — core del fix)
+   [ ] Crea una cita con /nueva o NLP
+   [ ] Ve a /citas y pulsa 🗑️
+   [ ] ✅ Debe mostrar: "🗑️ ¿Borrar esta cita?\n  ⏰ HH:MM — Nombre [tipo]\n⚠️ Esta acción no se puede deshacer."
+   [ ] Pulsa Confirmar → cita borrada
+   [ ] Pulsa Cancelar → vuelve sin borrar
+
+2. FLUJO CREAR CITA CON CONFLICTO
+   [ ] Crea una cita a las 10:00
+   [ ] Intenta crear otra a las 10:30 (solapa 60 min)
+   [ ] ✅ Debe mostrar aviso ⚠️ con nombre de la cita que bloquea + horario visual
+   [ ] Opción "crear de todas formas" funciona
+   [ ] Opción "cambiar hora" vuelve a la selección de franja
+
+3. FLUJO EDITAR HORA DE CITA
+   [ ] Pulsa ✏️ en una cita → elige "⏰ Hora"
+   [ ] Pon una hora que solape con otra cita
+   [ ] ✅ Debe mostrar el mismo aviso ⚠️ de conflicto
+   [ ] Acepta → guarda la nueva hora
+
+4. FLUJO NLP
+   [ ] Escribe "mañana dentista a las 5" → cita creada
+   [ ] Escribe "dormí 7 horas" → hábito registrado
+   [ ] Escribe "¿qué tengo hoy?" → lista con datos reales
+   [ ] Escribe "borra el dentista" → desambiguación si hay varias, borra si hay una
+
+5. ARRANQUE / SCHEDULER
+   [ ] /start programa los jobs diarios (resumen + evening log)
+   [ ] Si tienes config guardada, los jobs deben quedar activos
+```
+
+### ⏩ Siguiente sesión — Hito 1.2
+**Objetivo:** Mostrar huecos disponibles (slot libres) antes de mover/editar una cita.
+- Cuando el usuario pulse ✏️ → Hora, en vez de pedir directamente "escribe HH:MM",
+  mostrar los huecos libres del día como botones.
+- Reutilizar `_build_day_schedule` de `nlp.py` para calcular slots disponibles.
+- Botones de franja (Mañana/Tarde/Noche) → horas libres de esa franja.
+- Si no hay huecos: mostrar mensaje claro + opción de escribir hora manualmente.
+- Integrar detección de conflicto al final (ya existe con `_check_and_show_conflict`).
+
+---
+
 ## [v0.15.2] — 14 abril 2026 (tarde)
 
 ### ✨ NLP v2 — Cache, contexto semana, desambiguación y cierre de proyecto
@@ -198,4 +294,4 @@ por la API para montar un mensaje rico y mostrar el horario visual del día.
 
 ---
 
-_Última actualización: 14 abril 2026 — 19:08 CEST_
+_Última actualización: 23 abril 2026 — 20:47 CEST_
