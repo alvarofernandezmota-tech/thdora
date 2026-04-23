@@ -44,6 +44,10 @@ Nota sobre callback_data con fechas:
     Los prefijos ae_, ad_, adc_ usan el patrón {prefix}{date_str}_{index}.
     La fecha contiene guiones (2026-04-13), así que NO usar split('_', 2).
     Se extrae con: data[len(prefix):] y luego rsplit('_', 1).
+
+Cambios v0.16 (2026-04-23):
+    - cb_apt_delete: muestra nombre + hora de la cita antes de pedir confirmación
+      (UX: el usuario sabe exactamente qué va a borrar — tarea 1.3)
 """
 
 import re
@@ -255,10 +259,40 @@ async def cb_cita_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ═══════════════════════════════════════════════════════════════════════
 
 async def cb_apt_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """
+    Primer paso del borrado: muestra nombre + hora de la cita y pide confirmación.
+
+    v0.16: antes sólo editaba el reply_markup (botones) sin mostrar qué cita
+    se iba a borrar. Ahora hace GET de la cita y muestra:
+        🗑️ ¿Borrar esta cita?
+          ⏰ HH:MM — Nombre [tipo]
+        ⚠️ Esta acción no se puede deshacer.
+    """
     query = update.callback_query
     await query.answer()
     date_str, idx = _parse_apt_callback("ad_", query.data)
-    await query.edit_message_reply_markup(reply_markup=_kb_apt_confirm(date_str, idx))
+
+    # Obtener datos de la cita para mostrárselos al usuario
+    nombre = "cita"
+    hora   = "?"
+    tipo   = ""
+    try:
+        apts = await api.get_appointments(date_str)
+        apt  = next((a for a in apts if a.get("index") == idx), None)
+        if apt:
+            nombre = apt.get("name", "") or apt.get("type", "cita")
+            hora   = apt.get("time", "?")
+            tipo   = f" \\[{apt['type']}\\]" if apt.get("type") else ""
+    except Exception:
+        pass  # degradación elegante: si falla la API mostramos igual la confirmación
+
+    await query.edit_message_text(
+        f"🗑️ *¿Borrar esta cita?*\n\n"
+        f"  ⏰ *{hora}* — {nombre}{tipo}\n\n"
+        f"⚠️ _Esta acción no se puede deshacer\\._",
+        parse_mode="Markdown",
+        reply_markup=_kb_apt_confirm(date_str, idx),
+    )
 
 
 async def cb_apt_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -512,18 +546,7 @@ async def _save_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 
 
 # ═══════════════════════════════════════════════════════════════════════
-# EDITAR CITA — flujo con botones (sin /skip)
-#
-# Flujo:
-#   1. cb_apt_edit_start       → muestra los campos actuales + botones para elegir
-#   2. El usuario pulsa qué quiere editar
-#   3. Se pide el nuevo valor (hora con validación de solapamiento, tipo con botones, resto texto)
-#   4. Se guarda y vuelve al día
-#
-# Nota (v0.15.1): editar hora ahora comprueba solapamiento igual que /nueva.
-# Si la nueva hora solapa con una cita existente, se muestra el mismo mensaje
-# con rango + horario visual que en el flujo de creación.
-# El usuario puede confirmar o cancelar desde el mismo teclado _kb_conflict_apt.
+# EDITAR CITA
 # ═══════════════════════════════════════════════════════════════════════
 
 def _kb_edit_apt_fields(date_str: str, idx: int) -> InlineKeyboardMarkup:
@@ -602,19 +625,6 @@ async def cb_apt_edit_field_chosen(update: Update, context: ContextTypes.DEFAULT
 
 
 async def cb_apt_edit_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Recibe la nueva hora para una cita existente.
-
-    v0.15.1: comprueba solapamiento antes de guardar.
-    Si la nueva hora solapa, muestra nombre + rango + horario visual
-    y retorna NUEVA_CONFLICT para que el usuario decida.
-    Si confirma de todas formas (aptconf_ok), el flujo sigue con
-    nueva_conflict_response → NUEVA_NOMBRE, pero en este contexto
-    se usa _do_update_apt directamente desde el estado EDIT_APT_TIME.
-
-    Diseño: reutiliza _check_and_show_conflict y _kb_conflict_apt
-    para mantener la UX idéntica a /nueva.
-    """
     text = update.message.text.strip()
     if not _RE_TIME.match(text):
         await update.message.reply_text(
@@ -630,7 +640,6 @@ async def cb_apt_edit_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         update, context, date_str, text, is_message=True
     )
     if result is not None:
-        # Hay conflicto: guardamos que estamos en flujo editar
         context.user_data["edit_conflict_pending"] = True
         return NUEVA_CONFLICT
 
@@ -638,13 +647,6 @@ async def cb_apt_edit_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def cb_apt_edit_conflict_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Respuesta al conflicto durante edición de hora.
-
-    Si el usuario confirma (aptconf_ok) → guarda la nueva hora.
-    Si cancela (aptconf_cambiar) → vuelve a pedir hora.
-    Solo se activa cuando edit_conflict_pending está en user_data.
-    """
     query = update.callback_query
     await query.answer()
     context.user_data.pop("edit_conflict_pending", None)
@@ -767,21 +769,6 @@ def build_nueva_handler() -> ConversationHandler:
 
 
 def build_edit_apt_handler() -> ConversationHandler:
-    """
-    ConversationHandler para editar una cita.
-
-    Entrada: callback ae_{date_str}_{index}
-    Estados:
-        EDIT_APT_FIELD  → botones para elegir qué campo editar
-        EDIT_APT_TIME   → texto HH:MM + comprobación solapamiento (v0.15.1)
-        EDIT_APT_NOMBRE → texto libre
-        EDIT_APT_TYPE   → botones de tipo
-        EDIT_APT_NOTES  → texto libre
-
-    Si al editar la hora hay conflicto, el ConversationHandler pasa al
-    estado NUEVA_CONFLICT donde cb_apt_edit_conflict_response gestiona
-    la respuesta del usuario (confirmar o volver a pedir hora).
-    """
     return ConversationHandler(
         entry_points=[CallbackQueryHandler(cb_apt_edit_start, pattern=r"^ae_")],
         states={
