@@ -4,7 +4,7 @@
 
 ---
 
-## Estado actual — v0.14.0 (14 abril 2026)
+## Estado actual — v0.16.0 (23 abril 2026)
 
 ```
 Bot Telegram (9 comandos + 5 ConversationHandlers + inline buttons + NLP texto libre)
@@ -41,6 +41,7 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
   - ⏳ Procesando... feedback inmediato al usuario
   - Fix hora 00:00 → pide confirmación antes de crear
   - **Desambiguación borrar/editar** → botones inline cuando hay varias citas candidatas ✅
+- **UX borrar cita (v0.16):** confirmación muestra nombre + hora antes de borrar ✅
 
 ---
 
@@ -64,6 +65,13 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 - Contexto semana completa en borrar/editar
 - `nlp_disambig.py` — handler de resolución de cita ambigua con botones inline
 
+### Tarea 1.1 — Desambiguación borrar/editar cita ✅
+### Tarea 1.3 — Flujo cancelar cita ✅ (23 abril 2026 tarde)
+- `cb_apt_delete` ahora hace GET de la cita y muestra nombre + hora antes de la confirmación
+- UX: el usuario sabe exactamente qué va a borrar antes de confirmar
+- Aviso "⚠️ Esta acción no se puede deshacer" en el mensaje de confirmación
+- Degradación elegante: si falla la API muestra la confirmación de todas formas
+
 ---
 
 ## 🔶 TRABAJO INMEDIATO — Bloques priorizados
@@ -76,7 +84,7 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 |---|---|---|
 | 1.1 | Desambiguación borrar/editar cita | ✅ Hecho |
 | 1.2 | Mostrar horario disponible antes de mover una cita | 🔲 Siguiente |
-| 1.3 | Flujo cancelar cita: confirmación + mostrar exactamente qué cita se borra | 🔲 Pendiente |
+| 1.3 | Flujo cancelar cita: confirmación + mostrar exactamente qué cita se borra | ✅ Hecho (23-abr) |
 
 ### 🟡 Bloque 2 — Menú e interfaz
 
@@ -133,4 +141,4 @@ Bloque 1 (Citas) → Bloque 2 (Menú)
 
 ---
 
-_Última actualización: 14 abril 2026 — 19:05 CEST_
+_Última actualización: 23 abril 2026 — 20:38 CEST_
