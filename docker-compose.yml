@@ -9,6 +9,7 @@
 #   docker compose exec api sqlite3 /app/data/thdora.db  # consola DB
 #
 # Volumen `thdora_data` persiste la base de datos SQLite entre reinicios.
+# Puertos: 8001 = thdora-api | 8000 = ai-toolkit/litellm
 # ──────────────────────────────────────────────────────────────────────────
 
 services:
@@ -21,7 +22,7 @@ services:
     command: /entrypoint-api.sh
     restart: always
     ports:
-      - "8000:8000"          # expone la API al host (opcional en producción)
+      - "8001:8000"          # 8001 en host → 8000 dentro del contenedor
     volumes:
       - thdora_data:/app/data
     env_file:
