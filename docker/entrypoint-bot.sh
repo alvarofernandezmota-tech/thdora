@@ -1,21 +1,19 @@
 #!/bin/sh
 # Entrypoint del servicio `bot`
 # Espera a que la API responda con 200 antes de arrancar el bot.
-# El health check de Docker ya garantiza esto via depends_on: condition: service_healthy
-# pero este script añade una capa extra para entornos sin Compose.
 set -e
 
 API_URL="${THDORA_API_URL:-http://api:8000}"
 MAX_RETRIES=30
 RETRY_INTERVAL=2
 
-echo "⏳ Esperando a que la API esté disponible en ${API_URL}/health..."
+echo "⏳ Esperando a que la API esté disponible en ${API_URL}/..."
 i=0
 while [ $i -lt $MAX_RETRIES ]; do
     if python -c "
 import urllib.request, sys
 try:
-    urllib.request.urlopen('${API_URL}/health')
+    urllib.request.urlopen('${API_URL}/')
     sys.exit(0)
 except Exception:
     sys.exit(1)
