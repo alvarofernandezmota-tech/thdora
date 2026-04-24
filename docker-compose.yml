@@ -31,7 +31,7 @@ services:
       - THDORA_DB_PATH=/app/data/thdora.db
     healthcheck:
       test: ["CMD", "python", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+             "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
       interval: 15s
       timeout: 5s
       retries: 5
