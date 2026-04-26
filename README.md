@@ -10,6 +10,18 @@
 
 ---
 
+## Parte del ecosistema
+
+> THDORA es el **producto** del tridente. Se construye con `ai-toolkit` y se documenta en `personal`.
+
+| Repo | Rol |
+|------|-----|
+| 🏠 [personal](https://github.com/alvarofernandezmota-tech/personal) | OS personal — tracking, contexto, hoja de ruta |
+| 🤖 [ai-toolkit](https://github.com/alvarofernandezmota-tech/ai-toolkit) | Stack IA — Claude Code + OpenRouter + Ollama |
+| 💬 **thdora** (este repo) | El producto — bot Telegram + FastAPI |
+
+---
+
 ## ¿Qué es THDORA?
 
 THDORA es un sistema personal de productividad accesible desde Telegram. El usuario puede crear citas,
@@ -18,6 +30,8 @@ por un LLM (Groq/Llama) o mediante flujos guiados por botones.
 
 El sistema detecta conflictos de agenda con solapamiento real de bloques horarios, genera horarios
 visuales por franjas y permite navegar entre semanas desde el propio chat.
+
+**Estado actual:** ✅ Corriendo 24/7 en servidor con Docker desde 24 abril 2026.
 
 ---
 
@@ -41,7 +55,7 @@ visuales por franjas y permite navegar entre semanas desde el propio chat.
 ```
 ┌─────────────────────────────────────────────────────────┐
 │  Usuario (Telegram)                                     │
-└────────────────────┬────────────────────────────────────┘
+└────────────────────┬────────────────────────────┘
                      │ Mensaje texto / botón
                      ▼
 ┌─────────────────────────────────────────────────────────┐
@@ -51,7 +65,7 @@ visuales por franjas y permite navegar entre semanas desde el propio chat.
 │  ├── handlers/habitos.py                                │
 │  ├── handlers/semana.py ← vista semanal (2 req paralelo) │
 │  └── scheduler.py       ← APScheduler jobs diarios      │
-└────────────────────┬────────────────────────────────────┘
+└────────────────────┬────────────────────────────┘
                      │ HTTP (httpx async)
                      ▼
 ┌─────────────────────────────────────────────────────────┐
@@ -60,7 +74,7 @@ visuales por franjas y permite navegar entre semanas desde el propio chat.
 │  ├── /habits        ← CRUD + acumulación                │
 │  ├── /config        ← hábitos configurados + notifs     │
 │  └── /summary       ← resumen diario                    │
-└────────────────────┬────────────────────────────────────┘
+└────────────────────┬────────────────────────────┘
                      │ SQLAlchemy ORM
                      ▼
               SQLite  (datos/thdora.db)
@@ -71,17 +85,15 @@ visuales por franjas y permite navegar entre semanas desde el propio chat.
 ## Decisiones de diseño destacadas
 
 - **Solapamiento real de citas**: el endpoint `GET /appointments/{date}/conflict/{time}` usa la fórmula
-  `new_start < exist_end AND new_end > exist_start` en vez de comparar hora exacta. Cubre los 4 casos
-  de solapamiento (inicio, fin, dentro, exacta) con duración configurable vía query param `?duration=`.
+  `new_start < exist_end AND new_end > exist_start` en vez de comparar hora exacta.
 
 - **Vista semanal optimizada**: `semana.py` pasó de 14 llamadas HTTP en serie a 2 concurrentes usando
   `asyncio.gather` + el endpoint `/appointments/week/{date}`.
 
-- **NLP con fallback visual**: cuando Groq extrae `time=00:00` (hora no detectada) o hay conflicto,
-  el bot genera un horario visual con franjas de 30min (08:00–22:00) marcando bloques ocupados.
+- **NLP con fallback visual**: cuando Groq extrae `time=00:00` o hay conflicto, el bot genera un
+  horario visual con franjas de 30min (08:00–22:00) marcando bloques ocupados.
 
-- **Separación API/bot**: la API expone el dominio completo; el bot es un cliente HTTP puro. Permite
-  usar la API desde cualquier otro cliente (web, móvil) sin tocar el bot.
+- **Separación API/bot**: la API expone el dominio completo; el bot es un cliente HTTP puro.
 
 ---
 
@@ -107,13 +119,7 @@ thdora/
 │           ├── nlp.py        # Texto libre → Groq → acción
 │           └── common.py     # /cancelar, /resumen, error_handler
 ├── tests/
-│   └── unit/
-│       ├── test_appointments_overlap.py   # _find_overlap, _time_to_minutes
-│       ├── test_json_lifemanager.py       # JsonLifeManager
-│       ├── test_memory_lifemanager.py     # MemoryLifeManager
-│       └── bot/
-│           └── test_nlp_schedule.py       # _build_day_schedule, _end_time
-├── docs/                     # Documentación técnica extendida
+├── docs/
 ├── CHANGELOG.md
 ├── ROADMAP.md
 ├── Makefile
@@ -126,22 +132,16 @@ thdora/
 ## Instalación y arranque
 
 ```bash
-# 1. Clonar y entrar
 git clone https://github.com/alvarofernandezmota-tech/thdora.git
 cd thdora
-
-# 2. Variables de entorno
 cp .env.example .env
 # Editar .env con TELEGRAM_BOT_TOKEN y GROQ_API_KEY
-
-# 3. Instalar dependencias
 pip install -e ".[dev]"
 
-# 4. Arrancar API y bot por separado
 make run-api   # FastAPI en http://localhost:8000
 make run-bot   # Bot Telegram
 
-# O con Docker
+# O con Docker (producción)
 make docker-up
 ```
 
@@ -150,13 +150,8 @@ make docker-up
 ## Tests
 
 ```bash
-# Todos los tests
 pytest tests/ -v
-
-# Solo unitarios (sin API ni bot levantado)
 pytest tests/unit/ -v
-
-# Con cobertura
 pytest tests/ --cov=src --cov-report=term-missing
 ```
 
@@ -167,7 +162,7 @@ pytest tests/ --cov=src --cov-report=term-missing
 | Comando | Descripción |
 |---|---|
 | `/start` | Menú principal + programar jobs diarios |
-| `/nueva` | Crear cita con flujo guiado (fecha → franja → hora → tipo) |
+| `/nueva` | Crear cita con flujo guiado |
 | `/citas` | Ver y gestionar citas de hoy |
 | `/habito` | Registrar un hábito con botones rápidos |
 | `/habitos` | Ver hábitos del día |
@@ -180,9 +175,30 @@ También acepta **texto libre**: _"mañana dentista a las 5"_, _"dormí 7 horas"
 
 ---
 
+## 🚧 Roadmap (por orden de dependencia)
+
+| Issue | Feature | Estado |
+|-------|---------|--------|
+| [#10](https://github.com/alvarofernandezmota-tech/thdora/issues/10) | 🐛 Fix `/config` timeout | 🔴 Bug — aplicar ya (3 líneas) |
+| [#3](https://github.com/alvarofernandezmota-tech/thdora/issues/3) | F10 Multi-usuario | 🔴 Prioritario — todo depende de esto |
+| [#4](https://github.com/alvarofernandezmota-tech/thdora/issues/4) | F11 Scheduler notificaciones | 🟠 Requiere F10 |
+| [#2](https://github.com/alvarofernandezmota-tech/thdora/issues/2) | F9.4 UX citas + vista mes | 🟠 Requiere F10 |
+| [#9](https://github.com/alvarofernandezmota-tech/thdora/issues/9) | F16 Onboarding + perfil usuario | 🟡 Requiere F10 |
+| [#5](https://github.com/alvarofernandezmota-tech/thdora/issues/5) | F12 IA lenguaje natural (Groq) | 🟡 Requiere F10 |
+| [#6](https://github.com/alvarofernandezmota-tech/thdora/issues/6) | F13 Análisis hábitos con IA | 🟢 Requiere F12 |
+| [#8](https://github.com/alvarofernandezmota-tech/thdora/issues/8) | F15 Voz a texto (Whisper) | 🟢 Requiere F12 |
+| [#7](https://github.com/alvarofernandezmota-tech/thdora/issues/7) | F14 Llamada Twilio urgente | 🔵 Futuro |
+
+---
+
 ## Versión actual
 
-**v4.1.0** — 2026-04-14
+**v4.1.0** — 2026-04-26  
+Desplegado en servidor con Docker. Corriendo 24/7.
 
 Ver [CHANGELOG.md](CHANGELOG.md) para historial completo.  
 Ver [ROADMAP.md](ROADMAP.md) para próximas funcionalidades.
+
+---
+
+*Construido y mantenido por [Álvaro Fernández Mota](https://github.com/alvarofernandezmota-tech) · Actualizado 26 abril 2026*
