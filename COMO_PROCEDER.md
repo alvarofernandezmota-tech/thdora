@@ -1,7 +1,7 @@
 # 🧭 THDORA — CÓMO PROCEDER
 
 > Guía de trabajo para retomar el proyecto en cualquier momento sin perder contexto.
-> Última actualización: **14 abril 2026 — 23:35 CEST**
+> Última actualización: **27 abril 2026 — 15:15 CEST**
 
 ---
 
@@ -26,7 +26,75 @@ make run-api
 
 # Terminal 2 — Bot
 make run-bot
+
+# Con Docker (producción)
+docker compose up -d
+docker compose logs -f
 ```
+
+---
+
+## 🌿 Estrategia de ramas — Desarrollo sin romper producción
+
+> **Regla de oro:** nunca tocar código en `main` directamente.
+> `main` = lo que está corriendo. `dev` = donde se trabaja.
+
+### Estructura de ramas
+
+```
+main  ──────────────────────────────────────→  producción (bot corriendo)
+         ↑ merge solo cuando está probado
+dev   ──────────────────────────────────────→  desarrollo activo
+```
+
+### Flujo completo de trabajo
+
+```bash
+# 1. Siempre arrancar desde dev
+git checkout dev
+git pull origin main          # sincronizar con lo último de prod
+
+# 2. Hacer cambios, commits normales
+git add .
+git commit -m "fix: descripción del cambio"
+git push origin dev
+
+# 3. Cuando está probado y listo → merge a main
+git checkout main
+git merge dev
+git push origin main
+
+# 4. En el servidor: rebuild SOLO el servicio afectado
+docker compose build bot      # si solo tocaste src/bot/
+docker compose up -d bot      # reinicia SOLO el bot — API sigue viva ✅
+
+# Si tocaste src/api/ también:
+docker compose build api
+docker compose up -d api
+```
+
+### Comandos Docker — cuál usar en cada caso
+
+| Situación | Comando | Efecto |
+|-----------|---------|--------|
+| Actualizar solo el bot | `docker compose build bot && docker compose up -d bot` | ✅ Solo reinicia el bot |
+| Actualizar solo la API | `docker compose build api && docker compose up -d api` | ✅ Solo reinicia la API |
+| Reiniciar todo desde cero | `docker compose down && docker compose up -d` | ⚠️ Corte breve |
+| Ver logs en tiempo real | `docker compose logs -f bot` | Solo lectura |
+| Ver estado de contenedores | `docker compose ps` | Solo lectura |
+
+> 💡 La base de datos SQLite está en el volumen `thdora_data` — **persiste siempre**,
+> los reinicios de contenedor no la tocan nunca.
+
+### Qué servicio rebuild según el fichero tocado
+
+| Fichero modificado | Rebuild necesario |
+|--------------------|-------------------|
+| `src/bot/**` | Solo `bot` |
+| `src/api/**` | Solo `api` |
+| `src/core/**` o `src/db/**` | Ambos (`api` + `bot`) |
+| `requirements.txt` | Ambos (rebuild completo) |
+| `keyboards.py`, `handlers/` | Solo `bot` |
 
 ---
 
@@ -81,6 +149,17 @@ Un hábito se guardó sin tipo. Hay que validar al guardar
 y mejorar el formateo si el tipo es null.
 
 **Ficheros:** `src/bot/handlers/habitos.py`
+
+---
+
+### BUG 5 🔴 CRÍTICO — Añadir cita desde menú (botón ➕ Nueva cita)
+```
+Flujo: ➕ Nueva cita → ConversationHandler → fallo en algún paso
+```
+El botón existe en `keyboards.py → _kb_start()` con `callback_data="quick_nueva"`.
+El ConversationHandler está en `citas.py`. En análisis — 27 abril 2026.
+
+**Ficheros:** `src/bot/handlers/citas.py` + `src/bot/keyboards.py`
 
 ---
 
@@ -200,7 +279,7 @@ Efecto inmediato al reiniciar. No tocar otros módulos.
 TELEGRAM_BOT_TOKEN=xxx
 GROQ_API_KEY=gsk_xxx       # configurada ✅
 
-# Para Claude Code mañana
+# Para Claude Code
 ANTHROPIC_BASE_URL=https://openrouter.ai/api/v1
 ANTHROPIC_API_KEY=sk-or-xxx  # openrouter.ai — gratis
 ```
@@ -219,7 +298,7 @@ thdora/
 │   ├── keyboards.py         ← teclados Telegram
 │   └── handlers/
 │       ├── nlp.py           ← handler texto libre
-│       ├── citas.py         ← ⚠️ bugs 1 y 2
+│       ├── citas.py         ← ⚠️ bugs 1, 2 y 5
 │       ├── habitos.py       ← ⚠️ bug 4
 │       ├── semana.py
 │       ├── config.py
@@ -238,4 +317,4 @@ thdora/
 
 ---
 
-_Actualizado: 14 abril 2026 — 23:35 CEST — post sesión de noche, bot parado_
+_Actualizado: 27 abril 2026 — 15:15 CEST — estrategia ramas + BUG 5 añadido_
