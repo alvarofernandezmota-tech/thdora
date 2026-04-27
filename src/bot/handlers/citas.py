@@ -3,7 +3,7 @@ Handlers de citas: /citas, /nueva (con franjas horarias), editar, borrar, detall
 
 Flujo /nueva con franjas:
     NUEVA_DATE       → fecha (texto libre)
-    NUEVA_FRANJA     → 🌅 Mañana / 🏆 Tarde / 🌙 Noche / ✏️ Exacta
+    NUEVA_FRANJA     → 🌅 Mañana / 🌆 Tarde / 🌙 Noche / ✏️ Exacta
     NUEVA_HORA_PUNTO → hora en punto con botones de la franja
     NUEVA_HORA_CUARTO→ (opcional) :00 :15 :30 :45
     NUEVA_TIME       → hora exacta si el usuario quiere escribirla
@@ -48,6 +48,10 @@ Nota sobre callback_data con fechas:
 Cambios v0.16 (2026-04-23):
     - cb_apt_delete: muestra nombre + hora de la cita antes de pedir confirmación
       (UX: el usuario sabe exactamente qué va a borrar — tarea 1.3)
+
+Fixes v0.16.1 (2026-04-27):
+    - B1: franja_labels corregido 🏆→🌆 para consistencia con _kb_franjas()
+    - B6: hora_ver_cuartos ahora usa la hora ya seleccionada si existe
 """
 
 import re
@@ -261,18 +265,11 @@ async def cb_cita_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def cb_apt_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """
     Primer paso del borrado: muestra nombre + hora de la cita y pide confirmación.
-
-    v0.16: antes sólo editaba el reply_markup (botones) sin mostrar qué cita
-    se iba a borrar. Ahora hace GET de la cita y muestra:
-        🗑️ ¿Borrar esta cita?
-          ⏰ HH:MM — Nombre [tipo]
-        ⚠️ Esta acción no se puede deshacer.
     """
     query = update.callback_query
     await query.answer()
     date_str, idx = _parse_apt_callback("ad_", query.data)
 
-    # Obtener datos de la cita para mostrárselos al usuario
     nombre = "cita"
     hora   = "?"
     tipo   = ""
@@ -284,7 +281,7 @@ async def cb_apt_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
             hora   = apt.get("time", "?")
             tipo   = f" \\[{apt['type']}\\]" if apt.get("type") else ""
     except Exception:
-        pass  # degradación elegante: si falla la API mostramos igual la confirmación
+        pass
 
     await query.edit_message_text(
         f"🗑️ *¿Borrar esta cita?*\n\n"
@@ -375,7 +372,8 @@ async def nueva_recv_franja(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return NUEVA_TIME
     franja_key = data.replace("franja_", "")
     context.user_data["nueva_franja"] = franja_key
-    franja_labels = {"manana": "🌅 Mañana", "tarde": "🏆 Tarde", "noche": "🌙 Noche"}
+    # FIX B1: emoji corregido 🏆 → 🌆 para consistencia con _kb_franjas()
+    franja_labels = {"manana": "🌅 Mañana", "tarde": "🌆 Tarde", "noche": "🌙 Noche"}
     label = franja_labels.get(franja_key, "")
     await query.edit_message_text(
         f"✅ Franja: *{label}*\n\n"
@@ -397,7 +395,9 @@ async def nueva_recv_hora_punto(update: Update, context: ContextTypes.DEFAULT_TY
         return NUEVA_TIME
     if data == "hora_ver_cuartos":
         franja = context.user_data.get("nueva_franja", "manana")
-        hora_inicio = {"manana": 6, "tarde": 14, "noche": 22}[franja]
+        # FIX B6: usar la hora ya seleccionada si existe; si no, inicio de franja
+        _franja_inicio = {"manana": 6, "tarde": 14, "noche": 22}
+        hora_inicio = context.user_data.get("nueva_hora_temp") or _franja_inicio.get(franja, 6)
         context.user_data["nueva_hora_temp"] = hora_inicio
         await query.edit_message_text(
             f"🕐 *Elige los cuartos para {hora_inicio:02d}:xx:*",
@@ -440,14 +440,6 @@ async def nueva_recv_time(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _after_time_selected(obj, context, time_str: str, is_message: bool = False) -> int:
-    """
-    Punto de entrada común tras elegir hora (botón o texto libre).
-
-    1. Guarda la hora en user_data.
-    2. Llama a _check_and_show_conflict.
-       - Si hay conflicto → muestra nombre + rango + horario visual → NUEVA_CONFLICT.
-       - Si no hay conflicto → pide nombre → NUEVA_NOMBRE.
-    """
     context.user_data["nueva_time"] = time_str
     date_str = context.user_data.get("nueva_date", str(date.today()))
 
@@ -717,7 +709,6 @@ async def _do_update_apt_from_query(query, context) -> int:
     """Versión de _do_update_apt para cuando la respuesta viene de un CallbackQuery."""
     date_str = context.user_data.get("edit_apt_date", "")
     index    = context.user_data.get("edit_apt_index", 0)
-    user_id  = str(query.from_user.id)
     try:
         await api.update_appointment(
             date_str, index,
@@ -788,7 +779,6 @@ def build_edit_apt_handler() -> ConversationHandler:
 
 async def _cmd_cancelar_inline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data.clear()
-    from telegram.ext import ConversationHandler
     await update.message.reply_text(
         "❌ Operación cancelada\\.",
         parse_mode="Markdown",
