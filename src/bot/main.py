@@ -1,5 +1,5 @@
 """
-Entrypoint del bot Telegram de THDORA — v4.2
+Entrypoint del bot Telegram de THDORA — v4.3
 
 Variables de entorno::
     TELEGRAM_BOT_TOKEN   → token de @BotFather (obligatorio)
@@ -25,6 +25,10 @@ Persistencia (PicklePersistence):
 
 Scheduler (F12):
     - Se arranca en post_init (dentro del event loop de PTB, evita RuntimeError)
+    - FIX B-NEW5 (v4.3): post_init se registra correctamente via
+      ApplicationBuilder().post_init(_post_init) en lugar de asignación directa
+      (app.post_init = _post_init no funcionaba en PTB v20+ y el scheduler
+      podía no arrancar en producción).
     - Los jobs diarios (daily_summary / evening_log) se programan en cmd_start
       y se reprograman cuando el usuario cambia horarios en /config
     - Los jobs one-shot de cita se gestionan en handlers/citas.py
@@ -122,6 +126,20 @@ def _load_token() -> str:
     return token
 
 
+async def _post_init(application) -> None:
+    """Arranca el scheduler APScheduler dentro del event loop de PTB.
+
+    FIX B-NEW5 (v4.3): esta función se pasa a ApplicationBuilder().post_init()
+    en lugar de asignarla directamente (app.post_init = fn), que no era
+    el API correcto de PTB v20+ y provocaba que el scheduler no arrancara
+    de forma fiable en producción.
+    """
+    scheduler = get_scheduler()
+    if not scheduler.running:
+        scheduler.start()
+        logger.info("⏰ Scheduler F12 iniciado")
+
+
 def build_app(token: str):
     os.makedirs("data", exist_ok=True)
     persistence = PicklePersistence(filepath=_PERSISTENCE_PATH)
@@ -130,17 +148,18 @@ def build_app(token: str):
         ApplicationBuilder()
         .token(token)
         .persistence(persistence)
+        .post_init(_post_init)   # FIX B-NEW5: API correcto PTB v20+
         .build()
     )
 
-    # ── 1. ConversationHandlers ───────────────────────────────────────────
+    # ── 1. ConversationHandlers ────────────────────────────────────────────
     app.add_handler(build_nueva_handler())     # /nueva + quick_nueva_*
     app.add_handler(build_habito_handler())    # /habito + quick_habito_*
     app.add_handler(build_edit_apt_handler())  # ^ae_
     app.add_handler(build_edit_hab_handler())  # ^he_
     app.add_handler(build_config_handler())    # /config + ^quick_config$
 
-    # ── 2. CallbackQueryHandlers globales ──────────────────────────────
+    # ── 2. CallbackQueryHandlers globales ─────────────────────────────
     app.add_handler(CallbackQueryHandler(cb_menu_home,          pattern=r"^menu_home$"))
     app.add_handler(CallbackQueryHandler(cb_citas_nav,          pattern=r"^citas_nav_"))
     app.add_handler(CallbackQueryHandler(cb_habitos_nav,        pattern=r"^habitos_nav_"))
@@ -158,7 +177,7 @@ def build_app(token: str):
     # ── 3. Texto libre (acumulación hábito → NLP) ──────────────────────
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _route_free_text))
 
-    # ── 4. Comandos ───────────────────────────────────────────────
+    # ── 4. Comandos ──────────────────────────────────────────────────
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("citas",    cmd_citas))
     app.add_handler(CommandHandler("habitos",  cmd_habitos))
@@ -166,14 +185,14 @@ def build_app(token: str):
     app.add_handler(CommandHandler("resumen",  cmd_resumen))
     app.add_handler(CommandHandler("cancelar", cmd_cancelar))
 
-    # ── 5. Error handler ────────────────────────────────────────────
+    # ── 5. Error handler ───────────────────────────────────────────────
     app.add_error_handler(error_handler)
 
     return app
 
 
 async def _route_free_text(update, context) -> None:
-    """Enruta texto libre fuera de ConversationHandlers.
+    """Enrúta texto libre fuera de ConversationHandlers.
 
     Prioridad:
         1. Si hay acumulación de hábito activa → cb_hab_add_value (flujo existente)
@@ -190,15 +209,7 @@ def main() -> None:
     asyncio.run(_check_api())
     app = build_app(token)
 
-    async def _post_init(application) -> None:
-        scheduler = get_scheduler()
-        if not scheduler.running:
-            scheduler.start()
-            logger.info("⏰ Scheduler F12 iniciado")
-
-    app.post_init = _post_init
-
-    logger.info("🤖 THDORA bot v4.2 arrancando (polling)…")
+    logger.info("🤖 THDORA bot v4.3 arrancando (polling)…")
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=["message", "callback_query"],
