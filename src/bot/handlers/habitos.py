@@ -22,6 +22,13 @@ Nota sobre callback_data con fechas:
     La fecha contiene guiones (2026-04-13), así que NO usar split('_', 2).
     Se extrae con: data[len(prefix):] y luego split('_', 1) ya que
     date_str siempre tiene formato fijo YYYY-MM-DD (10 caracteres).
+
+Fixes v0.16.2 (2026-04-27):
+    - B-NEW3: eliminado habit[:15] en _kb_edit_hab_fields — los hábitos con
+      nombre > 15 chars fallaban en edición porque la API no los encontraba
+      con el nombre truncado. Ahora se usa el nombre completo igual que en
+      _kb_hab_actions y _kb_hab_confirm (que ya tenían este fix documentado
+      como FIX B3).
 """
 
 import logging
@@ -330,22 +337,20 @@ async def habito_conflict_response(update: Update, context: ContextTypes.DEFAULT
 
 
 # ════════════════════════════════════════════════════════════════════════
-# EDITAR HÁBITO — flujo con botones
-#
-# Flujo:
-#   1. cb_hab_edit_start  → muestra valor actual + botones Cambiar nombre /
-#                           Cambiar valor / Cancelar
-#   2. cb_hab_edit_field  → usuario elige qué cambiar
-#   3. Se pide el nuevo valor
-#   4. Se guarda y vuelve al día
+# EDITAR HÁBITO
 # ════════════════════════════════════════════════════════════════════════
 
 def _kb_edit_hab_fields(date_str: str, habit: str) -> InlineKeyboardMarkup:
-    """Teclado para elegir qué campo del hábito editar."""
-    h = habit[:15]
+    """Teclado para elegir qué campo del hábito editar.
+
+    FIX B-NEW3 (v0.16.2): eliminado habit[:15] — el nombre completo es
+    necesario para que _parse_hab_callback y la API lo encuentren.
+    Los callbacks hedit_name_ y hedit_val_ usan ahora el nombre sin truncar,
+    igual que _kb_hab_actions y _kb_hab_confirm (FIX B3 anterior).
+    """
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton("📝 Cambiar nombre", callback_data=f"hedit_name_{date_str}_{h}")],
-        [InlineKeyboardButton("📊 Cambiar valor",  callback_data=f"hedit_val_{date_str}_{h}")],
+        [InlineKeyboardButton("📝 Cambiar nombre", callback_data=f"hedit_name_{date_str}_{habit}")],
+        [InlineKeyboardButton("📊 Cambiar valor",  callback_data=f"hedit_val_{date_str}_{habit}")],
         [InlineKeyboardButton("← Cancelar",        callback_data=f"habitos_nav_{date_str}")],
     ])
 
@@ -356,7 +361,6 @@ async def cb_hab_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     date_str, habit = _parse_hab_callback("he_", query.data)
     context.user_data["edit_hab_date"]   = date_str
     context.user_data["edit_hab_nombre"] = habit
-    # Cargar valor actual
     try:
         habits = await api.get_habits(date_str)
         valor  = habits.get(habit, "—")
@@ -376,10 +380,10 @@ async def cb_hab_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     """El usuario eligió cambiar nombre o valor."""
     query = update.callback_query
     await query.answer()
-    data  = query.data  # hedit_{field}_{date_str}_{habit[:15]}
+    data  = query.data  # hedit_{field}_{date_str}_{habit}
     rest  = data[len("hedit_"):]
     field, rest2 = rest.split("_", 1)
-    # date_str = primeros 10 chars de rest2
+    # date_str = primeros 10 chars de rest2 (formato YYYY-MM-DD fijo)
     date_str = rest2[:10]
     habit    = rest2[11:]
     context.user_data["edit_hab_field"]  = field
@@ -442,7 +446,6 @@ async def _do_edit_habit(msg, context, value: Optional[str]) -> int:
     nombre_nuevo = context.user_data.get("edit_hab_nombre_nuevo", nombre_orig)
     try:
         if nombre_nuevo != nombre_orig:
-            # Renombrar: borrar original y crear con nuevo nombre
             habits    = await api.get_habits(date_str)
             val_orig  = habits.get(nombre_orig)
             final_val = value if value else val_orig
@@ -497,7 +500,7 @@ def build_edit_hab_handler() -> ConversationHandler:
     """
     ConversationHandler para editar un hábito.
 
-    Entrada: callback he_{date_str}_{habit[:15]}
+    Entrada: callback he_{date_str}_{habit}
     Estados:
         EDIT_HAB_FIELD  → botones: cambiar nombre / cambiar valor
         EDIT_HAB_NOMBRE → nuevo nombre (texto)
