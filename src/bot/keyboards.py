@@ -1,6 +1,12 @@
 """
 Teclados inline del bot THDORA.
 Todos los _kb_* y _nav_keyboard centralizados aquí.
+
+Fixes v0.16.2 (2026-04-27):
+    - B-NEW6: _kb_horas_franja("noche") separaba 22-23 y 00-05 en la misma
+      fila sin distincción visual. Ahora se generan dos bloques: primero
+      22:00-23:00 y luego 00:00-05:00 separados por fila, con etiqueta
+      "--- Madrugada ---" como botón informativo deshabilitado.
 """
 
 from datetime import datetime, timedelta
@@ -10,12 +16,12 @@ from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
 from src.bot.utils.dates import _date_short, _monday
 
-# ── Constantes ────────────────────────────────────────────────
+# ── Constantes ──────────────────────────────────────────────────────────
 TIPOS_CITA = ["médica", "personal", "trabajo", "otra"]
 
 FRANJAS = [
     ("🌅 Mañana",  list(range(6, 14))),
-    ("🌆 Tarde",   list(range(14, 22))),
+    ("🏆 Tarde",   list(range(14, 22))),
     ("🌙 Noche",   list(range(22, 24)) + list(range(0, 6))),
 ]
 FRANJA_KEYS = ["manana", "tarde", "noche"]
@@ -28,7 +34,7 @@ HABIT_TYPE_EMOJIS = {
 }
 
 
-# ── Menú principal ────────────────────────────────────────────
+# ── Menú principal ────────────────────────────────────────────────────
 
 def _kb_start():
     from datetime import date
@@ -51,7 +57,7 @@ def _kb_start():
     ])
 
 
-# ── Navegación ──────────────────────────────────────────────
+# ── Navegación ────────────────────────────────────────────────────────
 
 def _nav_keyboard(date_str: str, prefix: str) -> InlineKeyboardMarkup:
     """Barra de navegación ◀️ [Fecha real] ▶️ + cambio de vista + 🏠 Menú."""
@@ -107,7 +113,7 @@ def _kb_week_nav(monday_str: str) -> InlineKeyboardMarkup:
     ])
 
 
-# ── Citas ───────────────────────────────────────────────────
+# ── Citas ───────────────────────────────────────────────────────────────────
 
 def _kb_tipos() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
@@ -118,7 +124,7 @@ def _kb_tipos() -> InlineKeyboardMarkup:
 def _kb_franjas() -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup([[
         InlineKeyboardButton("🌅 Mañana",  callback_data="franja_manana"),
-        InlineKeyboardButton("🌆 Tarde",   callback_data="franja_tarde"),
+        InlineKeyboardButton("🏆 Tarde",   callback_data="franja_tarde"),
         InlineKeyboardButton("🌙 Noche",   callback_data="franja_noche"),
     ], [
         InlineKeyboardButton("✏️ Escribir hora exacta", callback_data="franja_exacta"),
@@ -126,21 +132,48 @@ def _kb_franjas() -> InlineKeyboardMarkup:
 
 
 def _kb_horas_franja(franja_key: str) -> InlineKeyboardMarkup:
-    horas_map = {
-        "manana": list(range(6, 14)),
-        "tarde":  list(range(14, 22)),
-        "noche":  list(range(22, 24)) + list(range(0, 6)),
-    }
-    horas = horas_map.get(franja_key, list(range(6, 14)))
-    rows, row = [], []
-    for h in horas:
-        label = f"{h:02d}:00"
-        row.append(InlineKeyboardButton(label, callback_data=f"hora_punto_{h:02d}"))
-        if len(row) == 4:
+    """Teclado de horas para una franja.
+
+    FIX B-NEW6 (v0.16.2): la franja 'noche' mezcla horas de tarde-noche
+    (22-23) con madrugada (00-05). Ahora se generan dos bloques separados
+    por una fila de separador visual para evitar confusión al usuario.
+    """
+    rows = []
+
+    if franja_key == "noche":
+        # Bloque 1: 22:00 y 23:00
+        fila_noche = [
+            InlineKeyboardButton(f"{h:02d}:00", callback_data=f"hora_punto_{h:02d}")
+            for h in [22, 23]
+        ]
+        rows.append(fila_noche)
+        # Separador visual (botón informativo sin acción útil)
+        rows.append([InlineKeyboardButton("── Madrugada ──", callback_data="noop_separator")])
+        # Bloque 2: 00:00 – 05:00 (4 por fila)
+        madrugada = list(range(0, 6))
+        row: list = []
+        for h in madrugada:
+            row.append(InlineKeyboardButton(f"{h:02d}:00", callback_data=f"hora_punto_{h:02d}"))
+            if len(row) == 4:
+                rows.append(row)
+                row = []
+        if row:
             rows.append(row)
-            row = []
-    if row:
-        rows.append(row)
+    else:
+        horas_map = {
+            "manana": list(range(6, 14)),
+            "tarde":  list(range(14, 22)),
+        }
+        horas = horas_map.get(franja_key, list(range(6, 14)))
+        row = []
+        for h in horas:
+            row.append(InlineKeyboardButton(f"{h:02d}:00", callback_data=f"hora_punto_{h:02d}"))
+            if len(row) == 4:
+                rows.append(row)
+                row = []
+        if row:
+            rows.append(row)
+
     rows.append([
         InlineKeyboardButton("🕐 Ver cuartos",       callback_data="hora_ver_cuartos"),
         InlineKeyboardButton("✏️ Escribir exacta",   callback_data="hora_exacta"),
@@ -185,7 +218,7 @@ def _kb_apt_confirm(date_str: str, index: int) -> InlineKeyboardMarkup:
     ]])
 
 
-# ── Hábitos ─────────────────────────────────────────────────
+# ── Hábitos ──────────────────────────────────────────────────────────────────
 
 def _kb_hab_value(cfg: Optional[dict]) -> Optional[InlineKeyboardMarkup]:
     if not cfg:
@@ -236,7 +269,7 @@ def _kb_hab_conflict() -> InlineKeyboardMarkup:
     ]])
 
 
-# ── Config ─────────────────────────────────────────────────
+# ── Config ───────────────────────────────────────────────────────────────────
 
 def _kb_config_menu() -> InlineKeyboardMarkup:
     """Menú raíz de /config."""
