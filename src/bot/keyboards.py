@@ -212,18 +212,18 @@ def _kb_hab_value(cfg: Optional[dict]) -> Optional[InlineKeyboardMarkup]:
 
 
 def _kb_hab_actions(date_str: str, habit: str) -> InlineKeyboardMarkup:
-    h = habit[:15]
+    # FIX B3: eliminado [:15] — el nombre completo es necesario para que la API lo encuentre
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("🗑️", callback_data=f"hd_{date_str}_{h}"),
-        InlineKeyboardButton("✏️", callback_data=f"he_{date_str}_{h}"),
-        InlineKeyboardButton("➕", callback_data=f"ha_{date_str}_{h}"),
+        InlineKeyboardButton("🗑️", callback_data=f"hd_{date_str}_{habit}"),
+        InlineKeyboardButton("✏️", callback_data=f"he_{date_str}_{habit}"),
+        InlineKeyboardButton("➕", callback_data=f"ha_{date_str}_{habit}"),
     ]])
 
 
 def _kb_hab_confirm(date_str: str, habit: str) -> InlineKeyboardMarkup:
-    h = habit[:15]
+    # FIX B3: eliminado [:15] — el nombre completo es necesario para que la API lo encuentre
     return InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Sí, borrar", callback_data=f"hdc_{date_str}_{h}"),
+        InlineKeyboardButton("✅ Sí, borrar", callback_data=f"hdc_{date_str}_{habit}"),
         InlineKeyboardButton("❌ Cancelar",   callback_data="cancel_action"),
     ]])
 
