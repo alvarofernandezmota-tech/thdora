@@ -4,7 +4,7 @@
 
 ---
 
-## Estado actual — v0.16.0 (27 abril 2026)
+## Estado actual — v0.16.1 (27 abril 2026)
 
 ```
 Bot Telegram (9 comandos + 5 ConversationHandlers + inline buttons + NLP texto libre)
@@ -26,7 +26,7 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 - Navegación ◀️▶️ con fecha real visible en botón central
 - Vista detalle de cita con click en ⏰ hora
 - Inline buttons: borrar/editar/sumar citas y hábitos
-- Conflicto hora en citas: aviso ⚠️ al crear
+- Conflicto hora en citas: aviso ⚠️ al crear y al editar
 - `/semana` con navegación semanal y botones por día
 - `/config` para configurar tipos de hábitos con botones rápidos
 - Fechas flexibles: `hoy`, `mañana`, `ayer`, `27/03`, nombres de día
@@ -34,6 +34,7 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 - **Scheduler F12** — resumen diario + evening log + avisos citas
 - **🤖 NLP Groq — modo Toki (v0.14.0)** — contexto real, crea citas/hábitos, desambiguación
 - **UX borrar cita (v0.16):** confirmación muestra nombre + hora antes de borrar ✅
+- **Fix B1/B6 (v0.16.1):** emoji 🌆 correcto + cuartos respetan hora seleccionada ✅
 
 ---
 
@@ -54,6 +55,14 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 | 3.7 | README profesional — v0.16.0, quick start, arquitectura real | ✅ 27-abr |
 | 3.8 | GitHub Actions CI — fix Python 3.12 + cache pip | ✅ 27-abr |
 
+### Bugs resueltos (v0.16.1 — 27 abril 2026)
+
+| ID | Descripción | Fix |
+|----|-------------|-----|
+| B1 | Emoji `🏆` incorrecto en franja Tarde | `🌆 Tarde` — consistente con `_kb_franjas()` |
+| B6 | `hora_ver_cuartos` mostraba inicio de franja en vez de hora seleccionada | Usa `nueva_hora_temp` si existe |
+| B8 | Pattern `^quick_nueva` analizado | No era bug — cerrado sin cambios |
+
 ---
 
 ## 🔶 TRABAJO INMEDIATO — Bloques priorizados
@@ -65,7 +74,7 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 | # | Tarea | Estado |
 |---|---|---|
 | 1.1 | Desambiguación borrar/editar cita | ✅ Hecho |
-| 1.2 | Mostrar horario disponible antes de mover una cita | 🔲 Siguiente |
+| 1.2 | Mostrar horario disponible antes de mover una cita | 🔲 **SIGUIENTE** |
 | 1.3 | Flujo cancelar cita: confirmación + mostrar exactamente qué cita se borra | ✅ Hecho (23-abr) |
 
 ### 🟡 Bloque 2 — Menú e interfaz
@@ -102,8 +111,25 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 | # | Tarea | Estado |
 |---|---|---|
 | 5.1 | Instalar Tailscale en Acer + móvil + PC | 🔲 S18 |
-| 5.2 | Renovar GROQ_API_KEY — desbloquea NLP completo | 🔴 URGENTE |
+| 5.2 | Renovar GROQ_API_KEY — desbloquea NLP completo | 🔴 **URGENTE** |
 | 5.3 | Script auto-update — despliegue sin SSH manual | 🔲 S18–S19 |
+
+---
+
+## 🧪 Pruebas pendientes de verificar en producción
+
+> Estos tests están documentados pero aún no ejecutados en el bot real.
+
+| Test | Versión | Estado |
+|------|---------|--------|
+| Flujo /nueva completo con franjas | v0.16.1 | 🔲 Pendiente |
+| Emoji 🌆 Tarde correcto (B1) | v0.16.1 | 🔲 Pendiente |
+| Cuartos respetan hora seleccionada (B6) | v0.16.1 | 🔲 Pendiente |
+| Borrar cita muestra nombre+hora | v0.16.0 | 🔲 Pendiente |
+| Conflicto hora en /nueva | v0.15.1 | 🔲 Pendiente |
+| Conflicto hora en editar | v0.15.1 | 🔲 Pendiente |
+| NLP texto libre | v0.14.0 | 🔴 BLOQUEADO (Groq key) |
+| Scheduler /start | F12 | 🔲 Pendiente |
 
 ---
 
@@ -124,12 +150,13 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 ## Orden recomendado
 
 ```
-Bloque 5.2 (Groq key) → Bloque 1.2 (citas)
-    → Bloque 2 (Menú) → Bloque 3 resto (docs)
-    → Bloque 5.1 (Tailscale) → Bloque 4 (Multi-usuario)
-    → F15 (Voz) → F14 (Tracking) → F16–F19 (Apps)
+Bloque 5.2 (Groq key) → tests producción
+    → Bloque 1.2 (citas) → Bloque 2 (Menú)
+    → Bloque 3 resto (docs) → Bloque 5.1 (Tailscale)
+    → Bloque 4 (Multi-usuario) → F15 (Voz) → F14 (Tracking)
+    → F16–F19 (Apps)
 ```
 
 ---
 
-_Última actualización: 27 abril 2026 — 20:18 CEST — Bloque 3 parcial + Bloque 5 infraestructura añadido_
+_Última actualización: 27 abril 2026 — 20:40 CEST — v0.16.1 + pruebas pendientes documentadas_

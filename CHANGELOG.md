@@ -4,6 +4,99 @@
 
 ---
 
+## [v0.16.1] — 27 abril 2026 (tarde)
+
+### 🐛 Bugfix — Emoji franja Tarde (B1) + hora_ver_cuartos (B6)
+
+#### Resumen de sesión
+Sesión de bugs en el flujo `/nueva`. Se corrigen dos inconsistencias visuales/lógicas en el selector de hora por franjas. Ningún cambio en la API ni en la base de datos.
+
+---
+
+#### B1 — `citas.py` · `nueva_recv_franja` · emoji incorrecto
+
+**Problema:** `franja_labels["tarde"]` devolvía `"🏆 Tarde"` mientras que `_kb_franjas()` en `keyboards.py` mostraba `"🌆 Tarde"`. El usuario veía un emoji diferente al pulsar el botón y al ver la confirmación.
+
+**Fix:** `franja_labels` actualizado → `{"manana": "🌅 Mañana", "tarde": "🌆 Tarde", "noche": "🌙 Noche"}` para ser idéntico al teclado.
+
+---
+
+#### B6 — `citas.py` · `nueva_recv_hora_punto` · `hora_ver_cuartos` ignoraba hora seleccionada
+
+**Problema:** Al pulsar el botón "Ver cuartos" tras elegir una hora (ej: 17:00), el bot ignoraba `nueva_hora_temp` y mostraba los cuartos del inicio de franja (14:xx para Tarde, 6:xx para Mañana, 22:xx para Noche).
+
+**Fix:**
+```python
+# ANTES (bug):
+hora_inicio = {"manana": 6, "tarde": 14, "noche": 22}[franja]
+
+# DESPUÉS (fix B6):
+_franja_inicio = {"manana": 6, "tarde": 14, "noche": 22}
+hora_inicio = context.user_data.get("nueva_hora_temp") or _franja_inicio.get(franja, 6)
+```
+Si el usuario ya había elegido una hora (ej: 17), los cuartos se muestran para 17:xx. El inicio de franja solo se usa como fallback si no hay hora previa.
+
+---
+
+#### B8 — `build_nueva_handler` · Analizado, NO es bug
+
+El pattern `r"^quick_nueva"` sin `$` es correcto. El `CallbackQueryHandler` funciona bien con `startswith` implícito en el pattern. Cerrado sin cambios.
+
+---
+
+### 📦 Archivos de esta sesión
+
+| Archivo | Cambio |
+|---|---|
+| `src/bot/handlers/citas.py` | 🐛 Fix B1 (emoji) + Fix B6 (hora_ver_cuartos) |
+| `CHANGELOG.md` | 📝 Esta entrada |
+| `ROADMAP.md` | 📝 B1/B6 añadidos al historial |
+| `docs/diarios/2026-04-27.md` | 📝 Sesión 2 + checklist de pruebas completo |
+
+### ⚠️ Nota de despliegue
+`git pull` en Acer + `docker compose restart bot`. No requiere cambios en `.env` ni API.
+
+### 🧪 Checklist de prueba — v0.16.1
+
+```
+BLOQUE A — Flujo /nueva con franjas (B1 + B6)
+[ ] /nueva → Tarde → confirmación muestra "🌆 Tarde" (no 🏆)
+[ ] /nueva → Tarde → elegir 16:00 → "Ver cuartos" → muestra 16:xx (no 14:xx)
+[ ] Flujo completo /nueva sin cuartos: fecha→franja→hora→nombre→tipo→notas ✅
+[ ] Flujo completo /nueva con hora exacta (✏️): 15:30 → cita creada ✅
+
+BLOQUE B — Conflicto hora (v0.15.1 — pendiente verificar)
+[ ] Cita 10:00 → intentar 10:30 → ⚠️ con nombre + rango + horario visual
+[ ] "Crear de todas formas" guarda la cita
+[ ] "Cambiar hora" vuelve a selección de franja
+
+BLOQUE C — Editar cita (v0.15.1 — pendiente verificar)
+[ ] ✏️ → Hora con conflicto → mismo aviso ⚠️
+[ ] ✏️ → Nombre → actualizado
+[ ] ✏️ → Tipo → actualizado
+
+BLOQUE D — Borrar cita (v0.16.0 — pendiente verificar)
+[ ] 🗑️ → muestra nombre+hora antes de confirmar
+[ ] Confirmar → cita borrada
+[ ] Cancelar → cita intacta
+
+BLOQUE E — NLP (requiere GROQ_API_KEY válida — BLOQUEADO)
+[ ] "mañana dentista a las 5" → cita creada
+[ ] "dormí 7 horas" → hábito registrado
+[ ] "¿qué tengo hoy?" → lista real
+[ ] "borra el dentista" → desambiguación/borrado
+```
+
+### ⏩ Siguiente — Tarea 1.2
+**Objetivo:** Mostrar huecos disponibles antes de mover/editar una cita.
+- Al pulsar ✏️ → Hora: mostrar slots libres del día como botones en vez de pedir HH:MM directamente.
+- Reutilizar `_build_day_schedule` de `nlp.py`.
+- Botones de franja → horas libres de esa franja.
+- Si no hay huecos: mensaje claro + opción escribir hora manual.
+- Integrar `_check_and_show_conflict` al final.
+
+---
+
 ## [v0.16.0] — 23 abril 2026 (tarde)
 
 ### 🔧 UX — Confirmación de borrado de cita muestra nombre + hora
@@ -55,7 +148,7 @@ botones de confirmación sin decirte qué cita ibas a borrar.
 ### ⚠️ Nota de despliegue
 `git pull` + reiniciar bot. No requiere cambios en `.env` ni dependencias.
 
-### 🧪 Checklist de prueba para esta versión
+### 🧪 Checklist de prueba — v0.16.0
 
 ```
 1. FLUJO BORRAR CITA (tarea 1.3 — core del fix)
@@ -294,4 +387,4 @@ por la API para montar un mensaje rico y mostrar el horario visual del día.
 
 ---
 
-_Última actualización: 23 abril 2026 — 20:47 CEST_
+_Última actualización: 27 abril 2026 — 20:40 CEST_
