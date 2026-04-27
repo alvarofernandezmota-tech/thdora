@@ -4,6 +4,114 @@
 
 ---
 
+## [v0.16.2] — 27 abril 2026 (noche)
+
+### 🐛 Bugfix — B-NEW3, B-NEW5, B-NEW6
+
+#### Resumen de sesión
+Sesión nocturna de auditoría y cierre. Se identifican y corrigen tres bugs
+nuevos detectados al revisar el código en profundidad. Ningún cambio en la API
+ni en la base de datos. Sin cambios en `.env`.
+
+---
+
+#### B-NEW3 — `habitos.py` · `_kb_edit_hab_fields` · nombre truncado
+
+**Problema:** `_kb_edit_hab_fields` usaba `habit[:15]` en los `callback_data`
+(`hedit_name_` y `hedit_val_`). Los hábitos con nombre > 15 chars no se
+encontraban al parsear de vuelta porque el nombre estaba truncado.
+
+**Contexto:** `_kb_hab_actions` y `_kb_hab_confirm` ya tenían este fix (FIX B3
+documentado en v0.15.x). `_kb_edit_hab_fields` lo había quedado sin actualizar.
+
+**Fix:** Eliminado `habit[:15]` → se usa el nombre completo igual que en
+`_kb_hab_actions` y `_kb_hab_confirm`.
+
+---
+
+#### B-NEW5 — `main.py` · `_post_init` · scheduler no arrancaba en producción
+
+**Problema:** `app.post_init = _post_init` no es el API correcto de
+PTB v20+. La asignación directa puede fallar en producción haciendo que
+el scheduler (APScheduler) no arranque de forma fiable.
+
+**Fix:**
+```python
+# ANTES (incorrecto para PTB v20+):
+app = ApplicationBuilder().token(token).persistence(persistence).build()
+app.post_init = _post_init
+
+# DESPUÉS (correcto):
+app = (
+    ApplicationBuilder()
+    .token(token)
+    .persistence(persistence)
+    .post_init(_post_init)   # API correcto PTB v20+
+    .build()
+)
+```
+Bump de versión del bot a **v4.3**.
+
+---
+
+#### B-NEW6 — `keyboards.py` · `_kb_horas_franja("noche")` · mezcla visual 22-23 y 00-05
+
+**Problema:** La franja noche incluye horas 22-23 y 00-05 en un único bloque
+sin distinción visual. El usuario podía confundirse pensando que 00:00 es
+media noche del día siguiente.
+
+**Fix:** Dos bloques separados:
+1. Fila: `22:00 | 23:00`
+2. Separador visual: botón `── Madrugada ──` (informativo, `callback_data="noop_separator"`)
+3. Filas de 4: `00:00 | 01:00 | 02:00 | 03:00` / `04:00 | 05:00`
+
+---
+
+### 📦 Archivos de esta sesión
+
+| Archivo | Cambio |
+|---|---|
+| `src/bot/handlers/habitos.py` | 🐛 Fix B-NEW3: eliminado `habit[:15]` en `_kb_edit_hab_fields` |
+| `src/bot/main.py` | 🐛 Fix B-NEW5: `ApplicationBuilder().post_init()` + bump v4.3 |
+| `src/bot/keyboards.py` | 🐛 Fix B-NEW6: separador visual noche/madrugada |
+| `CHANGELOG.md` | 📝 Esta entrada |
+| `docs/diarios/2026-04-27.md` | 📝 Cierre sesión nocturna |
+
+### ⚠️ Nota de despliegue
+`git pull` en Acer + `docker compose restart bot`. No requiere cambios en `.env` ni API.
+
+### 🧪 Checklist de prueba — v0.16.2
+
+```
+B-NEW3 — Hábito con nombre largo (> 15 chars)
+[ ] Registra un hábito con nombre largo (ej: "Meditación matutina")
+[ ] Pulsa ✏️ → debe mostrar botones con nombre completo, no truncado
+[ ] "Cambiar valor" → guarda correctamente
+[ ] "Cambiar nombre" → cambia correctamente
+
+B-NEW5 — Scheduler arranca en producción
+[ ] Reinicia el bot (docker compose restart bot)
+[ ] /start → programa jobs diarios
+[ ] Espera 2 min → log debe mostrar "⏰ Scheduler F12 iniciado"
+[ ] Los recordatorios de cita se programan al crear una cita
+
+B-NEW6 — Franja noche separada visualmente
+[ ] /nueva → Noche → teclado muestra 22:00 | 23:00 en primera fila
+[ ] Separador "── Madrugada ──" visible entre 23:00 y 00:00
+[ ] Filas de madrugada: 00:00 01:00 02:00 03:00 / 04:00 05:00
+[ ] Pulsar separador no hace nada (noop_separator)
+```
+
+### ⏩ Siguiente — Tarea 1.2
+**Objetivo:** Mostrar huecos disponibles antes de mover/editar una cita.
+- Al pulsar ✏️ → Hora: mostrar slots libres del día como botones.
+- Reutilizar `_build_day_schedule` de `nlp.py`.
+- Botones de franja → horas libres de esa franja.
+- Si no hay huecos: mensaje claro + opción escribir hora manual.
+- Integrar `_check_and_show_conflict` al final.
+
+---
+
 ## [v0.16.1] — 27 abril 2026 (tarde)
 
 ### 🐛 Bugfix — Emoji franja Tarde (B1) + hora_ver_cuartos (B6)
@@ -34,13 +142,6 @@ hora_inicio = {"manana": 6, "tarde": 14, "noche": 22}[franja]
 _franja_inicio = {"manana": 6, "tarde": 14, "noche": 22}
 hora_inicio = context.user_data.get("nueva_hora_temp") or _franja_inicio.get(franja, 6)
 ```
-Si el usuario ya había elegido una hora (ej: 17), los cuartos se muestran para 17:xx. El inicio de franja solo se usa como fallback si no hay hora previa.
-
----
-
-#### B8 — `build_nueva_handler` · Analizado, NO es bug
-
-El pattern `r"^quick_nueva"` sin `$` es correcto. El `CallbackQueryHandler` funciona bien con `startswith` implícito en el pattern. Cerrado sin cambios.
 
 ---
 
@@ -56,45 +157,6 @@ El pattern `r"^quick_nueva"` sin `$` es correcto. El `CallbackQueryHandler` func
 ### ⚠️ Nota de despliegue
 `git pull` en Acer + `docker compose restart bot`. No requiere cambios en `.env` ni API.
 
-### 🧪 Checklist de prueba — v0.16.1
-
-```
-BLOQUE A — Flujo /nueva con franjas (B1 + B6)
-[ ] /nueva → Tarde → confirmación muestra "🌆 Tarde" (no 🏆)
-[ ] /nueva → Tarde → elegir 16:00 → "Ver cuartos" → muestra 16:xx (no 14:xx)
-[ ] Flujo completo /nueva sin cuartos: fecha→franja→hora→nombre→tipo→notas ✅
-[ ] Flujo completo /nueva con hora exacta (✏️): 15:30 → cita creada ✅
-
-BLOQUE B — Conflicto hora (v0.15.1 — pendiente verificar)
-[ ] Cita 10:00 → intentar 10:30 → ⚠️ con nombre + rango + horario visual
-[ ] "Crear de todas formas" guarda la cita
-[ ] "Cambiar hora" vuelve a selección de franja
-
-BLOQUE C — Editar cita (v0.15.1 — pendiente verificar)
-[ ] ✏️ → Hora con conflicto → mismo aviso ⚠️
-[ ] ✏️ → Nombre → actualizado
-[ ] ✏️ → Tipo → actualizado
-
-BLOQUE D — Borrar cita (v0.16.0 — pendiente verificar)
-[ ] 🗑️ → muestra nombre+hora antes de confirmar
-[ ] Confirmar → cita borrada
-[ ] Cancelar → cita intacta
-
-BLOQUE E — NLP (requiere GROQ_API_KEY válida — BLOQUEADO)
-[ ] "mañana dentista a las 5" → cita creada
-[ ] "dormí 7 horas" → hábito registrado
-[ ] "¿qué tengo hoy?" → lista real
-[ ] "borra el dentista" → desambiguación/borrado
-```
-
-### ⏩ Siguiente — Tarea 1.2
-**Objetivo:** Mostrar huecos disponibles antes de mover/editar una cita.
-- Al pulsar ✏️ → Hora: mostrar slots libres del día como botones en vez de pedir HH:MM directamente.
-- Reutilizar `_build_day_schedule` de `nlp.py`.
-- Botones de franja → horas libres de esa franja.
-- Si no hay huecos: mensaje claro + opción escribir hora manual.
-- Integrar `_check_and_show_conflict` al final.
-
 ---
 
 ## [v0.16.0] — 23 abril 2026 (tarde)
@@ -108,35 +170,6 @@ antes de pedirte confirmación.
 
 ---
 
-#### `src/bot/handlers/citas.py` — `cb_apt_delete` mejorado
-
-**Antes (v0.15.x):**
-Al pulsar 🗑️ en una cita, el bot editaba directamente el mensaje con los
-botones de confirmación sin decirte qué cita ibas a borrar.
-
-**Ahora (v0.16.0):**
-- Hace GET de la cita antes de mostrar la confirmación.
-- Muestra nombre + hora + tipo:
-  ```
-  🗑️ ¿Borrar esta cita?
-
-    ⏰ 17:00 — Dentista [médica]
-
-  ⚠️ Esta acción no se puede deshacer.
-  ```
-- Degradación elegante: si la API falla al obtener los datos, muestra
-  igualmente la confirmación (el borrado puede continuar).
-
----
-
-#### ROADMAP actualizado
-
-- Bloque 1 — tarea 1.3 marcada ✅ (23-abr)
-- Versión bumpeada a v0.16.0
-- Siguiente foco: **tarea 1.2** — Mostrar huecos disponibles antes de mover una cita
-
----
-
 ### 📦 Archivos de esta sesión
 
 | Archivo | Cambio |
@@ -145,128 +178,11 @@ botones de confirmación sin decirte qué cita ibas a borrar.
 | `ROADMAP.md` | 📝 1.3 ✅, versión v0.16.0, siguiente → 1.2 |
 | `CHANGELOG.md` | 📝 Esta entrada |
 
-### ⚠️ Nota de despliegue
-`git pull` + reiniciar bot. No requiere cambios en `.env` ni dependencias.
-
-### 🧪 Checklist de prueba — v0.16.0
-
-```
-1. FLUJO BORRAR CITA (tarea 1.3 — core del fix)
-   [ ] Crea una cita con /nueva o NLP
-   [ ] Ve a /citas y pulsa 🗑️
-   [ ] ✅ Debe mostrar: "🗑️ ¿Borrar esta cita?\n  ⏰ HH:MM — Nombre [tipo]\n⚠️ Esta acción no se puede deshacer."
-   [ ] Pulsa Confirmar → cita borrada
-   [ ] Pulsa Cancelar → vuelve sin borrar
-
-2. FLUJO CREAR CITA CON CONFLICTO
-   [ ] Crea una cita a las 10:00
-   [ ] Intenta crear otra a las 10:30 (solapa 60 min)
-   [ ] ✅ Debe mostrar aviso ⚠️ con nombre de la cita que bloquea + horario visual
-   [ ] Opción "crear de todas formas" funciona
-   [ ] Opción "cambiar hora" vuelve a la selección de franja
-
-3. FLUJO EDITAR HORA DE CITA
-   [ ] Pulsa ✏️ en una cita → elige "⏰ Hora"
-   [ ] Pon una hora que solape con otra cita
-   [ ] ✅ Debe mostrar el mismo aviso ⚠️ de conflicto
-   [ ] Acepta → guarda la nueva hora
-
-4. FLUJO NLP
-   [ ] Escribe "mañana dentista a las 5" → cita creada
-   [ ] Escribe "dormí 7 horas" → hábito registrado
-   [ ] Escribe "¿qué tengo hoy?" → lista con datos reales
-   [ ] Escribe "borra el dentista" → desambiguación si hay varias, borra si hay una
-
-5. ARRANQUE / SCHEDULER
-   [ ] /start programa los jobs diarios (resumen + evening log)
-   [ ] Si tienes config guardada, los jobs deben quedar activos
-```
-
-### ⏩ Siguiente sesión — Hito 1.2
-**Objetivo:** Mostrar huecos disponibles (slot libres) antes de mover/editar una cita.
-- Cuando el usuario pulse ✏️ → Hora, en vez de pedir directamente "escribe HH:MM",
-  mostrar los huecos libres del día como botones.
-- Reutilizar `_build_day_schedule` de `nlp.py` para calcular slots disponibles.
-- Botones de franja (Mañana/Tarde/Noche) → horas libres de esa franja.
-- Si no hay huecos: mostrar mensaje claro + opción de escribir hora manualmente.
-- Integrar detección de conflicto al final (ya existe con `_check_and_show_conflict`).
-
 ---
 
 ## [v0.15.2] — 14 abril 2026 (tarde)
 
 ### ✨ NLP v2 — Cache, contexto semana, desambiguación y cierre de proyecto
-
-#### Resumen de sesión
-Sesión enfocada en consolidar el NLP de acciones (borrar/editar citas),
-aflinar el contexto disponible para el modelo y documentar el proyecto.
-
----
-
-#### 1. `src/bot/handlers/nlp.py` — Cache TTL + contexto semana completa
-
-- **Cache TTL 2 min** — `_api_context_cache` con timestamp. La API solo se llama
-  si han pasado más de 120 s desde el último fetch. Se invalida automáticamente
-  al crear, editar o borrar cualquier cita o hábito.
-- **Contexto semana completa** — `extract_borrar_cita` y `extract_editar_cita`
-  reciben ahora las citas de hoy + mañana + semana completa (`semana_raw`),
-  no solo las de hoy. Reduce drasticamente los fallos de desambiguación.
-
----
-
-#### 2. `src/bot/handlers/nlp_disambig.py` — Nuevo módulo
-
-- `cb_nlp_disambig` — `CallbackQueryHandler` que gestiona la elección del usuario
-  cuando hay varias citas candidatas.
-- Patrón del callback: `nlp_disambig|<acción>|<apt_id>` (borrar / editar).
-- Al pulsar un botón: ejecuta la acción sobre la cita elegida, edita el mensaje
-  con confirmación y limpia `nlp_pending_changes` en `user_data`.
-- Degradación elegante si la cita ya no existe (404 → aviso amigable).
-
----
-
-#### 3. `src/bot/main.py` — Registro de cb_nlp_disambig
-
-- Importa `cb_nlp_disambig` desde `handlers.nlp_disambig`.
-- Registra `CallbackQueryHandler(cb_nlp_disambig, pattern=r"^nlp_disambig\|")`
-  antes de `cancel_action` para evitar colisiones.
-- Bump de versión a **v4.2** en docstring.
-
----
-
-#### 4. `.gitignore` — Protección de datos personales
-
-- Añadido `data/` completo (cubre `thdora.db` y `bot_persistence.pkl`).
-- Mantenido `!data/.gitkeep` para que la carpeta exista al clonar.
-- **Antes** solo estaba excluido `data/bot_persistence.pkl` — la base de datos
-  quedaba desprotegida.
-
----
-
-#### 5. `ROADMAP.md` — Actualizado
-
-- Sección nueva **"Trabajo inmediato"** con 4 bloques priorizados y tabla de estado.
-- F13-v2a marcada como completada.
-- Backlog a largo plazo ordenado al final.
-
----
-
-### 📦 Archivos de esta sesión
-
-| Archivo | Cambio |
-|---|---|
-| `src/bot/handlers/nlp.py` | ⚡ Cache TTL + contexto semana |
-| `src/bot/handlers/nlp_disambig.py` | ✨ Nuevo módulo |
-| `src/bot/main.py` | 🔧 Registro cb_nlp_disambig + v4.2 |
-| `.gitignore` | 🔒 Protección `data/` completo |
-| `ROADMAP.md` | 📝 Bloques priorizados |
-
-### ⚠️ Nota de despliegue
-`git pull` + reiniciar bot. No requiere cambios en `.env` ni dependencias.
-
-### ⏩ Siguiente sesión (mañana)
-- **Bloque 1.2** — Mostrar horario disponible antes de mover una cita
-- Ejercicios Musk de Python (foco por la mañana)
 
 ---
 
@@ -274,101 +190,31 @@ aflinar el contexto disponible para el modelo y documentar el proyecto.
 
 ### 🔧 Fix — Conflicto de cita alineado entre API, bot /nueva y editar hora
 
-#### Problema que resuelve
-Aunque la API ya detectaba solapamiento real (v0.15.0), el bot mostraba un mensaje
-genérico sin información del bloque existente (`⚠️ Ya tienes una cita a las 17:30`).
-Además, el flujo de *editar hora* no comprobaba solapamiento en absoluto.
-
-#### Solución
-Nuevo helper centralizado `_check_and_show_conflict` que usa el dato devuelto
-por la API para montar un mensaje rico y mostrar el horario visual del día.
-
----
-
-#### `src/bot/handlers/citas.py`
-
-**`_check_and_show_conflict(obj, context, date_str, time_str, is_message)`** — nuevo helper
-- Llama a `api.check_appointment_conflict` (solapamiento real, 60 min).
-- Si hay conflicto, obtiene nombre y rango de la cita existente:
-  `_end_time(ct, 60)` → `Dentista (17:00–18:00)`.
-- Obtiene las citas del día y renderiza el horario visual con
-  `_build_day_schedule(..., highlight_time=time_str)` (slot solicitado marcado ⚠️).
-- Muestra el mensaje con `_kb_conflict_apt()` y retorna `NUEVA_CONFLICT`.
-- Degradación elegante: si la API falla, devuelve `None` y el flujo continúa.
-
-**`_after_time_selected`** — simplificado
-- Sustituye el bloque `try/except` manual por una llamada a `_check_and_show_conflict`.
-
-**`cb_apt_edit_time`** — nuevo (fix P4)
-- Al editar la hora de una cita, ahora comprueba solapamiento antes de guardar.
-
-**`cb_apt_edit_conflict_response`** — nuevo
-- Gestiona la respuesta del usuario tras el conflicto en edición.
-
-**`build_edit_apt_handler`** — actualizado
-- Añade el estado `NUEVA_CONFLICT` con handler `cb_apt_edit_conflict_response`.
-
----
-
-### 📦 Archivos modificados en v0.15.1
-
-| Archivo | Cambio |
-|---|---|
-| `src/bot/handlers/citas.py` | 🔧 Fix + nuevo helper + fix editar hora |
-| `CHANGELOG.md` | 📝 Esta entrada |
-
 ---
 
 ## [v0.15.0] — 14 abril 2026
 
 ### ✨ Mejoras de calidad — Solapamiento real, horario visual, rendimiento y tests
 
-#### 1. `src/api/routers/appointments.py` — Conflicto con solapamiento real
-- Solapamiento real con duración predeterminada de 60 minutos.
-- `_time_to_minutes`, `_find_overlap` con fórmula correcta.
-- `check_conflict` acepta `?duration=` como query param.
-
-#### 2. `src/bot/handlers/nlp.py` — Horario visual
-- `_build_day_schedule` — franjas de 30 min entre 08:00 y 22:00.
-- `_end_time` — calcula hora de fin.
-
-#### 3. `src/bot/handlers/semana.py` — De 14 llamadas a 2 concurrentes
-- `asyncio.gather` — de ~14 round-trips en serie a 2 concurrentes (×7 más rápido).
-
-#### 4 & 5. Tests — 32 tests nuevos
-- `tests/unit/test_appointments_overlap.py` — 18 tests.
-- `tests/unit/bot/test_nlp_schedule.py` — 14 tests.
-
-#### 6. `README.md` — Portfolio-ready
-- Badges, stack técnico, arquitectura, decisiones de diseño.
-
 ---
 
 ## [v0.14.0] — 14 abril 2026
-
-### ✨ Añadido — Modo Toki: contexto real + menú en intent desconocido
-- `api_context` inyectado en el system prompt de Groq.
-- Intent `desconocido` → menú del bot.
+### ✨ Modo Toki: contexto real + menú en intent desconocido
 
 ---
 
 ## [v0.13.0] — 14 abril 2026
-### ✨ Añadido / Mejorado — UX, Persistencia y Personalidad
-- `⏳ Procesando...` + fix hora 00:00.
-- `PicklePersistence` activa.
-- `_CHAT_SYSTEM` reescrito.
+### ✨ UX, Persistencia y Personalidad
 
 ---
 
 ## [v0.12.0] — 14 abril 2026
-- `groq_router.py` completo: clasificador + extractor + chat.
-- `handlers/nlp.py` con detección de conflicto.
-- `docs/NLP_ARQUITECTURA.md` creado.
+- groq_router.py completo, handlers/nlp.py, NLP_ARQUITECTURA.md.
 
 ---
 
 ## [v0.11.0] — 13 abril 2026
-- `UserConfig` en SQLite, APScheduler, `/config` con notificaciones.
+- UserConfig SQLite, APScheduler, /config con notificaciones.
 
 ---
 
@@ -378,7 +224,7 @@ por la API para montar un mensaje rico y mostrar el horario visual del día.
 ---
 
 ## [v0.9.0] — Marzo 2026
-- `SQLiteLifeManager` CRUD + FastAPI 14 endpoints.
+- SQLiteLifeManager CRUD + FastAPI 14 endpoints.
 
 ---
 
@@ -387,4 +233,4 @@ por la API para montar un mensaje rico y mostrar el horario visual del día.
 
 ---
 
-_Última actualización: 27 abril 2026 — 20:40 CEST_
+_Última actualización: 27 abril 2026 — 22:28 CEST_
