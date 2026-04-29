@@ -175,6 +175,11 @@ async def _check_and_show_conflict(
 # ═══════════════════════════════════════════════════════════════════════
 
 async def cmd_citas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handler del comando /citas. Muestra las citas de una fecha (hoy por defecto).
+
+    Acepta un argumento opcional: /citas mañana, /citas 2026-05-01, etc.
+    Limpia el contexto acumulativo antes de mostrar la vista.
+    """
     from src.bot.utils.accum import _clean_acum_context
     _clean_acum_context(context)
     date_str = _parse_date_arg(context.args[0] if context.args else None)
@@ -182,6 +187,15 @@ async def cmd_citas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 
 async def _show_citas(msg, date_str: str) -> None:
+    """Muestra la lista de citas de date_str con botones de detalle, editar y borrar.
+
+    Si no hay citas muestra un mensaje vacío con teclado de navegación.
+    Cada cita se muestra con sus botones inline: detalle ⏰, editar ✏️, borrar 🗑️.
+
+    Args:
+        msg:      Objeto message de Telegram donde enviar la respuesta.
+        date_str: Fecha en formato YYYY-MM-DD.
+    """
     try:
         apts = await api.get_appointments(date_str)
     except ApiError:
@@ -220,6 +234,10 @@ async def _show_citas(msg, date_str: str) -> None:
 
 
 async def cb_citas_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback para navegar entre días en la vista de citas.
+
+    Responde al patrón citas_nav_{date_str} de los botones de navegación.
+    """
     query = update.callback_query
     await query.answer()
     date_str = query.data.replace("citas_nav_", "")
@@ -227,6 +245,11 @@ async def cb_citas_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
 
 async def cb_cita_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Callback para ver el detalle completo de una cita concreta.
+
+    Muestra todos los campos: fecha, hora, nombre, tipo y notas.
+    Patrón: cita_detail_{date_str}_{index}.
+    """
     query = update.callback_query
     await query.answer()
     date_str, idx = _parse_apt_callback("cita_detail_", query.data)
@@ -293,6 +316,11 @@ async def cb_apt_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def cb_apt_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Confirma y ejecuta el borrado de la cita. Cancela sus reminders programados.
+
+    Patrón: adc_{date_str}_{apt_id}. Si la cita ya no existe responde con mensaje
+    informativo en lugar de error.
+    """
     query = update.callback_query
     await query.answer()
     date_str, apt_id = _parse_apt_callback("adc_", query.data)
@@ -315,6 +343,7 @@ async def cb_apt_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TY
 # ═══════════════════════════════════════════════════════════════════════
 
 async def nueva_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entry point de /nueva invocado por comando. Pide la fecha como primer paso."""
     context.user_data.clear()
     await update.message.reply_text(
         "📅 *Nueva cita — paso 1/6*\n\n¿Para qué fecha?\n`hoy`, `mañana`, `27/03`…",
@@ -324,6 +353,7 @@ async def nueva_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 
 async def nueva_start_desde_boton(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entry point de /nueva desde botón quick_nueva_{fecha}. Salta el paso de fecha."""
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
@@ -343,6 +373,10 @@ async def nueva_start_desde_boton(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def nueva_recv_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe la fecha libre del usuario y avanza al paso de franja horaria.
+
+    Si la fecha no se puede parsear, pide que la repita.
+    """
     date_str = _parse_date_flex(update.message.text.strip())
     if not date_str:
         await update.message.reply_text(
@@ -361,6 +395,10 @@ async def nueva_recv_date(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def nueva_recv_franja(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe la franja elegida (Mañana/Tarde/Noche/Exacta) y muestra las horas disponibles.
+
+    Si el usuario elige ✏️ Exacta, salta directamente al estado NUEVA_TIME.
+    """
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -385,6 +423,11 @@ async def nueva_recv_franja(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def nueva_recv_hora_punto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe la hora en punto seleccionada y avanza a elegir cuartos o a hora exacta.
+
+    Opciones de callback: hora_punto_{H}, hora_ver_cuartos, hora_exacta.
+    FIX B6: hora_ver_cuartos usa la hora ya seleccionada si existe en user_data.
+    """
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -416,6 +459,10 @@ async def nueva_recv_hora_punto(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def nueva_recv_hora_cuarto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe el cuarto de hora elegido (hora_cuarto_{HH:MM}) y avanza.
+
+    Si el usuario pulsa hora_exacta, va a NUEVA_TIME para escribir manualmente.
+    """
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -429,6 +476,10 @@ async def nueva_recv_hora_cuarto(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def nueva_recv_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe la hora escrita manualmente (HH:MM) y avanza al paso siguiente.
+
+    Valida el formato con _RE_TIME. Si no es válido pide corrección.
+    """
     text = update.message.text.strip()
     if not _RE_TIME.match(text):
         await update.message.reply_text(
@@ -440,6 +491,20 @@ async def nueva_recv_time(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _after_time_selected(obj, context, time_str: str, is_message: bool = False) -> int:
+    """Lógica común tras seleccionar hora: comprueba conflicto y avanza a NUEVA_NOMBRE.
+
+    Guarda la hora en user_data, llama a _check_and_show_conflict y si no hay
+    conflicto muestra el mensaje de paso 3/5 (nombre de la cita).
+
+    Args:
+        obj:        Update o CallbackQuery desde el que responder.
+        context:    ContextTypes.DEFAULT_TYPE de PTB.
+        time_str:   Hora en formato HH:MM ya validada.
+        is_message: True si obj.message existe (texto), False si es callback.
+
+    Returns:
+        NUEVA_CONFLICT si hay solapamiento, NUEVA_NOMBRE si no.
+    """
     context.user_data["nueva_time"] = time_str
     date_str = context.user_data.get("nueva_date", str(date.today()))
 
@@ -456,6 +521,11 @@ async def _after_time_selected(obj, context, time_str: str, is_message: bool = F
 
 
 async def nueva_conflict_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Respuesta del usuario ante un aviso de conflicto de hora.
+
+    aptconf_ok → confirma la hora y avanza a NUEVA_NOMBRE.
+    Cualquier otra opción → vuelve a NUEVA_FRANJA para elegir otra hora.
+    """
     query = update.callback_query
     await query.answer()
     if query.data == "aptconf_ok":
@@ -472,6 +542,7 @@ async def nueva_conflict_response(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def nueva_recv_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe el nombre de la cita y avanza al paso de elección de tipo."""
     nombre = update.message.text.strip()
     if not nombre:
         await update.message.reply_text("❌ El nombre no puede estar vacío\\.", parse_mode="Markdown")
@@ -486,6 +557,7 @@ async def nueva_recv_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def nueva_recv_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe el tipo de cita elegido (botón tipo_{value}) y avanza al paso de notas."""
     query = update.callback_query
     await query.answer()
     apt_type = query.data.replace("tipo_", "")
@@ -498,14 +570,30 @@ async def nueva_recv_type(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def nueva_recv_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe las notas del usuario y guarda la cita vía _save_appointment."""
     return await _save_appointment(update, context, update.message.text.strip())
 
 
 async def nueva_skip_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handler de /skip: guarda la cita sin notas."""
     return await _save_appointment(update, context, "")
 
 
 async def _save_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE, notes: str) -> int:
+    """Llama a la API para crear la cita, programa sus reminders y confirma al usuario.
+
+    Recoge los datos de user_data (fecha, hora, nombre, tipo), llama a
+    api.create_appointment y, si tiene éxito, llama a schedule_apt_reminders
+    con la configuración del usuario. Limpia user_data al finalizar.
+
+    Args:
+        update: Update de PTB.
+        context: ContextTypes.DEFAULT_TYPE.
+        notes:  Notas de la cita (puede ser cadena vacía).
+
+    Returns:
+        ConversationHandler.END siempre.
+    """
     d  = context.user_data.get("nueva_date", str(date.today()))
     t  = context.user_data.get("nueva_time", "")
     nm = context.user_data.get("nueva_nombre", "")
@@ -553,6 +641,11 @@ def _kb_edit_apt_fields(date_str: str, idx: int) -> InlineKeyboardMarkup:
 
 
 async def cb_apt_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Entrada al flujo de edición: muestra el resumen de la cita y el menú de campos.
+
+    Patrón: ae_{date_str}_{index}. Guarda la cita actual en user_data para
+    mostrar los valores existentes al editar.
+    """
     query = update.callback_query
     await query.answer()
     date_str, idx = _parse_apt_callback("ae_", query.data)
@@ -617,6 +710,10 @@ async def cb_apt_edit_field_chosen(update: Update, context: ContextTypes.DEFAULT
 
 
 async def cb_apt_edit_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe la nueva hora (HH:MM), comprueba conflicto y ejecuta la actualización.
+
+    Si hay conflicto, guarda edit_conflict_pending y vuelve a NUEVA_CONFLICT.
+    """
     text = update.message.text.strip()
     if not _RE_TIME.match(text):
         await update.message.reply_text(
@@ -639,6 +736,11 @@ async def cb_apt_edit_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def cb_apt_edit_conflict_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Respuesta al conflicto durante la edición de hora.
+
+    aptconf_ok → confirma la nueva hora y ejecuta la actualización.
+    Cualquier otra opción → pide que escriba otra hora.
+    """
     query = update.callback_query
     await query.answer()
     context.user_data.pop("edit_conflict_pending", None)
@@ -653,11 +755,13 @@ async def cb_apt_edit_conflict_response(update: Update, context: ContextTypes.DE
 
 
 async def cb_apt_edit_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe el nuevo nombre del mensaje y actualiza la cita."""
     context.user_data["edit_apt_nombre"] = update.message.text.strip()
     return await _do_update_apt(update, context)
 
 
 async def cb_apt_edit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe el nuevo tipo desde el botón (etipo_{value}) y actualiza la cita."""
     query = update.callback_query
     await query.answer()
     context.user_data["edit_apt_type"] = query.data.replace("etipo_", "")
@@ -665,6 +769,7 @@ async def cb_apt_edit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def cb_apt_edit_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe las nuevas notas del mensaje y actualiza la cita."""
     context.user_data["edit_apt_notes"] = update.message.text.strip()
     return await _do_update_apt(update, context)
 
@@ -735,6 +840,7 @@ async def _do_update_apt_from_query(query, context) -> int:
 # ═══════════════════════════════════════════════════════════════════════
 
 def build_nueva_handler() -> ConversationHandler:
+    """Construye y devuelve el ConversationHandler completo para /nueva."""
     return ConversationHandler(
         entry_points=[
             CommandHandler("nueva", nueva_start),
@@ -760,6 +866,7 @@ def build_nueva_handler() -> ConversationHandler:
 
 
 def build_edit_apt_handler() -> ConversationHandler:
+    """Construye y devuelve el ConversationHandler completo para editar cita."""
     return ConversationHandler(
         entry_points=[CallbackQueryHandler(cb_apt_edit_start, pattern=r"^ae_")],
         states={
@@ -778,6 +885,7 @@ def build_edit_apt_handler() -> ConversationHandler:
 
 
 async def _cmd_cancelar_inline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Fallback: cancela la conversación activa y muestra botón de menú."""
     context.user_data.clear()
     await update.message.reply_text(
         "❌ Operación cancelada\\.",
