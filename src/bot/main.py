@@ -110,6 +110,13 @@ _PERSISTENCE_PATH = os.path.join("data", "bot_persistence.pkl")
 
 
 async def _check_api() -> None:
+    """Verifica la disponibilidad de la API de THDORA al arranque.
+
+    Realiza una llamada health check al endpoint /health de la FastAPI.
+    Logea INFO si la API responde o WARNING si no está disponible,
+    pero no aborta el inicio del bot — el bot arranca igualmente y
+    reintentará cuando lleguen peticiones desde los handlers.
+    """
     api = ThdoraApiClient()
     ok = await api.health()
     if ok:
@@ -119,6 +126,14 @@ async def _check_api() -> None:
 
 
 def _load_token() -> str:
+    """Lee TELEGRAM_BOT_TOKEN del entorno y valida que no esté vacío.
+
+    Returns:
+        Token de Telegram como string listo para usar en ApplicationBuilder.
+
+    Raises:
+        SystemExit: Si TELEGRAM_BOT_TOKEN no está configurado (sys.exit(1)).
+    """
     token = os.environ.get("TELEGRAM_BOT_TOKEN", "").strip()
     if not token:
         logger.error("TELEGRAM_BOT_TOKEN no está configurado.")
@@ -141,6 +156,25 @@ async def _post_init(application) -> None:
 
 
 def build_app(token: str):
+    """Construye y configura la Application de Python-Telegram-Bot.
+
+    Registra todos los handlers en el orden de prioridad correcto
+    (ver docstring del módulo):
+    1. ConversationHandlers (mayor prioridad)
+    2. CallbackQueryHandlers globales
+    3. MessageHandler de texto libre → NLP / acumulación hábito
+    4. CommandHandlers simples
+    5. Error handler
+
+    Configura PicklePersistence para preservar user_data (historial NLP,
+    caché de API, pending_changes) entre reinicios del proceso.
+
+    Args:
+        token: Token de Telegram obtenido con _load_token().
+
+    Returns:
+        Application de PTB lista para llamar a run_polling().
+    """
     os.makedirs("data", exist_ok=True)
     persistence = PicklePersistence(filepath=_PERSISTENCE_PATH)
 
@@ -205,6 +239,17 @@ async def _route_free_text(update, context) -> None:
 
 
 def main() -> None:
+    """Punto de entrada principal del bot THDORA.
+
+    Secuencia de arranque:
+    1. Carga el token de Telegram desde el entorno (_load_token)
+    2. Verifica disponibilidad de la API FastAPI (_check_api, async)
+    3. Construye la Application PTB con todos sus handlers (build_app)
+    4. Arranca el polling en modo producción
+
+    Ejecutar directamente::
+        python -m src.bot.main
+    """
     token = _load_token()
     asyncio.run(_check_api())
     app = build_app(token)
