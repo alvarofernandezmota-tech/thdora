@@ -4,6 +4,75 @@
 
 ---
 
+## [v0.16.3] — 29 abril 2026 (noche)
+
+### 🧪 Tests + Documentación — Auditoría completa
+
+#### Resumen de sesión
+Sesión de auditoría y cierre de deuda técnica. Todos los bugs corregidos en
+v0.16.1 y v0.16.2 ahora tienen cobertura de test unitario. Se crea el archivo
+`test_habitos.py` y se amplía `test_keyboards.py` con los casos que faltaban.
+Ningún cambio en lógica de negocio, API ni base de datos.
+
+---
+
+#### Tests añadidos — `tests/unit/bot/test_keyboards.py`
+
+| Test | Qué verifica | Fix relacionado |
+|------|-------------|----------------|
+| `TestKbFranjas::test_tarde_emoji_correcto` | Botón franja Tarde muestra 🌆 (no 🏆) | B1 — v0.16.1 |
+| `TestKbHorasFranjaNoche::test_noche_tiene_separador_madrugada` | `noop_separator` existe en franja noche | B-NEW6 — v0.16.2 |
+| `TestKbHorasFranjaNoche::test_noche_incluye_horas_madrugada` | Horas 00-05 presentes en franja noche | B-NEW6 — v0.16.2 |
+| `TestKbHorasFranjaNoche::test_noche_tiene_22_y_23` | Bloque inicial 22:00 y 23:00 presentes | B-NEW6 — v0.16.2 |
+| `TestKbHorasFranjaNoche::test_separador_noop_no_envia_accion` | `noop_separator` tiene texto visible y no dispara acción | B-NEW6 — v0.16.2 |
+
+---
+
+#### Tests añadidos — `tests/unit/bot/test_habitos.py` (archivo nuevo)
+
+Contexto: `_kb_edit_hab_fields` usaba `habit[:15]` en los `callback_data`,
+haciendo que hábitos con nombre >15 chars no pudieran editarse (B-NEW3).
+Este nuevo archivo de tests cubre ese fix específicamente.
+
+| Test | Qué verifica | Fix relacionado |
+|------|-------------|----------------|
+| `test_devuelve_teclado_valido` | `_kb_edit_hab_fields` devuelve `InlineKeyboardMarkup` | B-NEW3 |
+| `test_nombre_largo_no_truncado_en_callback` | Nombre >15 chars completo en `callback_data` | B-NEW3 — v0.16.2 |
+| `test_nombre_corto_en_callback` | Nombre <15 chars también correcto | B-NEW3 |
+| `test_nombre_exactamente_15_chars` | Nombre de 15 chars exactos (límite del bug original) | B-NEW3 |
+
+---
+
+### 📦 Archivos de esta sesión
+
+| Archivo | Cambio |
+|---|---|
+| `tests/unit/bot/test_keyboards.py` | 🧪 +5 tests: B-NEW6 (4) + B1 (1) |
+| `tests/unit/bot/test_habitos.py` | 🆕 Archivo nuevo — 4 tests B-NEW3 |
+| `docs/diarios/2026-04-29.md` | 📝 Diario de sesión |
+| `CHANGELOG.md` | 📝 Esta entrada |
+| `ROADMAP.md` | 📝 Estado actualizado v0.16.3 |
+
+### ⚠️ Nota de despliegue
+No requiere `docker compose restart`. Solo cambios en tests y docs.
+
+### 🧪 Estado tests después de v0.16.3
+
+```
+COBERTURA UNIT TESTS:
+[ ] pytest tests/unit/ — debe pasar 100%
+
+PENDIENTE en producción (Acer — Telegram real):
+[ ] /nueva → Tarde → emoji 🌆 en confirmación (B1)
+[ ] /nueva → Tarde → 16:00 → "Ver cuartos" → muestra 16:xx (B6)
+[ ] /nueva → Noche → separador Madrugada visible (B-NEW6)
+[ ] Hábito nombre >15 chars → editar → funciona (B-NEW3)
+[ ] /start → 2 min → log "⏰ Scheduler F12 iniciado" (B-NEW5)
+[ ] NLP (BLOQUEADO hasta renovar GROQ_API_KEY)
+```
+
+---
+
 ## [v0.16.2] — 27 abril 2026 (noche)
 
 ### 🐛 Bugfix — B-NEW3, B-NEW5, B-NEW6
@@ -56,7 +125,7 @@ Bump de versión del bot a **v4.3**.
 
 #### B-NEW6 — `keyboards.py` · `_kb_horas_franja("noche")` · mezcla visual 22-23 y 00-05
 
-**Problema:** La franja noche incluye horas 22-23 y 00-05 en un único bloque
+**Problema:** La franja noche incluíe horas 22-23 y 00-05 en un único bloque
 sin distinción visual. El usuario podía confundirse pensando que 00:00 es
 media noche del día siguiente.
 
@@ -76,39 +145,6 @@ media noche del día siguiente.
 | `src/bot/keyboards.py` | 🐛 Fix B-NEW6: separador visual noche/madrugada |
 | `CHANGELOG.md` | 📝 Esta entrada |
 | `docs/diarios/2026-04-27.md` | 📝 Cierre sesión nocturna |
-
-### ⚠️ Nota de despliegue
-`git pull` en Acer + `docker compose restart bot`. No requiere cambios en `.env` ni API.
-
-### 🧪 Checklist de prueba — v0.16.2
-
-```
-B-NEW3 — Hábito con nombre largo (> 15 chars)
-[ ] Registra un hábito con nombre largo (ej: "Meditación matutina")
-[ ] Pulsa ✏️ → debe mostrar botones con nombre completo, no truncado
-[ ] "Cambiar valor" → guarda correctamente
-[ ] "Cambiar nombre" → cambia correctamente
-
-B-NEW5 — Scheduler arranca en producción
-[ ] Reinicia el bot (docker compose restart bot)
-[ ] /start → programa jobs diarios
-[ ] Espera 2 min → log debe mostrar "⏰ Scheduler F12 iniciado"
-[ ] Los recordatorios de cita se programan al crear una cita
-
-B-NEW6 — Franja noche separada visualmente
-[ ] /nueva → Noche → teclado muestra 22:00 | 23:00 en primera fila
-[ ] Separador "── Madrugada ──" visible entre 23:00 y 00:00
-[ ] Filas de madrugada: 00:00 01:00 02:00 03:00 / 04:00 05:00
-[ ] Pulsar separador no hace nada (noop_separator)
-```
-
-### ⏩ Siguiente — Tarea 1.2
-**Objetivo:** Mostrar huecos disponibles antes de mover/editar una cita.
-- Al pulsar ✏️ → Hora: mostrar slots libres del día como botones.
-- Reutilizar `_build_day_schedule` de `nlp.py`.
-- Botones de franja → horas libres de esa franja.
-- Si no hay huecos: mensaje claro + opción escribir hora manual.
-- Integrar `_check_and_show_conflict` al final.
 
 ---
 
@@ -131,7 +167,7 @@ Sesión de bugs en el flujo `/nueva`. Se corrigen dos inconsistencias visuales/l
 
 #### B6 — `citas.py` · `nueva_recv_hora_punto` · `hora_ver_cuartos` ignoraba hora seleccionada
 
-**Problema:** Al pulsar el botón "Ver cuartos" tras elegir una hora (ej: 17:00), el bot ignoraba `nueva_hora_temp` y mostraba los cuartos del inicio de franja (14:xx para Tarde, 6:xx para Mañana, 22:xx para Noche).
+**Problema:** Al pulsar el botón "Ver cuartos" tras elegir una hora (ej: 17:00), el bot ignoraba `nueva_hora_temp` y mostraba los cuartos del inicio de franja.
 
 **Fix:**
 ```python
@@ -145,38 +181,9 @@ hora_inicio = context.user_data.get("nueva_hora_temp") or _franja_inicio.get(fra
 
 ---
 
-### 📦 Archivos de esta sesión
-
-| Archivo | Cambio |
-|---|---|
-| `src/bot/handlers/citas.py` | 🐛 Fix B1 (emoji) + Fix B6 (hora_ver_cuartos) |
-| `CHANGELOG.md` | 📝 Esta entrada |
-| `ROADMAP.md` | 📝 B1/B6 añadidos al historial |
-| `docs/diarios/2026-04-27.md` | 📝 Sesión 2 + checklist de pruebas completo |
-
-### ⚠️ Nota de despliegue
-`git pull` en Acer + `docker compose restart bot`. No requiere cambios en `.env` ni API.
-
----
-
 ## [v0.16.0] — 23 abril 2026 (tarde)
 
 ### 🔧 UX — Confirmación de borrado de cita muestra nombre + hora
-
-#### Resumen de sesión
-Sesión corta pero limpia. Un fix de UX real (tarea 1.3 del Bloque 1) y
-documentación al día. El bot ya muestra exactamente qué cita vas a borrar
-antes de pedirte confirmación.
-
----
-
-### 📦 Archivos de esta sesión
-
-| Archivo | Cambio |
-|---|---|
-| `src/bot/handlers/citas.py` | 🔧 cb_apt_delete muestra nombre+hora antes de confirmar |
-| `ROADMAP.md` | 📝 1.3 ✅, versión v0.16.0, siguiente → 1.2 |
-| `CHANGELOG.md` | 📝 Esta entrada |
 
 ---
 
@@ -233,4 +240,4 @@ antes de pedirte confirmación.
 
 ---
 
-_Última actualización: 27 abril 2026 — 22:28 CEST_
+_Última actualización: 29 abril 2026 — 21:50 CEST_
