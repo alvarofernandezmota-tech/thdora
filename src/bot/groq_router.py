@@ -52,7 +52,18 @@ logger = logging.getLogger(__name__)
 
 _CLIENT: Optional[AsyncGroq] = None
 
+
 def _get_client() -> Optional[AsyncGroq]:
+    """Devuelve (o crea) el cliente AsyncGroq singleton.
+
+    Lazy-init: el cliente se crea la primera vez que se llama, siempre
+    que GROQ_API_KEY esté definida en el entorno.
+    Si la variable no existe devuelve None; todas las funciones públicas
+    comprueban este caso y responden con mensajes de error sin llamar a la API.
+
+    Returns:
+        Instancia AsyncGroq lista para usar, o None si la clave no está configurada.
+    """
     global _CLIENT
     if _CLIENT is None:
         key = os.getenv("GROQ_API_KEY", "")
@@ -61,10 +72,13 @@ def _get_client() -> Optional[AsyncGroq]:
     return _CLIENT
 
 
-MODEL_FAST   = "llama-3.1-8b-instant"
-MODEL_STRONG = "llama-3.3-70b-versatile"
-MAX_HISTORY  = 10
+# ── Constantes de modelo y comportamiento ────────────────────────────────────
 
+MODEL_FAST   = "llama-3.1-8b-instant"     # Clasificación rápida de intent
+MODEL_STRONG = "llama-3.3-70b-versatile"  # Extracción de entidades y chat
+MAX_HISTORY  = 10                          # Mensajes por dirección en user_data
+
+# Normalización del campo 'type' de cita — el modelo puede devolver variantes
 _TIPO_MAP = {
     "medica": "médica", "médica": "médica",
     "personal": "personal",
@@ -74,7 +88,7 @@ _TIPO_MAP = {
 _TIPO_DEFAULT = "otra"
 
 
-# ── Paso 1: Clasificador de intents ──────────────────────────────────
+# ── Paso 1: Clasificador de intents ──────────────────────────────────────────
 
 _CLASSIFY_SYSTEM = """
 Clasifica el siguiente mensaje en UNO de estos intents. Responde SOLO con el nombre del intent:
@@ -94,6 +108,20 @@ Responde únicamente con una de las nueve palabras anteriores, sin puntuación n
 
 
 async def classify_intent(text: str) -> str:
+    """Clasifica el mensaje del usuario en uno de los 9 intents posibles.
+
+    Usa MODEL_FAST (llama-3.1-8b-instant) para minimizar latencia.
+    Temperatura 0.0 para máxima determinismo.
+
+    Args:
+        text: Mensaje en lenguaje natural del usuario.
+
+    Returns:
+        Intent como string: 'nueva_cita', 'borrar_cita', 'editar_cita',
+        'log_habito', 'borrar_habito', 'consulta', 'consulta_semana',
+        'chat' o 'desconocido'.
+        Devuelve 'desconocido' si la API no está disponible o falla.
+    """
     client = _get_client()
     if not client:
         return "desconocido"
@@ -122,20 +150,45 @@ async def classify_intent(text: str) -> str:
         return "desconocido"
 
 
-# ── Paso 2a: Extracción nueva_cita ────────────────────────────────────
+# ── Paso 2a: Extracción nueva_cita ──────────────────────────────────────────
 
 def _build_cita_system(today: str) -> str:
+    """Construye el system prompt para extraer datos de una cita nueva.
+
+    Inyecta la fecha de hoy para que el modelo pueda inferir fechas relativas
+    ('mañana', 'el lunes', etc.).
+
+    Args:
+        today: Fecha actual en formato YYYY-MM-DD.
+
+    Returns:
+        String con el system prompt listo para enviar a MODEL_STRONG.
+    """
     return f"""Hoy es {today}.
 Extrae del mensaje del usuario los datos de la cita y devuelve JSON válido.
 Campos obligatorios: name (str), date (YYYY-MM-DD), time (HH:MM), type (médica/personal/trabajo/otra).
 Campos opcionales: notes (str, puede ser vacío).
 Si no se menciona la fecha asume hoy ({today}). Si no se menciona la hora devuelve "09:00".
-Devuelve ÚNICAMENTE el JSON, sin texto adicional, sin markdown, sin bloques de código.
+Devuelve ÚNCIAMENTE el JSON, sin texto adicional, sin markdown, sin bloques de código.
 Ejemplo de salida válida: {{"name":"Dentista","date":"{today}","time":"17:00","type":"médica","notes":""}}
 """
 
 
 async def extract_cita(text: str, today: str) -> Optional[Dict]:
+    """Extrae los campos de una cita nueva desde lenguaje natural.
+
+    Llama a MODEL_STRONG con temperatura 0.0 para obtener un JSON con los
+    campos obligatorios (name, date, time, type) y opcionales (notes).
+    Normaliza el campo 'type' mediante _TIPO_MAP para garantizar valores válidos.
+
+    Args:
+        text:  Mensaje del usuario describiendo la cita.
+        today: Fecha actual YYYY-MM-DD usada para resolver referencias relativas.
+
+    Returns:
+        Dict con las claves name/date/time/type/notes, o None si falla la
+        extracción o el JSON del modelo es inválido.
+    """
     client = _get_client()
     if not client:
         return None
@@ -168,19 +221,36 @@ async def extract_cita(text: str, today: str) -> Optional[Dict]:
         return None
 
 
-# ── Paso 2b: Extracción log_habito ────────────────────────────────────
+# ── Paso 2b: Extracción log_habito ──────────────────────────────────────────
 
 def _build_habito_system(today: str) -> str:
+    """Construye el system prompt para extraer datos de un registro de hábito.
+
+    Args:
+        today: Fecha actual en formato YYYY-MM-DD.
+
+    Returns:
+        String con el system prompt listo para enviar a MODEL_STRONG.
+    """
     return f"""Hoy es {today}.
 Extrae del mensaje del usuario los datos del hábito y devuelve JSON válido.
 Campos obligatorios: habit (nombre del hábito, str), value (valor registrado, str), date (YYYY-MM-DD).
 Si no se menciona la fecha asume hoy ({today}).
-Devuelve ÚNICAMENTE el JSON, sin texto adicional, sin markdown, sin bloques de código.
+Devuelve ÚNCIAMENTE el JSON, sin texto adicional, sin markdown, sin bloques de código.
 Ejemplo de salida válida: {{"habit":"sueño","value":"7 horas","date":"{today}"}}
 """
 
 
 async def extract_habito(text: str, today: str) -> Optional[Dict]:
+    """Extrae nombre, valor y fecha de un registro de hábito desde lenguaje natural.
+
+    Args:
+        text:  Mensaje del usuario describiendo el hábito registrado.
+        today: Fecha actual YYYY-MM-DD.
+
+    Returns:
+        Dict con habit/value/date, o None si el modelo no devuelve JSON válido.
+    """
     client = _get_client()
     if not client:
         return None
@@ -206,10 +276,24 @@ async def extract_habito(text: str, today: str) -> Optional[Dict]:
         return None
 
 
-# ── Paso 2c: Extracción borrar_cita ────────────────────────────────────
+# ── Paso 2c: Extracción borrar_cita ─────────────────────────────────────────
 # Recibe TODAS las citas de la semana. Devuelve un único match o {"candidates": [...]}
 
 def _build_borrar_cita_system(today: str, todas_citas: List[Dict]) -> str:
+    """Construye el system prompt para identificar la cita a borrar.
+
+    Lista TODAS las citas disponibles en el prompt para que el modelo
+    identifique la correcta por nombre, hora o día mencionado.
+    Si hay ambigüedad, el modelo devuelve 'candidates' en lugar de un solo ID.
+
+    Args:
+        today:       Fecha actual YYYY-MM-DD.
+        todas_citas: Lista plana de citas (hoy + mañana + semana) generada
+                     por build_todas_citas().
+
+    Returns:
+        System prompt con la lista de citas formateada para MODEL_STRONG.
+    """
     citas_str = "\n".join(
         f"  id={c.get('id','?')} date={c.get('date', today)} index={c.get('index','?')}: {c.get('time','?')} — {c.get('name','?')}"
         for c in todas_citas
@@ -226,13 +310,28 @@ REGLAS:
 3. Si no puedes identificar ninguna con certeza devuelve:
    {{"date": "{today}", "id": -1, "index": -1, "name": ""}}
 Si no se menciona fecha, busca en TODAS las fechas.
-Devuelve ÚNICAMENTE el JSON, sin texto adicional, sin markdown.
+Devuelve ÚNCIAMENTE el JSON, sin texto adicional, sin markdown.
 """
 
 
 async def extract_borrar_cita(
     text: str, today: str, todas_citas: List[Dict]
 ) -> Optional[Dict]:
+    """Identifica la cita a borrar a partir del mensaje del usuario.
+
+    Pasa la lista completa de citas al modelo para que resuelva por
+    nombre, hora o día incluso si no se menciona el ID.
+
+    Args:
+        text:        Mensaje del usuario.
+        today:       Fecha actual YYYY-MM-DD.
+        todas_citas: Lista de todas las citas (de build_todas_citas).
+
+    Returns:
+        Dict con date/id/index/name si hay match único.
+        Dict con 'candidates' si hay ambigüedad (el handler muestra botones).
+        None si la API falla o el JSON es inválido.
+    """
     client = _get_client()
     if not client:
         return None
@@ -258,10 +357,24 @@ async def extract_borrar_cita(
         return None
 
 
-# ── Paso 2d: Extracción editar_cita ────────────────────────────────────
+# ── Paso 2d: Extracción editar_cita ─────────────────────────────────────────
 # Recibe TODAS las citas de la semana. Devuelve un único match o {"candidates": [...]}
 
 def _build_editar_cita_system(today: str, todas_citas: List[Dict]) -> str:
+    """Construye el system prompt para identificar la cita a editar y los cambios.
+
+    Además de identificar la cita (id/index), el modelo extrae los campos
+    new_time, new_name, new_type y new_notes de la petición del usuario.
+    Si hay ambigüedad en la cita, devuelve 'candidates' más los cambios pedidos
+    para aplicarlos después de que el usuario elija.
+
+    Args:
+        today:       Fecha actual YYYY-MM-DD.
+        todas_citas: Lista plana de citas generada por build_todas_citas().
+
+    Returns:
+        System prompt listo para MODEL_STRONG.
+    """
     citas_str = "\n".join(
         f"  id={c.get('id','?')} date={c.get('date', today)} index={c.get('index','?')}: {c.get('time','?')} — {c.get('name','?')}"
         for c in todas_citas
@@ -281,13 +394,30 @@ REGLAS:
 3. Si no puedes identificar ninguna devuelve:
    {{"date": "{today}", "id": -1, "index": -1}}
 Si no se menciona fecha, busca en TODAS las fechas.
-Devuelve ÚNICAMENTE el JSON, sin texto adicional, sin markdown.
+Devuelve ÚNCIAMENTE el JSON, sin texto adicional, sin markdown.
 """
 
 
 async def extract_editar_cita(
     text: str, today: str, todas_citas: List[Dict]
 ) -> Optional[Dict]:
+    """Identifica la cita a editar y extrae los cambios solicitados.
+
+    Devuelve tanto la cita identificada (id/index/date) como los campos
+    a modificar (new_time, new_name, new_type, new_notes). Si hay ambigüedad
+    en la identificación, devuelve 'candidates' junto a los cambios para
+    que nlp.py los aplique tras la desambiguación del usuario.
+
+    Args:
+        text:        Mensaje del usuario.
+        today:       Fecha actual YYYY-MM-DD.
+        todas_citas: Lista de todas las citas (de build_todas_citas).
+
+    Returns:
+        Dict con id/index/date/new_* si hay match único.
+        Dict con 'candidates' + new_* si hay ambigüedad.
+        None si la API falla.
+    """
     client = _get_client()
     if not client:
         return None
@@ -313,9 +443,21 @@ async def extract_editar_cita(
         return None
 
 
-# ── Paso 2e: Extracción borrar_habito ────────────────────────────────────
+# ── Paso 2e: Extracción borrar_habito ───────────────────────────────────────
 
 def _build_borrar_habito_system(today: str, habitos_hoy: Dict) -> str:
+    """Construye el system prompt para identificar el hábito a borrar.
+
+    Lista los hábitos registrados hoy para que el modelo seleccione
+    el nombre exacto (necesario para que la API lo localice).
+
+    Args:
+        today:       Fecha actual YYYY-MM-DD.
+        habitos_hoy: Dict {nombre_habito: valor_registrado} del día.
+
+    Returns:
+        System prompt listo para MODEL_STRONG.
+    """
     habs_str = "\n".join(
         f"  • {k}: {v}" for k, v in habitos_hoy.items()
     ) or "  (ninguno registrado)"
@@ -327,13 +469,25 @@ Identifica cuál hábito quiere borrar y devuelve JSON:
 {{"date": "YYYY-MM-DD", "habit": "<nombre exacto del hábito>"}}
 Si no se menciona fecha asume hoy ({today}).
 Si no puedes identificar el hábito devuelve: {{"date": "{today}", "habit": ""}}
-Devuelve ÚNICAMENTE el JSON, sin texto adicional, sin markdown.
+Devuelve ÚNCIAMENTE el JSON, sin texto adicional, sin markdown.
 """
 
 
 async def extract_borrar_habito(
     text: str, today: str, habitos_hoy: Dict
 ) -> Optional[Dict]:
+    """Identifica el hábito a borrar por nombre desde lenguaje natural.
+
+    Args:
+        text:        Mensaje del usuario.
+        today:       Fecha actual YYYY-MM-DD.
+        habitos_hoy: Hábitos registrados hoy {nombre: valor}.
+
+    Returns:
+        Dict con date/habit (nombre exacto), o None si la API falla.
+        habit puede ser '' si el modelo no identifica el hábito —
+        route() detecta ese caso y responde con mensaje de error.
+    """
     client = _get_client()
     if not client:
         return None
@@ -359,7 +513,7 @@ async def extract_borrar_habito(
         return None
 
 
-# ── Paso 2f: Respuesta contextual ────────────────────────────────────
+# ── Paso 2f: Respuesta contextual (chat / consulta) ──────────────────────────
 
 _CHAT_SYSTEM_BASE = """
 Eres THDORA, la asistente personal de Álvaro. Tu objetivo es ayudarle a gestionar
@@ -379,7 +533,25 @@ Cuando quiera editar una cita dile: "Escíbeme algo como: mueve el gym a las 18"
 """
 
 
-def _build_chat_system(api_context: Optional[Dict], username: Optional[str] = None) -> str:
+def _build_chat_system(
+    api_context: Optional[Dict],
+    username: Optional[str] = None,
+) -> str:
+    """Construye el system prompt completo para chat_response inyectando contexto real.
+
+    Parte de _CHAT_SYSTEM_BASE y añade un bloque CONTEXTO ACTUAL con las
+    citas y hábitos reales del día desde la API. Si api_context es None
+    devuelve solo el system base (el modelo responderá sin datos concretos).
+
+    Args:
+        api_context: Dict con claves 'citas', 'habitos', 'citas_manana',
+                     'citas_semana', 'semana_raw'. Puede ser None.
+        username:    Nombre del usuario Telegram para personalizar el saludo.
+                     Si se provee, reemplaza 'Álvaro' en el system prompt.
+
+    Returns:
+        String con el system prompt completo listo para MODEL_STRONG.
+    """
     base = _CHAT_SYSTEM_BASE
     if username:
         base = base.replace("Álvaro", username)
@@ -427,6 +599,26 @@ async def chat_response(
     api_context: Optional[Dict] = None,
     username: Optional[str] = None,
 ) -> str:
+    """Genera una respuesta conversacional con contexto real de la agenda.
+
+    Usa MODEL_STRONG con temperatura 0.7 (más creativo que la extracción)
+    e inyecta el historial de conversación (hasta MAX_HISTORY mensajes)
+    para mantener coherencia entre turnos.
+
+    También sirve a los intents 'consulta' y 'consulta_semana' cuando
+    la respuesta es texto libre (no extracción de entidades).
+
+    Args:
+        text:        Mensaje actual del usuario.
+        history:    Lista de dicts {role, content} con el historial previo.
+                    Se trunca a MAX_HISTORY entradas automáticamente.
+        api_context: Contexto real de citas y hábitos (opcional).
+        username:   Nombre Telegram para personalizar la respuesta.
+
+    Returns:
+        Respuesta en texto para el usuario. Si la API no está disponible
+        devuelve un mensaje de error descriptivo.
+    """
     client = _get_client()
     if not client:
         return "⚠️ El asistente IA no está configurado. Verifica GROQ_API_KEY."
@@ -449,13 +641,26 @@ async def chat_response(
         return "⚠️ Error al conectar con el asistente. Inténtalo de nuevo."
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────
+# ── Helpers ————————————————————————————————————————————————————————————————
 
 def build_todas_citas(api_context: Dict) -> List[Dict]:
-    """
-    Construye una lista plana de TODAS las citas disponibles en api_context
-    (hoy + mañana + semana) añadiendo el campo 'date' a cada cita si no lo tiene.
-    Usada por extract_borrar_cita y extract_editar_cita para desambiguación.
+    """Construye una lista plana de TODAS las citas disponibles en api_context.
+
+    Combina citas de hoy, mañana y el resto de la semana (semana_raw) en una
+    única lista, añadiendo el campo 'date' a cada cita si no lo tiene.
+    Deduplica por 'id' para evitar repeticiones cuando hoy/mañana ya
+    aparecen en semana_raw.
+
+    Usada por extract_borrar_cita y extract_editar_cita para pasar al modelo
+    TODAS las citas posibles y habilitar la desambiguación multi-día.
+
+    Args:
+        api_context: Dict devuelto por la API con claves 'citas', 'citas_manana'
+                     y 'semana_raw' (date_str → [citas]).
+
+    Returns:
+        Lista de dicts de citas, cada uno con el campo 'date' garantizado.
+        Sin duplicados por id.
     """
     today    = date.today().isoformat()
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -488,7 +693,7 @@ def build_todas_citas(api_context: Dict) -> List[Dict]:
     return dedup
 
 
-# ── Orquestador principal ────────────────────────────────────────────────
+# ── Orquestador principal ————————————————————————————————————————————
 
 async def route(
     text: str,
@@ -496,23 +701,33 @@ async def route(
     api_context: Optional[Dict] = None,
     username: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """
-    Punto de entrada principal del router NLP.
+    """Punto de entrada principal del router NLP.
 
-    Parámetros:
-        text        — mensaje del usuario
-        user_data   — context.user_data de PTB (historial NLP)
-        api_context — datos reales de la API inyectados desde nlp.py (con cache)
-        username    — nombre del usuario Telegram (para personalizar respuestas)
+    Orquesta el flujo completo de dos pasos:
+    1. classify_intent — determina qué quiere hacer el usuario
+    2. extract_* / chat_response — extrae entidades o genera respuesta
 
-    Devuelve un dict con:
-        intent      (str)        — intent clasificado
-        data        (dict|None)  — entidades extraídas si aplica
-        candidates  (list|None)  — lista de candidatas si hay ambigüedad
-        reply       (str|None)   — respuesta para el usuario
-        show_menu   (bool)       — True si el handler debe mostrar el menú del bot
-        pending_action (str|None)— 'borrar_cita' o 'editar_cita' si hay candidates
-        pending_changes (dict|None) — cambios pendientes de aplicar tras desambiguación (editar)
+    Gestiona también el historial de conversación en user_data y la
+    resolución de ambigüedad devolviendo 'candidates' cuando hay varias
+    citas candidatas para borrar/editar.
+
+    Args:
+        text:        Mensaje del usuario.
+        user_data:   context.user_data de PTB donde se persiste 'nlp_history'.
+        api_context: Datos reales de la API inyectados desde nlp.py (con cache TTL).
+                     Estructura: {citas, habitos, citas_manana, citas_semana,
+                     semana_raw}.
+        username:    Nombre Telegram del usuario para personalizar respuestas.
+
+    Returns:
+        Dict con:
+            intent         (str)        — intent clasificado
+            data           (dict|None)  — entidades extraídas si aplica
+            candidates     (list|None)  — lista de citas candidatas si ambigüedad
+            reply          (str|None)   — respuesta para el usuario
+            show_menu      (bool)       — True si el handler debe mostrar el menú
+            pending_action (str|None)   — 'borrar_cita' o 'editar_cita' si candidates
+            pending_changes(dict|None)  — cambios new_* pendientes de aplicar (editar)
     """
     today    = date.today().isoformat()
     tomorrow = (date.today() + timedelta(days=1)).isoformat()
@@ -526,11 +741,11 @@ async def route(
     if len(history) > MAX_HISTORY * 2:
         history[:] = history[-(MAX_HISTORY * 2):]
 
-    data           = None
-    candidates     = None
-    reply          = None
-    show_menu      = False
-    pending_action = None
+    data            = None
+    candidates      = None
+    reply           = None
+    show_menu       = False
+    pending_action  = None
     pending_changes = None
 
     todas_citas = build_todas_citas(api_context or {})
@@ -592,6 +807,7 @@ async def route(
 
     # ── consulta ──────────────────────────────────────────────────────
     elif intent == "consulta":
+        # Detecta si la consulta es sobre mañana para ajustar el contexto
         ctx = api_context or {}
         if any(w in text.lower() for w in ("mañana", "manana", "tomorrow")):
             ctx = {**ctx, "fecha_consulta": tomorrow}
@@ -607,6 +823,7 @@ async def route(
 
     # ── desconocido ───────────────────────────────────────────────────
     elif intent == "desconocido":
+        # El handler nlp.py mostrará el menú principal del bot
         show_menu = True
         reply = None
 
