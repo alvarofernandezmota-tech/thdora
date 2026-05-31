@@ -1,34 +1,77 @@
 # 🧭 THDORA — CÓMO PROCEDER
 
 > Guía de trabajo para retomar el proyecto en cualquier momento sin perder contexto.
-> Última actualización: **27 abril 2026 — 20:15 CEST**
+> Última actualización: **31 mayo 2026 — 20:55 CEST**
 
 ---
 
-## Estado actual — v0.16.0 ✅ 24/7 Docker
+## Estado actual — v4.3 ⚠️ GROQ KEY CADUCADA
 
 ```
-✅ API FastAPI        → http://localhost:8001 (en servidor Acer)
-✅ Bot Telegram       → polling 24/7
+✅ Bot Telegram       → src/bot/main.py (polling, PTB v20+)
+✅ FastAPI            → src/api/ (5 routers completos)
 ✅ SQLite             → data/thdora.db
+✅ Groq client        → src/ai/groq_client.py
+✅ NLP modo Toki      → src/bot/groq_router.py (34KB)
 ✅ Scheduler F12      → APScheduler (resumen + evening + citas)
-✅ groq_router.py    → NLP modo Toki con contexto real
-⚠️ GROQ_API_KEY       → caducada — NLP degradado a menú
+✅ .venv instalado    → ~/projects/thdora/.venv
+⚠️ GROQ_API_KEY        → CADUCADA — renovar en console.groq.com
 ```
 
-### Arrancar el proyecto
+### ⭐ Arrancar el proyecto (orden correcto)
 
 ```bash
+# 0. Ir al proyecto y activar entorno
+cd ~/projects/thdora
+source .venv/bin/activate
+
+# 1. Actualizar GROQ_API_KEY en .env
+nano .env
+# → GROQ_API_KEY=gsk_nueva_key_aqui
+
 # Terminal 1 — API
 make run-api
 
 # Terminal 2 — Bot
 make run-bot
 
-# Con Docker (producción)
-docker compose up -d
-docker compose logs -f
+# Verificar que funciona
+# → Abrir Telegram → /start → debe responder
+# → Escribir texto libre → debe responder con NLP (Groq)
+
+# Dejar corriendo en segundo plano
+screen -S thdora-api
+make run-api
+# Ctrl+A D para salir sin matar
+
+screen -S thdora-bot
+make run-bot
+# Ctrl+A D para salir sin matar
 ```
+
+---
+
+## 📋 Próximas tareas (en orden)
+
+### PRIORIDAD 1 — Activación (mañana 1 junio)
+- [ ] Renovar GROQ_API_KEY en console.groq.com
+- [ ] `make run-api` + `make run-bot`
+- [ ] Probar /start y texto libre en Telegram
+- [ ] Dejar con `screen` en segundo plano
+
+### PRIORIDAD 2 — Features nuevas
+- [ ] Handler `/desahogo` → rimas/letras con lo que sientes (Groq)
+- [ ] Soporte Ollama como alternativa local a Groq
+- [ ] Resolver BUG 1 y BUG 2 (borrar/editar citas)
+
+### PRIORIDAD 3 — BD real
+- [ ] Migraciones en src/db/migrations/
+- [ ] PostgreSQL en producción (docker-compose ya configurado)
+- [ ] Tests de integración con BD real
+
+### PRIORIDAD 4 — Deploy
+- [ ] Railway.app (gratis, sube solo desde GitHub)
+- [ ] O mantener en servidor Acer con Docker
 
 ---
 
@@ -37,35 +80,31 @@ docker compose logs -f
 > **Regla de oro:** nunca tocar código en `main` directamente.
 > `main` = lo que está corriendo. `dev` = donde se trabaja.
 
-### Flujo completo de trabajo
-
 ```bash
 # 1. Siempre arrancar desde dev
 git checkout dev
-git pull origin main          # sincronizar con lo último de prod
+git pull origin main
 
-# 2. Hacer cambios, commits normales
+# 2. Hacer cambios y commits
 git add .
-git commit -m "fix: descripción del cambio"
+git commit -m "feat: descripción del cambio"
 git push origin dev
 
-# 3. Cuando está probado y listo → merge a main
+# 3. Cuando está probado → merge a main
 git checkout main
 git merge dev
 git push origin main
 
-# 4. En el servidor: rebuild SOLO el servicio afectado
-docker compose build bot      # si solo tocaste src/bot/
-docker compose up -d bot      # reinicia SOLO el bot — API sigue viva ✅
+# 4. Rebuild SOLO el servicio afectado
+docker compose build bot
+docker compose up -d bot
 ```
-
-### Qué rebuild según el fichero tocado
 
 | Fichero modificado | Rebuild necesario |
 |--------------------|-------------------|
 | `src/bot/**` | Solo `bot` |
 | `src/api/**` | Solo `api` |
-| `src/core/**` o `src/db/**` | Ambos (`api` + `bot`) |
+| `src/core/**` o `src/db/**` | Ambos |
 | `requirements.txt` | Ambos (rebuild completo) |
 
 ---
@@ -82,7 +121,7 @@ docker compose up -d bot      # reinicia SOLO el bot — API sigue viva ✅
 
 ---
 
-## 🤖 Arquitectura NLP actual (modo Toki)
+## 🤖 Arquitectura NLP (modo Toki)
 
 ```
 Usuario escribe texto
@@ -91,7 +130,7 @@ nlp_handler() — handlers/nlp.py
     ↓
 ⏳ Procesando... (feedback inmediato)
     ↓
-_get_api_context()  ←── 3 llamadas paralelas a la API
+_get_api_context()  ←── 3 llamadas paralelas
     ├── get_appointments(hoy)
     ├── get_appointments(mañana)
     └── get_habits(hoy)
@@ -99,12 +138,13 @@ _get_api_context()  ←── 3 llamadas paralelas a la API
 groq_router.route(text, user_data, api_context)
     ↓
 ① llama-3.1-8b-instant → clasificar intent
-    ├── nueva_cita      → extract_cita()   → api.create_appointment()
-    ├── log_habito      → extract_habito() → api.log_habit()
-    ├── borrar_cita     → [BUG 1]
-    ├── editar_cita     → [BUG 2]
-    ├── consulta/chat   → chat_response(contexto real)
-    └── desconocido     → mostrar menú del bot
+    ├── nueva_cita    → extract_cita()   → api.create_appointment()
+    ├── log_habito    → extract_habito() → api.log_habit()
+    ├── borrar_cita   → [BUG 1]
+    ├── editar_cita   → [BUG 2]
+    ├── consulta/chat → chat_response(contexto real)
+    └── desahogo      → [PENDIENTE — rimas/letras]
+    └── desconocido   → mostrar menú del bot
 ```
 
 ### Cómo añadir un nuevo intent
@@ -117,13 +157,22 @@ groq_router.route(text, user_data, api_context)
 ## Variables de entorno
 
 ```bash
-# Obligatorias
 TELEGRAM_BOT_TOKEN=xxx
-GROQ_API_KEY=gsk_xxx       # ⚠️ CADUCADA — renovar en groq.com
-THDORA_API_URL=http://api:8000
+GROQ_API_KEY=gsk_xxx       # ⚠️ CADUCADA — renovar en console.groq.com
+THDORA_API_URL=http://localhost:8000
 THDORA_DB_PATH=data/thdora.db
 ```
 
 ---
 
-_Actualizado: 27 abril 2026 — 20:15 CEST — movido a .github/ (Bloque 3.2)_
+## 📌 Contexto del proyecto
+
+- **Stack:** Python 3.11 | python-telegram-bot v20 | FastAPI | SQLAlchemy | SQLite→PostgreSQL | Groq
+- **Ruta local:** `~/projects/thdora`
+- **Repo:** [github.com/alvarofernandezmota-tech/thdora](https://github.com/alvarofernandezmota-tech/thdora)
+- **Diario:** repo `personal` → `01_traking_diario/01_diarios/`
+- **Visión:** Asistente personal IA multi-plataforma. Base privada que alimenta expresión pública.
+
+---
+
+_Actualizado: 31 mayo 2026 — 20:55 CEST_
