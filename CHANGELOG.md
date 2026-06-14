@@ -4,6 +4,71 @@
 
 ---
 
+## [v0.16.4] — 14 junio 2026 (noche)
+
+### 🔑 Fix — Rotación de GROQ_API_KEY + upgrade de modelo
+
+#### Resumen de sesión
+Sesión de diagnóstico y resolución del error `401 Invalid API Key` en el NLP del bot. La key de Groq había sido expuesta accidentalmente en un chat. Se rotó la key, se actualizó el modelo a uno disponible actualmente, y se configuró SSH para Git. Ningún cambio en lógica de negocio ni base de datos.
+
+---
+
+#### Incidencia — Error 401 en `groq_router.py`
+
+**Síntoma:** El bot arrancaba correctamente pero todas las llamadas a Groq devolvían:
+```
+Error code: 401 - {'error': {'message': 'Invalid API Key', 'type': 'invalid_request_error', 'code': 'invalid_api_key'}}
+```
+
+**Causa raíz:** La `GROQ_API_KEY` fue expuesta en un canal externo. Adicionalmente, el modelo configurado por defecto (`llama3-8b-8192`) ya no existe en el catálogo de Groq.
+
+**Diagnóstico:** Se verificó la key con `curl` y Google Colab contra `https://api.groq.com/openai/v1/models`. Retornó `200` con la key nueva → confirmado que el problema era la key revocada + modelo inexistente, no la configuración de Docker.
+
+**Fix:**
+1. Key revocada en [console.groq.com](https://console.groq.com) y nueva key generada
+2. `.env` actualizado con nueva `GROQ_API_KEY`
+3. `GROQ_MODEL` cambiado de `llama3-8b-8192` (deprecado) → `llama-3.3-70b-versatile` (128k contexto, free tier)
+4. `docker compose down && docker compose up -d` para forzar recarga del entorno
+
+---
+
+#### Modelos Groq disponibles (free tier, junio 2026)
+
+| Modelo | Contexto | Uso recomendado |
+|--------|----------|-----------------|
+| `llama-3.3-70b-versatile` ✅ | 128k | **Seleccionado** — NLP, razonamiento |
+| `llama-3.1-8b-instant` | 128k | Respuestas rápidas |
+| `meta/llama-4-scout-17b-16e-instruct` | 512k | Contexto muy largo |
+| `qwen/qwen3-32b` | 32k | Alternativa razonamiento |
+
+---
+
+#### Mejoras de infraestructura Git
+
+- Remote cambiado de HTTPS → SSH: `git remote set-url origin git@github.com:alvarofernandezmota-tech/thdora.git`
+- Se evita introducir credenciales manualmente en cada push
+- `.gitignore` ya contenía `.env` — confirmado que la key NO fue subida a GitHub
+
+---
+
+### 📦 Archivos de esta sesión
+
+| Archivo | Cambio |
+|---|---|
+| `.env` (local, no en repo) | 🔑 Nueva GROQ_API_KEY + GROQ_MODEL=llama-3.3-70b-versatile |
+| `.gitignore` | 📝 Entrada duplicada `.env` eliminada (era redundante) |
+| `CHANGELOG.md` | 📝 Esta entrada |
+
+### ⚠️ Nota de despliegue
+Requiere `docker compose down && docker compose up -d` (no solo `restart`) para forzar la recarga del `.env` en el contenedor.
+
+### ✅ Estado NLP tras esta sesión
+- `groq_router.py` operativo — sin errores 401
+- Scheduler F12 arrancando correctamente
+- Warnings de `SyntaxWarning` y `PTBUserWarning` presentes pero no críticos (pendiente de limpiar)
+
+---
+
 ## [v0.16.3] — 29 abril 2026 (noche)
 
 ### 🧪 Tests + Documentación — Auditoría completa
@@ -240,4 +305,4 @@ hora_inicio = context.user_data.get("nueva_hora_temp") or _franja_inicio.get(fra
 
 ---
 
-_Última actualización: 29 abril 2026 — 21:50 CEST_
+_Última actualización: 14 junio 2026 — 23:32 CEST_
