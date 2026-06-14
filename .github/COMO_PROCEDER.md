@@ -1,77 +1,74 @@
 # 🧭 THDORA — CÓMO PROCEDER
 
 > Guía de trabajo para retomar el proyecto en cualquier momento sin perder contexto.
-> Última actualización: **31 mayo 2026 — 20:55 CEST**
+> Última actualización: **14 junio 2026 — 22:16 CEST**
 
 ---
 
-## Estado actual — v4.3 ⚠️ GROQ KEY CADUCADA
+## Estado actual — v0.16.3 ✅ ACTIVO EN MADRE
 
 ```
 ✅ Bot Telegram       → src/bot/main.py (polling, PTB v20+)
 ✅ FastAPI            → src/api/ (5 routers completos)
-✅ SQLite             → data/thdora.db
+✅ SQLite             → data/thdora.db (volumen Docker persistente)
 ✅ Groq client        → src/ai/groq_client.py
-✅ NLP modo Toki      → src/bot/groq_router.py (34KB)
+✅ NLP modo Toki      → src/bot/groq_router.py
 ✅ Scheduler F12      → APScheduler (resumen + evening + citas)
-✅ .venv instalado    → ~/projects/thdora/.venv
-⚠️ GROQ_API_KEY        → CADUCADA — renovar en console.groq.com
-```
-
-### ⭐ Arrancar el proyecto (orden correcto)
-
-```bash
-# 0. Ir al proyecto y activar entorno
-cd ~/projects/thdora
-source .venv/bin/activate
-
-# 1. Actualizar GROQ_API_KEY en .env
-nano .env
-# → GROQ_API_KEY=gsk_nueva_key_aqui
-
-# Terminal 1 — API
-make run-api
-
-# Terminal 2 — Bot
-make run-bot
-
-# Verificar que funciona
-# → Abrir Telegram → /start → debe responder
-# → Escribir texto libre → debe responder con NLP (Groq)
-
-# Dejar corriendo en segundo plano
-screen -S thdora-api
-make run-api
-# Ctrl+A D para salir sin matar
-
-screen -S thdora-bot
-make run-bot
-# Ctrl+A D para salir sin matar
+✅ GROQ_API_KEY       → Renovada 14 jun 2026
+✅ Docker             → docker compose en Madre (Omarchy)
 ```
 
 ---
 
-## 📋 Próximas tareas (en orden)
+## ⭐ Arrancar el proyecto (orden correcto)
 
-### PRIORIDAD 1 — Activación (mañana 1 junio)
-- [ ] Renovar GROQ_API_KEY en console.groq.com
-- [ ] `make run-api` + `make run-bot`
-- [ ] Probar /start y texto libre en Telegram
-- [ ] Dejar con `screen` en segundo plano
+```bash
+# Ir al proyecto
+cd ~/dev/thdora
 
-### PRIORIDAD 2 — Features nuevas
-- [ ] Handler `/desahogo` → rimas/letras con lo que sientes (Groq)
-- [ ] Soporte Ollama como alternativa local a Groq
-- [ ] Resolver BUG 1 y BUG 2 (borrar/editar citas)
+# Arrancar todos los servicios
+docker compose up -d
 
-### PRIORIDAD 3 — BD real
-- [ ] Migraciones en src/db/migrations/
-- [ ] PostgreSQL en producción (docker-compose ya configurado)
-- [ ] Tests de integración con BD real
+# Ver logs en tiempo real
+docker compose logs -f
 
-### PRIORIDAD 4 — Deploy
-- [ ] Railway.app (gratis, sube solo desde GitHub)
-- [ ] O mantener en servidor Acer con Docker
+# Verificar estado
+docker compose ps
+# → thdora-api y thdora-bot deben estar Running
+
+# Verificar en Telegram
+# → /start → debe responder
+# → Texto libre → NLP Toki debe responder (Groq)
+```
+
+---
+
+## 🔧 Gestión de servicios
+
+```bash
+# Parar todo
+docker compose down
+
+# Reiniciar solo el bot
+docker compose restart bot
+
+# Rebuild tras cambios de código
+docker compose build bot && docker compose up -d bot
+
+# Consola base de datos
+docker compose exec api sqlite3 /app/data/thdora.db
+
+# Ver logs de un servicio
+docker compose logs -f bot
+docker compose logs -f api
+```
+
+| Fichero modificado | Rebuild necesario |
+|--------------------|-------------------|
+| `src/bot/**` | Solo `bot` |
+| `src/api/**` | Solo `api` |
+| `src/core/**` o `src/db/**` | Ambos |
+| `requirements.txt` | Ambos (rebuild completo) |
 
 ---
 
@@ -95,17 +92,43 @@ git checkout main
 git merge dev
 git push origin main
 
-# 4. Rebuild SOLO el servicio afectado
+# 4. Rebuild solo el servicio afectado
 docker compose build bot
 docker compose up -d bot
 ```
 
-| Fichero modificado | Rebuild necesario |
-|--------------------|-------------------|
-| `src/bot/**` | Solo `bot` |
-| `src/api/**` | Solo `api` |
-| `src/core/**` o `src/db/**` | Ambos |
-| `requirements.txt` | Ambos (rebuild completo) |
+---
+
+## 📋 Próximas tareas (en orden)
+
+### PRIORIDAD 1 — Verificación post-deploy ← AHORA
+- [x] ~~Renovar GROQ_API_KEY~~ ✅ 14 jun 2026
+- [x] ~~Migrar de Acer a Madre~~ ✅ 14 jun 2026
+- [ ] Ejecutar checklist de pruebas en producción (Telegram real)
+- [ ] Probar /start y texto libre con NLP Toki
+- [ ] Verificar Scheduler F12 activo
+
+### PRIORIDAD 2 — Citas
+- [ ] Bloque 1.2 — mostrar horario disponible antes de mover una cita
+- [ ] BUG 1 — borrar cita por fecha futura
+- [ ] BUG 2 — editar cita con intent genérico
+
+### PRIORIDAD 3 — Reestructuración repo
+- [ ] Mover `docs/diarios/` → `.github/diarios/`
+- [ ] Mover `docs/sessions/` → `.github/sessions/`
+- [ ] Mover `docs/auditoria/` → `.github/auditoria/`
+- [ ] Mover `CLASES_BEGO.md` + `GUIA_BEGO.md` → `.github/archive/`
+- [ ] Borrar `docs/ROADMAP.md` (duplicado de raíz)
+
+### PRIORIDAD 4 — BD real
+- [ ] Alembic — migraciones en `src/db/migrations/`
+- [ ] PostgreSQL en producción
+- [ ] Tests de integración con BD real
+
+### PRIORIDAD 5 — Features
+- [ ] Handler `/desahogo` → rimas/letras (Groq)
+- [ ] Soporte Ollama como alternativa local
+- [ ] Multiusuario — API con `user_id` de Telegram
 
 ---
 
@@ -143,7 +166,7 @@ groq_router.route(text, user_data, api_context)
     ├── borrar_cita   → [BUG 1]
     ├── editar_cita   → [BUG 2]
     ├── consulta/chat → chat_response(contexto real)
-    └── desahogo      → [PENDIENTE — rimas/letras]
+    └── desahogo      → [PENDIENTE]
     └── desconocido   → mostrar menú del bot
 ```
 
@@ -154,13 +177,12 @@ groq_router.route(text, user_data, api_context)
 
 ---
 
-## Variables de entorno
+## Variables de entorno (`.env`)
 
 ```bash
 TELEGRAM_BOT_TOKEN=xxx
-GROQ_API_KEY=gsk_xxx       # ⚠️ CADUCADA — renovar en console.groq.com
-THDORA_API_URL=http://localhost:8000
-THDORA_DB_PATH=data/thdora.db
+GROQ_API_KEY=gsk_xxx       # renovar en console.groq.com cuando caduque
+# THDORA_API_URL no va aquí — definida en docker-compose.yml como http://api:8000
 ```
 
 ---
@@ -168,11 +190,11 @@ THDORA_DB_PATH=data/thdora.db
 ## 📌 Contexto del proyecto
 
 - **Stack:** Python 3.11 | python-telegram-bot v20 | FastAPI | SQLAlchemy | SQLite→PostgreSQL | Groq
-- **Ruta local:** `~/projects/thdora`
+- **Servidor:** Madre — Omarchy (Arch + Hyprland), i5-8400, 16GB, GTX 1060 · IP Tailscale `100.91.112.32`
+- **Ruta local:** `~/dev/thdora`
 - **Repo:** [github.com/alvarofernandezmota-tech/thdora](https://github.com/alvarofernandezmota-tech/thdora)
-- **Diario:** repo `personal` → `01_traking_diario/01_diarios/`
 - **Visión:** Asistente personal IA multi-plataforma. Base privada que alimenta expresión pública.
 
 ---
 
-_Actualizado: 31 mayo 2026 — 20:55 CEST_
+_Actualizado: 14 junio 2026 — 22:16 CEST_
