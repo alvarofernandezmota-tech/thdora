@@ -1,94 +1,119 @@
-from fastapi import APIRouter, Depends, HTTPException
+import uuid
+from typing import Annotated
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from uuid import UUID
+from pydantic import BaseModel
 
 from core.database import get_db
-from agents.schemas import AgentCreate, AgentUpdate, AgentOut, ChatRequest, ChatResponse, ToolCreate, ToolOut
-from agents.crud import create_agent, get_agent, list_agents, update_agent, attach_tool_to_agent, register_tool, list_tools
-from agents.orchestrator import get_orchestrator
+from core.auth import require_api_key
+from agents import crud
+from agents.orchestrator import get_orchestrator, invalidate_orchestrator_cache
 
-router = APIRouter(prefix="/api", tags=["agents"])
+router = APIRouter(prefix="/agents", tags=["agents"])
 
-# TODO: reemplazar por JWT real
-DEFAULT_TENANT_ID = UUID("00000000-0000-0000-0000-000000000001")
-
-
-# ── Agents CRUD ──────────────────────────────────────────────
-@router.post("/agents/", response_model=AgentOut, status_code=201)
-async def create_new_agent(data: AgentCreate, db: AsyncSession = Depends(get_db)):
-    return await create_agent(db, DEFAULT_TENANT_ID, data)
+Auth = Annotated[str, Depends(require_api_key)]
+DB = Annotated[AsyncSession, Depends(get_db)]
 
 
-@router.get("/agents/", response_model=list[AgentOut])
-async def get_my_agents(db: AsyncSession = Depends(get_db)):
-    return await list_agents(db, DEFAULT_TENANT_ID)
+class AgentCreate(BaseModel):
+    tenant_id: uuid.UUID
+    name: str
+    description: str | None = None
+    system_prompt: str
+    model: str = "llama-3.3-70b-versatile"
+    temperature: float = 0.7
+    max_tokens: int = 4096
+    active_tools: list[str] = []
 
 
-@router.get("/agents/{agent_id}", response_model=AgentOut)
-async def get_agent_by_id(agent_id: UUID, db: AsyncSession = Depends(get_db)):
-    agent = await get_agent(db, agent_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agente no encontrado")
-    return agent
+class ChatRequest(BaseModel):
+    message: str
+    chat_id: str = "default"
 
 
-@router.patch("/agents/{agent_id}", response_model=AgentOut)
-async def update_agent_config(
-    agent_id: UUID, data: AgentUpdate, db: AsyncSession = Depends(get_db)
+class ChatResponse(BaseModel):
+    reply: str
+    agent_id: str
+    chat_id: str
+
+
+@router.get("/")
+async def list_agents(
+    _: Auth,
+    db: DB,
+    tenant_id: uuid.UUID | None = None,
 ):
-    agent = await update_agent(db, agent_id, data)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agente no encontrado")
-    return agent
+    agents = await crud.list_agents(db, tenant_id=tenant_id)
+    return [
+        {
+            "id": str(a.id),
+            "name": a.name,
+            "model": a.model,
+            "is_active": a.is_active,
+        }
+        for a in agents
+    ]
 
 
-@router.post("/agents/{agent_id}/tools/attach")
-async def attach_tool(
-    agent_id: UUID, tool_id: UUID, db: AsyncSession = Depends(get_db)
+@router.post("/", status_code=status.HTTP_201_CREATED)
+async def create_agent(
+    _: Auth,
+    payload: AgentCreate,
+    db: DB,
 ):
-    agent = await attach_tool_to_agent(db, agent_id, tool_id)
-    if not agent:
-        raise HTTPException(status_code=404, detail="Agente o tool no encontrado")
-    return {"status": "ok", "active_tools": agent.active_tools}
+    agent = await crud.create_agent(db, **payload.model_dump())
+    return {"id": str(agent.id), "name": agent.name}
 
 
-# ── Chat endpoint ────────────────────────────────────────────
-@router.post("/chat/{agent_id}", response_model=ChatResponse)
+@router.get("/{agent_id}")
+async def get_agent(
+    _: Auth,
+    agent_id: uuid.UUID,
+    db: DB,
+):
+    agent = await crud.get_agent(db, agent_id)
+    if agent is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    return {
+        "id": str(agent.id),
+        "name": agent.name,
+        "description": agent.description,
+        "system_prompt": agent.system_prompt,
+        "model": agent.model,
+        "temperature": agent.temperature,
+        "max_tokens": agent.max_tokens,
+        "active_tools": agent.active_tools,
+        "is_active": agent.is_active,
+    }
+
+
+@router.delete("/{agent_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_agent(
+    _: Auth,
+    agent_id: uuid.UUID,
+    db: DB,
+):
+    deleted = await crud.delete_agent(db, agent_id)
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Agent not found")
+    invalidate_orchestrator_cache(agent_id)
+
+
+@router.post("/{agent_id}/chat", response_model=ChatResponse)
 async def chat_with_agent(
-    agent_id: UUID,
-    request: ChatRequest,
-    db: AsyncSession = Depends(get_db),
+    _: Auth,
+    agent_id: uuid.UUID,
+    payload: ChatRequest,
+    db: DB,
 ):
-    agent = await get_agent(db, agent_id)
-    if not agent or not agent.is_active:
-        raise HTTPException(status_code=404, detail="Agente no encontrado o inactivo")
+    orchestrator = await get_orchestrator(agent_id, db)
+    if orchestrator is None:
+        raise HTTPException(status_code=404, detail="Agent not found")
 
-    orchestrator = await get_orchestrator(str(agent_id), db)
-    result = await orchestrator.chat(
-        message=request.message,
-        chat_id=request.chat_id,
+    reply = await orchestrator.chat(
+        user_message=payload.message,
+        chat_id=payload.chat_id,
+        db=db,
     )
-
-    # Guardar historial (simplificado)
-    from agents.models import AgentMessage  # noqa — se añade en siguiente fase
-
-    return ChatResponse(
-        agent_id=agent_id,
-        chat_id=request.chat_id,
-        reply=result["reply"],
-        tool_calls_made=result["tool_calls_made"],
-    )
-
-
-# ── Tool Registry ────────────────────────────────────────────
-@router.post("/tools/", response_model=ToolOut, status_code=201)
-async def register_new_tool(data: ToolCreate, db: AsyncSession = Depends(get_db)):
-    return await register_tool(db, data)
-
-
-@router.get("/tools/", response_model=list[ToolOut])
-async def list_available_tools(
-    category: str | None = None,
-    db: AsyncSession = Depends(get_db)
-):
-    return await list_tools(db, category=category)
+    return ChatResponse(reply=reply, agent_id=str(agent_id), chat_id=payload.chat_id)
