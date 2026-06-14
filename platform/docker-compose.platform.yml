@@ -1,0 +1,66 @@
+# THDORA Agent Platform v2 — Docker Compose
+# NO interfiere con el docker-compose.yml del bot actual
+
+version: '3.9'
+
+services:
+  platform-db:
+    image: pgvector/pgvector:pg16
+    container_name: thdora_platform_db
+    environment:
+      POSTGRES_USER: thdora
+      POSTGRES_PASSWORD: thdora
+      POSTGRES_DB: thdora_platform
+    ports:
+      - "5433:5432"  # Puerto diferente para no colisionar con BD existente
+    volumes:
+      - platform_pgdata:/var/lib/postgresql/data
+      - ./migrations/001_initial_schema.sql:/docker-entrypoint-initdb.d/001_initial.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U thdora -d thdora_platform"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - thdora_platform_net
+
+  platform-redis:
+    image: redis:7-alpine
+    container_name: thdora_platform_redis
+    ports:
+      - "6380:6379"  # Puerto diferente para no colisionar con Redis existente
+    volumes:
+      - platform_redisdata:/data
+    networks:
+      - thdora_platform_net
+
+  platform-api:
+    build:
+      context: .
+      dockerfile: Dockerfile.platform
+    container_name: thdora_platform_api
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://thdora:thdora@platform-db:5432/thdora_platform
+      REDIS_URL: redis://platform-redis:6379/0
+    ports:
+      - "8001:8000"  # Puerto diferente al bot actual (8000)
+    depends_on:
+      platform-db:
+        condition: service_healthy
+      platform-redis:
+        condition: service_started
+    volumes:
+      - .:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+    networks:
+      - thdora_platform_net
+
+volumes:
+  platform_pgdata:
+  platform_redisdata:
+
+networks:
+  thdora_platform_net:
+    driver: bridge
