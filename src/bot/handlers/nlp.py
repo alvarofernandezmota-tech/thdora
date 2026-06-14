@@ -2,20 +2,17 @@
 Handler de texto libre — modo Toki.
 
 Flujo completo:
-    1. Envía ⏳ Procesando... (feedback inmediato)
-    2. Consulta contexto real de la API con CACHE TTL de 2 minutos:
-       — citas de hoy y mañana
-       — citas de la semana completa (semana_raw incluido para desambiguación)
-       — hábitos de hoy
-    3. Llama a groq_router.route() con texto + contexto + username
-    4. Si hay candidatas (ambigüedad) → muestra botones inline para elegir
-    5. Según el intent ejecuta la acción y responde.
+    1. Envía acción "typing" (indicador visual mientras Groq responde)
+    2. Envía ⏳ Procesando... (feedback inmediato)
+    3. Consulta contexto real de la API con CACHE TTL de 2 minutos
+    4. Llama a groq_router.route() con texto + contexto + username
+    5. Si hay candidatas (ambigüedad) → muestra botones inline para elegir
+    6. Según el intent ejecuta la acción y responde.
 
 Cache TTL:
     El contexto de la API se guarda en context.user_data["api_context_cache"]
     con timestamp. Si tiene menos de CACHE_TTL_SEC segundos se reutiliza.
-    Se invalida forzosamente si el intent modifica datos (nueva/borrar/editar cita
-    o log/borrar hábito) para que la siguiente consulta vea datos frescos.
+    Se invalida forzosamente si el intent modifica datos.
 
 Horario visual:
     _build_day_schedule() genera franjas de 30min entre 08:00 y 22:00.
@@ -44,7 +41,6 @@ _SCHEDULE_START_H     = 8
 _SCHEDULE_END_H       = 22
 _SLOT_MIN             = 30
 
-# Cache TTL: 2 minutos. Intents que modifican datos invalidan el cache.
 CACHE_TTL_SEC        = 120
 _MUTATING_INTENTS    = {"nueva_cita", "borrar_cita", "editar_cita", "log_habito", "borrar_habito"}
 
@@ -61,10 +57,6 @@ _MSG_MENU = (
 # ── Cache TTL ──────────────────────────────────────────────────────────
 
 async def _get_api_context_cached(today: str, tomorrow: str, user_data: dict) -> dict:
-    """
-    Devuelve el api_context desde caché si tiene < CACHE_TTL_SEC segundos.
-    Si no, llama a la API y actualiza el caché.
-    """
     cache     = user_data.get("api_context_cache", {})
     cached_at = cache.get("_ts", 0)
 
@@ -80,7 +72,6 @@ async def _get_api_context_cached(today: str, tomorrow: str, user_data: dict) ->
 
 
 def _invalidate_cache(user_data: dict) -> None:
-    """Fuerza refresco en la siguiente petición."""
     if "api_context_cache" in user_data:
         user_data["api_context_cache"]["_ts"] = 0
 
@@ -106,10 +97,6 @@ async def _fetch_api_context(today: str, tomorrow: str) -> dict:
     habitos    = habitos    or {}
     semana_raw = semana_raw or {}
 
-    # FIX Bug1: inyectar campo date en cada cita de semana_raw
-    # La API no devuelve date dentro de cada cita, solo como clave del dict.
-    # Sin este fix, build_todas_citas y _build_borrar_cita_system usaban
-    # today como fallback para todas las citas futuras, impidiendo borrarlas.
     for day_str, day_citas in semana_raw.items():
         for c in day_citas:
             c.setdefault("date", day_str)
@@ -132,7 +119,7 @@ async def _fetch_api_context(today: str, tomorrow: str) -> dict:
         "citas_manana": citas_man,
         "habitos":      habitos,
         "citas_semana": citas_semana,
-        "semana_raw":   semana_raw,   # ← para desambiguación en groq_router
+        "semana_raw":   semana_raw,
     }
 
 
@@ -206,10 +193,6 @@ def _end_time(start: str, duration: int = _DEFAULT_DURATION_MIN) -> str:
 # ── Desambiguación: botones inline ────────────────────────────────────
 
 def _build_disambig_keyboard(candidates: list, action: str) -> InlineKeyboardMarkup:
-    """
-    Genera botones inline con cada candidata.
-    callback_data: 'nlp_disambig|<action>|<id>|<date>|<index>'
-    """
     buttons = []
     for c in candidates:
         label = f"{c.get('date','?')} {c.get('time','?')} — {c.get('name','?')}"
@@ -232,8 +215,11 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     username = (
         update.effective_user.first_name
         or update.effective_user.username
-        or "Álvaro"
+        or "Usuario"
     )
+
+    # ← NUEVO: indicador de escritura mientras Groq procesa
+    await update.message.chat.send_action("typing")
 
     processing_msg = await update.message.reply_text("⏳ Procesando...")
 
@@ -260,7 +246,6 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     pending_action  = result.get("pending_action")
     pending_changes = result.get("pending_changes")
 
-    # ── Invalidar caché si la acción modifica datos ────────────────────
     if intent in _MUTATING_INTENTS and data:
         _invalidate_cache(context.user_data)
 
@@ -270,10 +255,8 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
         return
 
-    # ── Desambiguación: múltiples candidatas ──────────────────────────
     if candidates and pending_action:
         action_label = "borrar" if pending_action == "borrar_cita" else "editar"
-        # Guardar cambios pendientes para aplicarlos tras la elección
         if pending_changes:
             context.user_data["nlp_pending_changes"] = pending_changes
         await update.message.reply_text(
@@ -352,7 +335,6 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         borrar_index = data.get("index", -1)
         borrar_name  = data.get("name", "")
 
-        # Resolver index si no viene del extractor
         if borrar_index == -1:
             try:
                 citas_actuales = await api.get_appointments(borrar_date)
