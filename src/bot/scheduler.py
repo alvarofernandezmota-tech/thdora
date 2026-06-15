@@ -1,36 +1,32 @@
 """
-Scheduler de notificaciones proactivas — F12.
+Scheduler de notificaciones proactivas — F12 adaptado a multi-usuario.
 
 Jobs:
-    daily_summary_{user_id}     → resumen de citas del día (hora configurable, default 08:00)
-    evening_log_{user_id}       → recordatorio de hábitos del día (hora configurable, default 22:00)
+    daily_summary_{user_id}                       → resumen de citas del día (default 08:00)
+    evening_log_{user_id}                         → recordatorio hábitos (default 22:00)
     apt_reminder_{user_id}_{apt_id}_{offset_min}  → aviso X min antes de cita (one-shot)
 
-Arquitectura:
-    - Un único AsyncIOScheduler compartido (singleton)
-    - Se arranca desde main.py via post_init (dentro del event loop de PTB)
-    - Los jobs diarios se programan en cmd_start si el usuario tiene config
-    - Los jobs one-shot de cita se programan al crear y cancelan al borrar
-    - Los jobs se reprograman al editar hora de cita o cambiar config
-
-Nota sobre apt dict:
-    La API puede devolver el campo fecha como 'date' o 'date_str'.
-    schedule_apt_reminders normaliza ambos con: apt.get('date') or apt.get('date_str', '')
+Arquitectura multi-usuario:
+    - _subscribed_users: Set[int] con user_ids suscritos
+    - subscribe_user / unsubscribe_user gestionan la lista
+    - Cada job itera _subscribed_users y envía a cada uno
+    - user_id siempre dinámico, nunca hardcoded del .env
 
 Uso desde handlers::
 
-    from src.bot.scheduler import get_scheduler, schedule_apt_reminders, cancel_apt_reminders
+    from src.bot.scheduler import subscribe_user, schedule_apt_reminders, cancel_apt_reminders
+    subscribe_user(update.effective_user.id)
     schedule_apt_reminders(bot, user_id, apt_dict, cfg_dict)
-    cancel_apt_reminders(user_id, apt_id)
 
 Uso desde main.py::
 
-    scheduler = get_scheduler()
-    scheduler.start()  # llamar dentro de post_init (event loop activo)
+    from src.bot.scheduler import setup_scheduler
+    setup_scheduler(application)  # dentro de post_init
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
+from typing import Set
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -42,9 +38,13 @@ from src.bot.api_client import ThdoraApiClient
 logger = logging.getLogger(__name__)
 
 _scheduler: AsyncIOScheduler | None = None
+_subscribed_users: Set[int] = set()
 api = ThdoraApiClient()
 
 _DEFAULT_TZ = "Europe/Madrid"
+_DEFAULT_SUMMARY_TIME = "08:00"
+_DEFAULT_EVENING_TIME = "22:00"
+_DEFAULT_OFFSETS = [60, 30, 15]
 
 
 # ── Singleton ────────────────────────────────────────────────
@@ -56,36 +56,59 @@ def get_scheduler() -> AsyncIOScheduler:
     return _scheduler
 
 
-# ── Arranque ───────────────────────────────────────────────
+# ── Gestión de usuarios suscritos ────────────────────────────────
 
-async def start_scheduler(app, bot_app) -> None:
+def _validate_user_id(user_id: int) -> None:
+    if not user_id or user_id <= 0:
+        raise ValueError("user_id es obligatorio y debe ser > 0")
+
+
+def subscribe_user(user_id: int) -> None:
+    """Suscribir usuario al scheduler (llamar en cmd_start)."""
+    _validate_user_id(user_id)
+    _subscribed_users.add(user_id)
+    logger.info("✅ Usuario %d suscrito al scheduler", user_id)
+
+
+def unsubscribe_user(user_id: int) -> None:
+    """Desuscribir usuario del scheduler."""
+    _subscribed_users.discard(user_id)
+    logger.info("❌ Usuario %d desuscrito del scheduler", user_id)
+
+
+def get_subscribed_users() -> Set[int]:
+    """Retorna copia del set de usuarios suscritos."""
+    return set(_subscribed_users)
+
+
+# ── Setup desde main.py ────────────────────────────────────────
+
+async def setup_scheduler(app) -> None:
     """
     Arrancar el scheduler desde post_init de PTB.
-    app / bot_app → objeto Application de python-telegram-bot.
+    app → objeto Application de python-telegram-bot.
     """
     scheduler = get_scheduler()
     if scheduler.running:
         return
     scheduler.start()
-    logger.info("⏰ Scheduler iniciado")
+    logger.info("⏰ Scheduler F12 iniciado (multi-usuario)")
 
 
-# ── Programar jobs de un usuario ─────────────────────────────────
+# ── Programar jobs de un usuario ────────────────────────────────
 
-def schedule_user_jobs(bot, user_id: str, cfg: dict) -> None:
+def schedule_user_jobs(bot, user_id: int, cfg: dict) -> None:
     """
-    Programa (o reprograma) los dos jobs diarios del usuario:
-        - daily_summary_{user_id}
-        - evening_log_{user_id}
-    Si el job ya existe lo reemplaza con la nueva hora.
-    Se llama desde cmd_start y desde config cuando el usuario cambia horarios.
+    Programa (o reprograma) los dos jobs diarios del usuario.
+    Se llama desde cmd_start y cuando el usuario cambia horarios en config.
     """
+    _validate_user_id(user_id)
+    subscribe_user(user_id)
     scheduler = get_scheduler()
     tz = cfg.get("timezone", _DEFAULT_TZ)
 
-    # ─ Resumen diario ────────────────────────────────────────
     if cfg.get("daily_summary_enabled", True):
-        summary_time = cfg.get("daily_summary_time", "08:00")
+        summary_time = cfg.get("daily_summary_time", _DEFAULT_SUMMARY_TIME)
         h, m = map(int, summary_time.split(":"))
         job_id = f"daily_summary_{user_id}"
         if scheduler.get_job(job_id):
@@ -97,11 +120,10 @@ def schedule_user_jobs(bot, user_id: str, cfg: dict) -> None:
             kwargs={"bot": bot, "user_id": user_id},
             misfire_grace_time=300,
         )
-        logger.info("⏰ daily_summary_%s programado a las %s", user_id, summary_time)
+        logger.info("⏰ daily_summary_%d programado a las %s", user_id, summary_time)
 
-    # ─ Evening log ──────────────────────────────────────────
     if cfg.get("evening_log_enabled", True):
-        evening_time = cfg.get("evening_log_time", "22:00")
+        evening_time = cfg.get("evening_log_time", _DEFAULT_EVENING_TIME)
         h, m = map(int, evening_time.split(":"))
         job_id = f"evening_log_{user_id}"
         if scheduler.get_job(job_id):
@@ -113,31 +135,26 @@ def schedule_user_jobs(bot, user_id: str, cfg: dict) -> None:
             kwargs={"bot": bot, "user_id": user_id},
             misfire_grace_time=300,
         )
-        logger.info("⏰ evening_log_%s programado a las %s", user_id, evening_time)
+        logger.info("⏰ evening_log_%d programado a las %s", user_id, evening_time)
 
 
 # ── Jobs de cita (one-shot) ───────────────────────────────────────
 
-def schedule_apt_reminders(bot, user_id: str, apt: dict, cfg: dict) -> None:
+def schedule_apt_reminders(bot, user_id: int, apt: dict, cfg: dict) -> None:
     """
     Programa avisos one-shot para una cita según notif_offsets del usuario.
-
-    apt puede tener la fecha como 'date' o 'date_str' (según endpoint de API).
-    Se normaliza con: apt.get('date') or apt.get('date_str', '')
-
-    Si la hora de aviso ya pasó, no programa nada.
+    apt puede tener la fecha como 'date' o 'date_str'.
     """
+    _validate_user_id(user_id)
     if not cfg.get("notif_enabled", True):
         return
 
     scheduler = get_scheduler()
-    tz        = ZoneInfo(cfg.get("timezone", _DEFAULT_TZ))
-
-    # Normalizar campo fecha (la API puede devolver 'date' o 'date_str')
-    date_str  = apt.get("date") or apt.get("date_str", "")
-    time_str  = apt.get("time", "")
-    apt_id    = apt.get("id", apt.get("index", 0))
-    offsets   = cfg.get("notif_offsets", ["60", "30", "15"])
+    tz = ZoneInfo(cfg.get("timezone", _DEFAULT_TZ))
+    date_str = apt.get("date") or apt.get("date_str", "")
+    time_str = apt.get("time", "")
+    apt_id = apt.get("id", apt.get("index", 0))
+    offsets = cfg.get("notif_offsets", _DEFAULT_OFFSETS)
 
     if not date_str or not time_str:
         logger.warning("schedule_apt_reminders: apt sin date o time: %s", apt)
@@ -145,10 +162,10 @@ def schedule_apt_reminders(bot, user_id: str, apt: dict, cfg: dict) -> None:
 
     apt_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M").replace(tzinfo=tz)
 
-    for offset_str in offsets:
+    for offset in offsets:
         try:
-            offset_min = int(offset_str)
-        except ValueError:
+            offset_min = int(offset)
+        except (ValueError, TypeError):
             continue
         fire_at = apt_dt - timedelta(minutes=offset_min)
         if fire_at <= datetime.now(tz=tz):
@@ -160,18 +177,14 @@ def schedule_apt_reminders(bot, user_id: str, apt: dict, cfg: dict) -> None:
             _send_apt_reminder,
             DateTrigger(run_date=fire_at),
             id=job_id,
-            kwargs={
-                "bot":     bot,
-                "user_id": user_id,
-                "apt":     apt,
-                "minutes": offset_min,
-            },
+            kwargs={"bot": bot, "user_id": user_id, "apt": apt, "minutes": offset_min},
         )
         logger.info("⏰ apt_reminder %s → %s (-%dmin)", job_id, fire_at, offset_min)
 
 
-def cancel_apt_reminders(user_id: str, apt_id: int) -> None:
+def cancel_apt_reminders(user_id: int, apt_id: int) -> None:
     """Cancela todos los avisos pendientes de una cita."""
+    _validate_user_id(user_id)
     scheduler = get_scheduler()
     for job in scheduler.get_jobs():
         if job.id.startswith(f"apt_reminder_{user_id}_{apt_id}_"):
@@ -179,75 +192,63 @@ def cancel_apt_reminders(user_id: str, apt_id: int) -> None:
             logger.info("❌ apt_reminder cancelado: %s", job.id)
 
 
-# ── Funciones de envío ────────────────────────────────────────────
+# ── Funciones de envío ───────────────────────────────────────────
 
-async def _send_daily_summary(bot, user_id: str) -> None:
+async def _send_daily_summary(bot, user_id: int) -> None:
     """Envía el resumen de citas del día al usuario."""
     try:
-        cfg = await api.get_user_config(user_id)
-        if not cfg.get("daily_summary_enabled", True):
-            return
-        from datetime import date
         today = str(date.today())
-        data  = await api.get_summary(today)
-        apts  = data.get("appointments", [])
+        data = await api.get_summary(today, user_id=user_id)
+        apts = data.get("appointments", [])
         if not apts:
-            text = f"🌅 *Buenos días\!*\n\nHoy no tienes citas programadas\. Que sea un día tranquilo 🏡"
+            text = "🌅 *Buenos días\!*\n\nHoy no tienes citas programadas\. Que sea un día tranquilo 🏡"
         else:
             lines = [f"🌅 *Buenos días\! Tus citas de hoy \({today}\):*\n"]
             for apt in apts:
                 nombre = apt.get("name") or apt.get("type", "cita")
                 lines.append(f"  ⏰ *{apt['time']}* \u2014 {nombre}")
             text = "\n".join(lines)
-        await bot.send_message(chat_id=int(user_id), text=text, parse_mode="MarkdownV2")
-        logger.info("✅ daily_summary enviado a %s", user_id)
+        await bot.send_message(chat_id=user_id, text=text, parse_mode="MarkdownV2")
+        logger.info("✅ daily_summary enviado a %d", user_id)
     except Exception as e:
-        logger.error("Error en daily_summary para %s: %s", user_id, e)
+        logger.error("Error en daily_summary para %d: %s", user_id, e)
 
 
-async def _send_evening_log(bot, user_id: str) -> None:
+async def _send_evening_log(bot, user_id: int) -> None:
     """Recuerda al usuario que registre sus hábitos del día."""
     try:
-        cfg = await api.get_user_config(user_id)
-        if not cfg.get("evening_log_enabled", True):
-            return
-        from datetime import date
-        today  = str(date.today())
-        habits = await api.get_habits(today)
-        # FIX: usar `if not habits` en vez de `if n == 0` para consistencia con _send_daily_summary
+        today = str(date.today())
+        habits = await api.get_habits(today, user_id=user_id)
         if not habits:
             text = (
-                f"🌙 *Última llamada del día\!*\n\n"
-                f"Todavía no has registrado ningún hábito hoy\."
-                f" ¿Apuntamos algo antes de dormir? Usa /habito"
+                "🌙 *Última llamada del día\!*\n\n"
+                "Todavía no has registrado ningún hábito hoy\. "
+                "¿Apuntamos algo antes de dormir? Usa /habito"
             )
         else:
-            hab_list = "\n".join(f"  • *{k}*: {v}" for k, v in habits.items())
+            hab_list = "\n".join(f"  \u2022 *{k}*: {v}" for k, v in habits.items())
             text = (
                 f"🌙 *Resumen de hábitos \u2014 {today}*\n\n"
                 f"{hab_list}\n\n"
                 f"¿Falta algo por apuntar? Usa /habito"
             )
-        await bot.send_message(chat_id=int(user_id), text=text, parse_mode="MarkdownV2")
-        logger.info("✅ evening_log enviado a %s", user_id)
+        await bot.send_message(chat_id=user_id, text=text, parse_mode="MarkdownV2")
+        logger.info("✅ evening_log enviado a %d", user_id)
     except Exception as e:
-        logger.error("Error en evening_log para %s: %s", user_id, e)
+        logger.error("Error en evening_log para %d: %s", user_id, e)
 
 
-async def _send_apt_reminder(bot, user_id: str, apt: dict, minutes: int) -> None:
+async def _send_apt_reminder(bot, user_id: int, apt: dict, minutes: int) -> None:
     """Avisa al usuario X minutos antes de una cita."""
     try:
         nombre = apt.get("name") or apt.get("type", "cita")
-        if minutes >= 60:
-            tiempo = f"{minutes // 60}h"
-        else:
-            tiempo = f"{minutes} min"
+        tiempo = f"{minutes // 60}h" if minutes >= 60 else f"{minutes} min"
         text = (
             f"🔔 *Recordatorio*\n\n"
             f"En *{tiempo}* tienes:\n"
             f"  ⏰ *{apt['time']}* \u2014 {nombre}"
         )
-        await bot.send_message(chat_id=int(user_id), text=text, parse_mode="MarkdownV2")
-        logger.info("✅ apt_reminder enviado a %s (-%dmin cita %s)", user_id, minutes, apt.get('id'))
+        await bot.send_message(chat_id=user_id, text=text, parse_mode="MarkdownV2")
+        logger.info("✅ apt_reminder enviado a %d (-%dmin cita %s)", user_id, minutes, apt.get('id'))
     except Exception as e:
-        logger.error("Error en apt_reminder para %s: %s", user_id, e)
+        logger.error("Error en apt_reminder para %d: %s", user_id, e)

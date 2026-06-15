@@ -1,86 +1,109 @@
 """
-Schemas de function calling para Groq — THDORA NLP.
+Groq tool calling functions for THDORA.
 
-Uso:
-    from src.ai.functions import GROQ_FUNCTIONS
-    # Pasar a la llamada de Groq:
-    # client.chat.completions.create(..., tools=GROQ_FUNCTIONS, tool_choice="auto")
+Defines GROQ_FUNCTIONS schema used by GroqClient for tool calling.
+Tools allow the LLM to query and modify appointments and habits.
 """
 
-GROQ_FUNCTIONS = [
+from typing import Any, Dict, List
+
+GROQ_FUNCTIONS: List[Dict[str, Any]] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_appointments",
+            "description": "Obtener las citas de un día específico del usuario.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {
+                        "type": "string",
+                        "description": "Fecha en formato YYYY-MM-DD. Usa 'hoy' para la fecha actual."
+                    }
+                },
+                "required": ["date"]
+            }
+        }
+    },
     {
         "type": "function",
         "function": {
             "name": "create_appointment",
-            "description": (
-                "Crea una nueva cita en la agenda del usuario. "
-                "Úsala cuando el usuario quiera añadir un evento, consulta, "
-                "reunión o cualquier actividad con fecha y hora concretas."
-            ),
+            "description": "Crear una nueva cita para el usuario.",
             "parameters": {
                 "type": "object",
-                "required": ["title", "date", "time"],
                 "properties": {
-                    "title": {
+                    "date": {"type": "string", "description": "Fecha YYYY-MM-DD"},
+                    "time": {"type": "string", "description": "Hora HH:MM"},
+                    "name": {"type": "string", "description": "Nombre o descripción de la cita"},
+                    "type": {
                         "type": "string",
-                        "description": "Nombre o descripción de la cita. Ej: 'Dentista', 'Reunión con Ana'.",
+                        "enum": ["médica", "personal", "trabajo", "otra"],
+                        "description": "Tipo de cita"
                     },
-                    "date": {
-                        "type": "string",
-                        "description": "Fecha de la cita en formato YYYY-MM-DD. Ej: '2026-06-16'.",
-                    },
-                    "time": {
-                        "type": "string",
-                        "description": "Hora de inicio en formato HH:MM (24h). Ej: '17:00'.",
-                    },
-                    "duration_minutes": {
-                        "type": "integer",
-                        "description": "Duración en minutos. Por defecto 60 si no se especifica.",
-                        "default": 60,
-                    },
-                    "notes": {
-                        "type": "string",
-                        "description": "Notas adicionales opcionales sobre la cita.",
-                    },
+                    "notes": {"type": "string", "description": "Notas adicionales (opcional)"}
                 },
-                "additionalProperties": False,
-            },
-        },
+                "required": ["date", "time", "name"]
+            }
+        }
     },
     {
         "type": "function",
         "function": {
-            "name": "mark_habit_done",
-            "description": (
-                "Registra un hábito completado por el usuario. "
-                "Úsala cuando el usuario indique que ha realizado una actividad "
-                "habitual: dormir, beber agua, hacer ejercicio, tomar medicación, etc."
-            ),
+            "name": "delete_appointment",
+            "description": "Eliminar una cita por fecha e índice.",
             "parameters": {
                 "type": "object",
-                "required": ["habit_name", "value", "date"],
                 "properties": {
-                    "habit_name": {
-                        "type": "string",
-                        "description": (
-                            "Nombre del hábito tal como lo conoce el sistema. "
-                            "Ej: 'sueño', 'agua', 'ejercicio', 'peso'."
-                        ),
-                    },
-                    "value": {
-                        "type": "string",
-                        "description": (
-                            "Valor registrado para el hábito. "
-                            "Ej: '7 horas', '2L', '45 minutos', '75 kg'."
-                        ),
-                    },
-                    "date": {
-                        "type": "string",
-                        "description": "Fecha del registro en formato YYYY-MM-DD. Ej: '2026-06-15'.",
-                    },
+                    "date": {"type": "string", "description": "Fecha YYYY-MM-DD"},
+                    "index": {"type": "integer", "description": "Índice de la cita (0-based)"}
                 },
-                "additionalProperties": False,
-            },
-        },
+                "required": ["date", "index"]
+            }
+        }
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_habits",
+            "description": "Obtener los hábitos registrados de un día.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string", "description": "Fecha YYYY-MM-DD"}
+                },
+                "required": ["date"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "log_habit",
+            "description": "Registrar un hábito del usuario.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string", "description": "Fecha YYYY-MM-DD"},
+                    "habit": {"type": "string", "description": "Nombre del hábito (ej: sueño, agua, ejercicio)"},
+                    "value": {"type": "string", "description": "Valor registrado (ej: 8h, 2L, 30min)"}
+                },
+                "required": ["date", "habit", "value"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_summary",
+            "description": "Obtener el resumen completo del día: citas y hábitos.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "date": {"type": "string", "description": "Fecha YYYY-MM-DD"}
+                },
+                "required": ["date"]
+            }
+        }
+    }
 ]
