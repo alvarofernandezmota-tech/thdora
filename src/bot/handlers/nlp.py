@@ -1,182 +1,254 @@
 # src/bot/handlers/nlp.py
+"""
+NLP handler for THDORA — v3 with intent_parser integration.
+
+Processes natural language messages and dispatches to appropriate handlers.
+Uses Groq tool calling for complex queries via intent_parser.
+"""
+
 import logging
-from datetime import date, timedelta
-from typing import Any, Dict, List, Optional
+from datetime import date
+from typing import Any, Dict
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
+from src.ai.intent_parser import parse_intent, IntentResult
 from src.bot.api_client import ThdoraApiClient
-from src.bot.keyboards import _kb_start
+from src.bot.keyboards import escape_md, _kb_start
 
 logger = logging.getLogger(__name__)
 api = ThdoraApiClient()
 
+
 async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Main NLP handler. user_id always from update.effective_user.id."""
     user_id = update.effective_user.id
     text = (update.message.text or "").strip()
+
     if not text:
         return
-
-    today = date.today().isoformat()
-    tomorrow = (date.today() + timedelta(days=1)).isoformat()
 
     await update.message.chat.send_action("typing")
     processing_msg = await update.message.reply_text("⏳ Procesando...")
 
     try:
-        result = await _process_nlp(text, today, tomorrow, user_id)
-        await processing_msg.delete()
-        await _handle_nlp_result(update, context, result, today, user_id)
+        intent_result = await parse_intent(text, user_id=user_id)
+        dispatch = {
+            "nueva_cita": handle_nueva_cita,
+            "borrar_cita": handle_borrar_cita,
+            "editar_cita": handle_editar_cita,
+            "log_habito": handle_log_habito,
+            "borrar_habito": handle_borrar_habito,
+            "consulta_nlp": handle_consulta_nlp,
+        }
+        handler = dispatch.get(intent_result.intent, handle_unknown)
+        await handler(update, context, intent_result, user_id=user_id)
     except Exception as e:
-        logger.error(f"Error en NLP: {e}")
+        logger.error(f"Error in NLP handler: {e}", exc_info=True)
+        await update.message.reply_text(
+            escape_md("❌ Error interno\. Inténtalo de nuevo\."),
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
+    finally:
         try:
             await processing_msg.delete()
         except Exception:
             pass
-        await update.message.reply_text("❌ Error al procesar", reply_markup=_kb_start())
 
-async def _process_nlp(text: str, today: str, tomorrow: str, user_id: int) -> Dict[str, Any]:
-    text_lower = text.lower()
 
-    if any(w in text_lower for w in ["cancela", "borra", "elimina"]):
-        if "cita" in text_lower:
-            return await _process_borrar_cita(text, today, user_id)
-        elif any(w in text_lower for w in ["hábito", "habito"]):
-            return await _process_borrar_habito(text, today, user_id)
-    elif any(w in text_lower for w in ["nueva", "añade", "agrega"]):
-        if "cita" in text_lower:
-            return await _process_nueva_cita(text, today, user_id)
-        elif any(w in text_lower for w in ["hábito", "habito"]):
-            return await _process_log_habito(text, today, user_id)
-    elif any(w in text_lower for w in ["mueve", "cambia", "edita"]):
-        return await _process_editar_cita(text, today, user_id)
-    elif any(w in text_lower for w in ["dorm", "comí", "comi", "beb", "hice"]):
-        return await _process_log_habito(text, today, user_id)
+async def handle_nueva_cita(update: Update, context: ContextTypes.DEFAULT_TYPE, intent_result: IntentResult, user_id: int) -> None:
+    entities = intent_result.entities
+    date_str = entities.get("date", date.today().isoformat())
+    time = entities.get("time", "09:00")
+    name = entities.get("name", "Cita")
+    apt_type = entities.get("type", "otra")
+    notes = entities.get("notes", "")
 
-    return {"intent": "unknown", "reply": "🤔 No he entendido. Usa /help para ver comandos."}
-
-async def _process_nueva_cita(text: str, today: str, user_id: int) -> Dict[str, Any]:
-    time_match = _extract_time(text)
-    if not time_match:
-        return {"intent": "nueva_cita", "reply": "⏰ No he detectado la hora. Ejemplo: mañana dentista a las 10"}
-
-    date_str = _extract_date(text, today)
-    name, apt_type = _extract_name_type(text)
-
-    conflict = await api.check_appointment_conflict(date_str, time_match, user_id=user_id)
+    conflict = await api.check_appointment_conflict(date_str, time, user_id=user_id)
     if conflict:
-        return {"intent": "conflict", "reply": f"⚠️ Las {time_match} del {date_str} ya tienes {conflict['name']}"}
+        await update.message.reply_text(
+            f"⚠️ Las {escape_md(time)} del {escape_md(date_str)} ya tienes {escape_md(conflict.get('name', 'una cita'))}",
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
+        return
 
-    await api.create_appointment(date_str, time_match, name, apt_type, "", user_id=user_id)
-    return {"intent": "nueva_cita", "reply": f"✅ *{name}* añadida el {date_str} a las {time_match} ⏰"}
+    try:
+        await api.create_appointment(date_str, time, name, apt_type, notes, user_id=user_id)
+        await update.message.reply_text(
+            f"✅ *{escape_md(name)}* añadida el {escape_md(date_str)} a las {escape_md(time)} ⏰",
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
+    except Exception as e:
+        logger.error(f"Error creating appointment: {e}")
+        await update.message.reply_text(
+            f"❌ No pude crear la cita: {escape_md(str(e))}",
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
 
-async def _process_borrar_cita(text: str, today: str, user_id: int) -> Dict[str, Any]:
-    date_str = _extract_date(text, today)
-    appointments = await api.get_appointments(date_str, user_id=user_id)
-    name = _extract_name(text)
-    for apt in appointments:
-        if name in apt["name"].lower() or name in apt["type"].lower():
-            ok = await api.delete_appointment(date_str, apt["index"], user_id=user_id)
-            if ok:
-                return {"intent": "borrar_cita", "reply": f"✅ *{apt['name']}* eliminada del {date_str}"}
-            break
-    return {"intent": "borrar_cita", "reply": f"⚠️ No encontré la cita en {date_str}"}
 
-async def _process_editar_cita(text: str, today: str, user_id: int) -> Dict[str, Any]:
-    date_str = _extract_date(text, today)
-    time_match = _extract_time(text)
-    name = _extract_name(text)
-    if not time_match:
-        return {"intent": "editar_cita", "reply": "⏰ ¿A qué hora quieres moverla?"}
-    appointments = await api.get_appointments(date_str, user_id=user_id)
-    for apt in appointments:
-        if name in apt["name"].lower():
-            ok = await api.update_appointment(date_str, apt["index"], time=time_match, user_id=user_id)
-            if ok:
-                return {"intent": "editar_cita", "reply": f"✅ *{apt['name']}* movida a {time_match}"}
-            break
-    return {"intent": "editar_cita", "reply": f"⚠️ No encontré la cita en {date_str}"}
+async def handle_borrar_cita(update: Update, context: ContextTypes.DEFAULT_TYPE, intent_result: IntentResult, user_id: int) -> None:
+    entities = intent_result.entities
+    date_str = entities.get("date", date.today().isoformat())
+    name = entities.get("name", "")
 
-async def _process_log_habito(text: str, today: str, user_id: int) -> Dict[str, Any]:
-    habit, value = _extract_habit_value(text)
+    try:
+        appointments = await api.get_appointments(date_str, user_id=user_id)
+        for apt in appointments:
+            if name.lower() in apt["name"].lower():
+                ok = await api.delete_appointment(date_str, apt["index"], user_id=user_id)
+                if ok:
+                    await update.message.reply_text(
+                        f"✅ *{escape_md(apt['name'])}* eliminada del {escape_md(date_str)}",
+                        parse_mode="MarkdownV2",
+                        reply_markup=_kb_start()
+                    )
+                    return
+        await update.message.reply_text(
+            f"⚠️ No encontré la cita {escape_md(name)} en {escape_md(date_str)}",
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
+    except Exception as e:
+        logger.error(f"Error deleting appointment: {e}")
+        await update.message.reply_text(
+            f"❌ No pude borrar la cita: {escape_md(str(e))}",
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
+
+
+async def handle_editar_cita(update: Update, context: ContextTypes.DEFAULT_TYPE, intent_result: IntentResult, user_id: int) -> None:
+    entities = intent_result.entities
+    date_str = entities.get("date", date.today().isoformat())
+    time = entities.get("time")
+    name = entities.get("name", "")
+
+    if not time:
+        await update.message.reply_text(
+            "⏰ ¿A qué hora quieres mover la cita?",
+            reply_markup=_kb_start()
+        )
+        return
+
+    try:
+        appointments = await api.get_appointments(date_str, user_id=user_id)
+        for apt in appointments:
+            if name.lower() in apt["name"].lower():
+                updated = await api.update_appointment(date_str, apt["index"], time=time, user_id=user_id)
+                if updated:
+                    await update.message.reply_text(
+                        f"✅ *{escape_md(apt['name'])}* movida a {escape_md(time)}",
+                        parse_mode="MarkdownV2",
+                        reply_markup=_kb_start()
+                    )
+                    return
+        await update.message.reply_text(
+            f"⚠️ No encontré la cita {escape_md(name)} en {escape_md(date_str)}",
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
+    except Exception as e:
+        logger.error(f"Error updating appointment: {e}")
+        await update.message.reply_text(
+            f"❌ No pude editar la cita: {escape_md(str(e))}",
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
+
+
+async def handle_log_habito(update: Update, context: ContextTypes.DEFAULT_TYPE, intent_result: IntentResult, user_id: int) -> None:
+    entities = intent_result.entities
+    date_str = entities.get("date", date.today().isoformat())
+    habit = entities.get("habit", "")
+    value = entities.get("value", "")
+
     if not habit:
-        return {"intent": "log_habito", "reply": "❓ No he entendido el hábito. Ejemplo: dormí 8 horas"}
-    await api.log_habit(today, habit, value, user_id=user_id)
-    return {"intent": "log_habito", "reply": f"✅ *{habit}*: {value} registrado"}
+        await update.message.reply_text(
+            "❓ No he entendido el hábito\. Ejemplo: dormí 8 horas",
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
+        return
 
-async def _process_borrar_habito(text: str, today: str, user_id: int) -> Dict[str, Any]:
-    habit = _extract_name(text)
-    if not habit:
-        return {"intent": "borrar_habito", "reply": "❓ No he entendido el hábito a borrar"}
-    ok = await api.delete_habit(today, habit, user_id=user_id)
-    if ok:
-        return {"intent": "borrar_habito", "reply": f"✅ *{habit}* eliminado de hoy"}
-    return {"intent": "borrar_habito", "reply": f"⚠️ No encontré el hábito *{habit}* hoy"}
+    try:
+        await api.log_habit(date_str, habit, value, user_id=user_id)
+        await update.message.reply_text(
+            f"✅ *{escape_md(habit)}*: {escape_md(value)} registrado",
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
+    except Exception as e:
+        logger.error(f"Error logging habit: {e}")
+        await update.message.reply_text(
+            f"❌ No pude registrar el hábito: {escape_md(str(e))}",
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
 
-async def _handle_nlp_result(update: Update, context: ContextTypes.DEFAULT_TYPE, result: Dict[str, Any], today: str, user_id: int) -> None:
-    reply = result.get("reply", "")
-    if reply:
-        await update.message.reply_text(reply, parse_mode="Markdown", reply_markup=_kb_start())
-    else:
-        await update.message.reply_text("🤔 No he entendido. Usa /help", parse_mode="Markdown", reply_markup=_kb_start())
 
-def _extract_time(text: str) -> Optional[str]:
-    import re
-    match = re.search(r"(\d{1,2}:\d{2})", text)
-    return match.group(1) if match else None
+async def handle_borrar_habito(update: Update, context: ContextTypes.DEFAULT_TYPE, intent_result: IntentResult, user_id: int) -> None:
+    entities = intent_result.entities
+    date_str = entities.get("date", date.today().isoformat())
+    habit = entities.get("habit", "")
 
-def _extract_date(text: str, today: str) -> str:
-    text_lower = text.lower()
-    if "mañana" in text_lower:
-        return (date.today() + timedelta(days=1)).isoformat()
-    elif "ayer" in text_lower:
-        return (date.today() - timedelta(days=1)).isoformat()
-    return today
+    try:
+        ok = await api.delete_habit(date_str, habit, user_id=user_id)
+        if ok:
+            await update.message.reply_text(
+                f"✅ *{escape_md(habit)}* eliminado del {escape_md(date_str)}",
+                parse_mode="MarkdownV2",
+                reply_markup=_kb_start()
+            )
+        else:
+            await update.message.reply_text(
+                f"⚠️ No encontré el hábito {escape_md(habit)} en {escape_md(date_str)}",
+                parse_mode="MarkdownV2",
+                reply_markup=_kb_start()
+            )
+    except Exception as e:
+        logger.error(f"Error deleting habit: {e}")
+        await update.message.reply_text(
+            f"❌ No pude borrar el hábito: {escape_md(str(e))}",
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
 
-def _extract_name(text: str) -> str:
-    words = text.lower().split()
-    for word in ["cita", "reunión", "reunion", "consulta", "dentista", "médico", "médica"]:
-        if word in words:
-            return word
-    return text.split()[-1] if text.split() else ""
 
-def _extract_name_type(text: str) -> tuple[str, str]:
-    words = text.lower().split()
-    name = ""
-    apt_type = "otra"
-    for word in words:
-        if word in ["médica", "medica", "médico", "medico"]:
-            apt_type = "médica"
-        elif word in ["personal"]:
-            apt_type = "personal"
-        elif word in ["trabajo", "reunión", "reunion"]:
-            apt_type = "trabajo"
-        elif word not in ["nueva", "cita", "a", "las", "la", "el", "de", "en", "para"]:
-            name = word.title()
-    return name if name else "Cita", apt_type
+async def handle_consulta_nlp(update: Update, context: ContextTypes.DEFAULT_TYPE, intent_result: IntentResult, user_id: int) -> None:
+    """Handle consulta_nlp — delegates to groq_router for full Toki mode."""
+    try:
+        from src.bot.groq_router import route
+        result = await route(
+            text=update.message.text or "",
+            user_data=context.user_data if context else {},
+            api_context={},
+            username=update.effective_user.first_name or "Usuario",
+            user_id=user_id,
+        )
+        reply = result.get("reply", "No he entendido la consulta")
+        await update.message.reply_text(
+            escape_md(reply),
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
+    except Exception as e:
+        logger.error(f"Error in consulta_nlp: {e}")
+        await update.message.reply_text(
+            "🤔 No he entendido\. Usa /help para ver comandos disponibles\.",
+            parse_mode="MarkdownV2",
+            reply_markup=_kb_start()
+        )
 
-def _extract_habit_value(text: str) -> tuple[str, str]:
-    text_lower = text.lower()
-    for habit in ["dorm", "dormí", "dormi", "sueño"]:
-        if habit in text_lower:
-            value = _extract_value(text_lower, ["horas", "h", "minutos", "min"])
-            return "sueño", value
-    for habit in ["agua", "vasos", "litros"]:
-        if habit in text_lower:
-            value = _extract_value(text_lower, ["vasos", "litros", "l", "ml"])
-            return "agua", value
-    for habit in ["comida", "comí", "comi"]:
-        if habit in text_lower:
-            return "comida", text
-    return "", ""
 
-def _extract_value(text: str, units: List[str]) -> str:
-    for unit in units:
-        if unit in text:
-            parts = text.split()
-            for part in parts:
-                if part == unit or (unit in part and part.replace(unit, "").isdigit()):
-                    return part
-    numbers = [w for w in text.split() if w.replace(".", "").isdigit()]
-    return numbers[0] if numbers else ""
+async def handle_unknown(update: Update, context: ContextTypes.DEFAULT_TYPE, intent_result: IntentResult, user_id: int) -> None:
+    """Handle desconocido intent."""
+    await update.message.reply_text(
+        "🤔 No he entendido\. Usa /help para ver los comandos disponibles\.",
+        parse_mode="MarkdownV2",
+        reply_markup=_kb_start()
+    )

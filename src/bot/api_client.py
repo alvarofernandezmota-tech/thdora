@@ -1,4 +1,15 @@
 # src/bot/api_client.py
+"""
+Async HTTP client for THDORA API — v3 with singleton pattern.
+
+Features:
+- Singleton AsyncClient to prevent connection leaks
+- user_id parameter in ALL methods
+- ValueError validation for user_id > 0
+- All endpoints use ?user_id={user_id} query parameter
+- Proper error handling with ApiError
+"""
+
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -12,6 +23,7 @@ _TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0)
 
 
 class ApiError(Exception):
+    """API error exception."""
     def __init__(self, message: str, status_code: int = 0) -> None:
         super().__init__(message)
         self.status_code = status_code
@@ -33,6 +45,32 @@ def _validate_user_id(user_id: int) -> None:
 
 
 class ThdoraApiClient:
+    """
+    Async HTTP client for THDORA FastAPI.
+    Singleton AsyncClient, user_id in all methods.
+    """
+
+    _instance: Optional["ThdoraApiClient"] = None
+    _client: Optional[httpx.AsyncClient] = None
+
+    @classmethod
+    async def get_instance(cls) -> "ThdoraApiClient":
+        if cls._instance is None:
+            cls._instance = cls()
+            cls._client = httpx.AsyncClient(
+                base_url=_API_BASE,
+                timeout=_TIMEOUT,
+                limits=httpx.Limits(max_connections=20, max_keepalive_connections=10)
+            )
+        return cls._instance
+
+    @classmethod
+    async def close(cls) -> None:
+        if cls._client:
+            await cls._client.aclose()
+            cls._client = None
+            cls._instance = None
+
     def __init__(self, base_url: str = _API_BASE) -> None:
         self.base_url = base_url.rstrip("/")
 
@@ -44,11 +82,11 @@ class ThdoraApiClient:
         except httpx.RequestError:
             return False
 
-    async def get_appointments(self, date_str: str, user_id: int) -> List[Dict[str, Any]]:
+    async def get_appointments(self, date_str: str, *, user_id: int) -> List[Dict[str, Any]]:
         _validate_user_id(user_id)
         return await self._get(f"/appointments/{date_str}?user_id={user_id}")
 
-    async def get_appointments_week(self, date_str: str, user_id: int) -> Dict[str, List[Dict[str, Any]]]:
+    async def get_appointments_week(self, date_str: str, *, user_id: int) -> Dict[str, List[Dict[str, Any]]]:
         _validate_user_id(user_id)
         return await self._get(f"/appointments/week/{date_str}?user_id={user_id}")
 
@@ -56,7 +94,7 @@ class ThdoraApiClient:
         _validate_user_id(user_id)
         return await self._post(f"/appointments/{date_str}?user_id={user_id}", json={"time": time, "name": name, "type": apt_type, "notes": notes})
 
-    async def delete_appointment(self, date_str: str, index: int, user_id: int) -> bool:
+    async def delete_appointment(self, date_str: str, index: int, *, user_id: int) -> bool:
         _validate_user_id(user_id)
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -68,7 +106,7 @@ class ThdoraApiClient:
         except httpx.RequestError as exc:
             raise ApiError(f"Error DELETE appointment: {exc}") from exc
 
-    async def update_appointment(self, date_str: str, index: int, time: Optional[str] = None, name: Optional[str] = None, apt_type: Optional[str] = None, notes: Optional[str] = None, *, user_id: int) -> Dict[str, Any]:
+    async def update_appointment(self, date_str: str, index: int, *, time: Optional[str] = None, name: Optional[str] = None, apt_type: Optional[str] = None, notes: Optional[str] = None, user_id: int) -> Dict[str, Any]:
         _validate_user_id(user_id)
         payload: Dict[str, Any] = {}
         if time is not None: payload["time"] = time
@@ -77,30 +115,28 @@ class ThdoraApiClient:
         if notes is not None: payload["notes"] = notes
         return await self._put(f"/appointments/{date_str}/{index}?user_id={user_id}", json=payload)
 
-    async def check_appointment_conflict(self, date_str: str, time: str, user_id: int) -> Optional[Dict[str, Any]]:
+    async def check_appointment_conflict(self, date_str: str, time: str, *, user_id: int) -> Optional[Dict[str, Any]]:
         _validate_user_id(user_id)
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
                 r = await client.get(f"{self.base_url}/appointments/{date_str}/conflict/{time.replace(':', '%3A')}?user_id={user_id}")
-                if r.status_code in (404, 204):
-                    return None
-                if r.status_code == 200:
-                    return r.json()
+                if r.status_code in (404, 200):
+                    return r.json() if r.status_code == 200 else None
                 return None
         except Exception:
             return None
 
-    async def get_habits(self, date_str: str, user_id: int) -> Dict[str, str]:
+    async def get_habits(self, date_str: str, *, user_id: int) -> Dict[str, str]:
         _validate_user_id(user_id)
         raw: List[Dict[str, str]] = await self._get(f"/habits/{date_str}?user_id={user_id}")
         return {item["habit"]: item["value"] for item in raw}
 
-    async def log_habit(self, date_str: str, habit: str, value: str, user_id: int) -> bool:
+    async def log_habit(self, date_str: str, habit: str, value: str, *, user_id: int) -> bool:
         _validate_user_id(user_id)
         await self._post(f"/habits/{date_str}?user_id={user_id}", json={"habit": habit, "value": value})
         return True
 
-    async def delete_habit(self, date_str: str, habit: str, user_id: int) -> bool:
+    async def delete_habit(self, date_str: str, habit: str, *, user_id: int) -> bool:
         _validate_user_id(user_id)
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
@@ -112,15 +148,15 @@ class ThdoraApiClient:
         except httpx.RequestError as exc:
             raise ApiError(f"Error DELETE habit: {exc}") from exc
 
-    async def update_habit(self, date_str: str, habit: str, value: str, user_id: int) -> Dict[str, str]:
+    async def update_habit(self, date_str: str, habit: str, value: str, *, user_id: int) -> Dict[str, str]:
         _validate_user_id(user_id)
         return await self._put(f"/habits/{date_str}/{habit}?user_id={user_id}", json={"value": value})
 
-    async def get_summary(self, date_str: str, user_id: int) -> Dict[str, Any]:
+    async def get_summary(self, date_str: str, *, user_id: int) -> Dict[str, Any]:
         _validate_user_id(user_id)
         return await self._get(f"/summary/{date_str}?user_id={user_id}")
 
-    async def get_week_summary(self, date_str: str, user_id: int) -> Dict[str, Dict[str, Any]]:
+    async def get_week_summary(self, date_str: str, *, user_id: int) -> Dict[str, Dict[str, Any]]:
         _validate_user_id(user_id)
         return await self._get(f"/summary/week/{date_str}?user_id={user_id}")
 
