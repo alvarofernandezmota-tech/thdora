@@ -1,91 +1,76 @@
+"""Handler NLP: patrón mensaje provisional + edición para evitar TimedOut de Telegram."""
+
+from __future__ import annotations
+
 import logging
-import time
-import asyncio
-from datetime import datetime
+import traceback
+
+import httpx
 from telegram import Update
+from telegram.error import NetworkError, TimedOut
 from telegram.ext import ContextTypes
-from telegram.error import TimedOut
 
 from src.bot.groq_router import GroqRouter
-from src.bot.api_client import ApiClient
-from src.agents.mood_detector import MoodDetector
 
 logger = logging.getLogger(__name__)
 
 
-class NLPHandler:
-    def __init__(self):
-        self.router = GroqRouter()
-        self.api_client = ApiClient()
-        self.mood_detector = MoodDetector(groq_api_key=__import__('os').environ.get('GROQ_API_KEY', ''))
+async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Procesa mensajes de texto libre via GroqRouter con patrón provisional+edición."""
+    if not update.message or not update.message.text:
+        return
 
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user = update.effective_user
-        message_text = update.message.text
-        chat_id = update.effective_chat.id
-        user_id = user.id
+    user_text = update.message.text
+    user_id = update.effective_user.id if update.effective_user else 0
+    chat_id = update.effective_chat.id if update.effective_chat else 0
 
-        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        start_time = time.time()
+    provisional = await update.message.reply_text("⏳ Procesando...")
 
-        try:
-            today = datetime.now().date().isoformat()
-            citas_hoy, habitos_activos, history = await asyncio.gather(
-                self.api_client.get_appointments(user_id, today),
-                self.api_client.get_active_habits(user_id),
-                self.api_client.get_history(user_id, limit=5),
-            )
+    groq_router: GroqRouter = context.bot_data.get("groq_router") or GroqRouter()
 
-            # Mood detection cada 5 mensajes
-            msg_count = context.user_data.get("msg_count", 0) + 1
-            context.user_data["msg_count"] = msg_count
-            if msg_count % 5 == 0:
-                recent_texts = [m["content"] for m in history if m["role"] == "user"]
-                recent_texts.append(message_text)
-                asyncio.create_task(
-                    self.mood_detector.analyze(recent_texts, user_id)
-                )
+    try:
+        response_text = await groq_router.process(
+            user_text=user_text,
+            user_id=user_id,
+            timeout=httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0),
+        )
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=provisional.message_id,
+            text=response_text,
+        )
 
-            mood_context = ""
-            if await self.mood_detector.should_mention(user_id):
-                mood_context = (
-                    "\n[CONTEXTO INTERNO: el usuario lleva varios dias con estado "
-                    "emocional bajo. Muestra empatia de forma natural, sin ser invasivo.]"
-                )
+    except httpx.TimeoutException:
+        logger.error("TimeoutException en NLP para user_id=%s: %s", user_id, traceback.format_exc())
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=provisional.message_id,
+            text="⌛ El servicio tardó demasiado en responder. Inténtalo de nuevo.",
+        )
 
-            response = await self.router.process_message(
-                message=message_text,
-                user_id=user_id,
-                citas_hoy=citas_hoy,
-                habitos=habitos_activos,
-                history=history,
-                extra_context=mood_context,
-            )
+    except httpx.ConnectError:
+        logger.error("ConnectError en NLP para user_id=%s: %s", user_id, traceback.format_exc())
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=provisional.message_id,
+            text="🔌 No se pudo conectar con el servicio de IA. Verifica la conexión.",
+        )
 
-            for attempt in range(3):
-                try:
-                    await update.message.reply_text(response)
-                    break
-                except TimedOut:
-                    if attempt == 2:
-                        await update.message.reply_text(
-                            "THDORA esta pensando... dame un segundo mas."
-                        )
-                    else:
-                        await asyncio.sleep(0.5 * (2 ** attempt))
-                        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+    except TimedOut:
+        logger.error("TimedOut de Telegram en NLP para user_id=%s: %s", user_id, traceback.format_exc())
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=provisional.message_id,
+            text="⌛ Telegram agotó el tiempo de espera. Inténtalo de nuevo.",
+        )
 
-            await asyncio.gather(
-                self.api_client.save_message(user_id, "user", message_text),
-                self.api_client.save_message(user_id, "assistant", response),
-            )
+    except NetworkError:
+        logger.error("NetworkError de Telegram en NLP para user_id=%s: %s", user_id, traceback.format_exc())
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=provisional.message_id,
+            text="📡 Error de red. Comprueba tu conexión e inténtalo de nuevo.",
+        )
 
-            elapsed = time.time() - start_time
-            logger.info("NLP ok - user:%s time:%.2fs", user_id, elapsed)
-
-        except Exception as e:
-            elapsed = time.time() - start_time
-            logger.error("NLP error user:%s time:%.2fs - %s", user_id, elapsed, str(e), exc_info=True)
-            await update.message.reply_text(
-                "Lo siento, tuve un problema interno. Intentalo de nuevo."
-            )
+    except Exception:
+        logger.error("Error inesperado en NLP para user_id=%s: %s", user_id, traceback.format_exc())
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=provisional.message_id,
+            text="❌ Ocurrió un error inesperado. El equipo ha sido notificado.",
+        )

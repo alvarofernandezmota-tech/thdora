@@ -1,200 +1,263 @@
-import logging
+"""GroqRouter: NLP via Groq API con system prompt estructurado y few-shot examples."""
+
+from __future__ import annotations
+
 import json
-from datetime import datetime
-from groq import Groq
-from src.bot.api_client import ApiClient
+import logging
+import os
+import time
+from dataclasses import dataclass, field
+
+import httpx
 
 logger = logging.getLogger(__name__)
 
 
+@dataclass
+class ToolCallResult:
+    action: str
+    success: bool
+    data: dict
+    message_to_user: str
+
+
+@dataclass
+class AmbiguityRequest:
+    intent: str
+    missing_fields: list[str]
+    question_to_user: str
+
+
+TOOLS: list[dict] = [
+    {
+        "type": "function",
+        "function": {
+            "name": "crear_cita",
+            "description": "Crea una nueva cita en la agenda del usuario.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "nombre": {"type": "string", "description": "Nombre o descripción de la cita."},
+                    "fecha": {"type": "string", "description": "Fecha en formato YYYY-MM-DD."},
+                    "hora": {"type": "string", "description": "Hora en formato HH:MM (24h)."},
+                    "tipo": {"type": "string", "description": "Categoría: médica, personal, trabajo, otro.", "enum": ["médica", "personal", "trabajo", "otro"]},
+                },
+                "required": ["nombre", "fecha"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "borrar_cita",
+            "description": "Elimina una cita existente por su ID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "cita_id": {"type": "integer", "description": "ID numérico de la cita a eliminar."},
+                },
+                "required": ["cita_id"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "consultar_citas",
+            "description": "Consulta las citas de una fecha concreta.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "fecha": {"type": "string", "description": "Fecha en formato YYYY-MM-DD."},
+                },
+                "required": ["fecha"],
+            },
+        },
+    },
+]
+
+
+def build_system_prompt(nombre_usuario: str | None = None) -> str:
+    """Construye el system prompt personalizado para el asistente Toki."""
+    nombre = nombre_usuario or "Usuario"
+
+    ejemplos_correctos = json.dumps(
+        [
+            {
+                "usuario": "Pon una cita con el dentista el viernes a las 10",
+                "respuesta": {
+                    "intent": "crear_cita", "accion": "crear_cita",
+                    "entidades": {"nombre": "Dentista", "fecha": "2025-06-20", "hora": "10:00", "tipo": "médica"},
+                    "respuesta_usuario": "✅ Cita con el Dentista creada para el viernes 20 jun a las 10:00.",
+                },
+            },
+            {
+                "usuario": "Marca que hoy hice ejercicio",
+                "respuesta": {
+                    "intent": "registrar_habito", "accion": "registrar_habito",
+                    "entidades": {"habito": "ejercicio", "fecha": "hoy"},
+                    "respuesta_usuario": "💪 ¡Ejercicio registrado para hoy!",
+                },
+            },
+            {
+                "usuario": "¿Qué tengo esta semana?",
+                "respuesta": {
+                    "intent": "consultar_semana", "accion": "consultar_semana",
+                    "entidades": {},
+                    "respuesta_usuario": "📅 Aquí tienes tu semana...",
+                },
+            },
+        ],
+        ensure_ascii=False, indent=2,
+    )
+
+    ejemplos_rechazo = json.dumps(
+        [
+            {
+                "usuario": "¿Cuál es la capital de Francia?",
+                "respuesta": {
+                    "intent": "fuera_de_scope", "accion": None, "entidades": {},
+                    "respuesta_usuario": "Lo siento, solo puedo ayudarte con tu agenda y hábitos. ¿Quieres añadir una cita o registrar un hábito?",
+                },
+            },
+            {
+                "usuario": "Escríbeme un poema sobre el mar",
+                "respuesta": {
+                    "intent": "fuera_de_scope", "accion": None, "entidades": {},
+                    "respuesta_usuario": "Eso está fuera de mis capacidades 😊. Estoy especializado en gestionar tu agenda y hábitos. ¿En qué puedo ayudarte con eso?",
+                },
+            },
+        ],
+        ensure_ascii=False, indent=2,
+    )
+
+    return f"""Eres Toki, asistente personal de {nombre}. Gestionas citas y hábitos.
+
+## TU ROL
+- Ayudas a {nombre} a gestionar su agenda (citas, recordatorios) y sus hábitos diarios.
+- Interpretas lenguaje natural en español y extraes la intención y los datos relevantes.
+
+## LÍMITES ESTRICTOS
+- SOLO respondes sobre agenda, citas, recordatorios y hábitos.
+- Si el usuario pregunta algo fuera de este scope, rechazas educadamente y rediriges.
+- No das consejos médicos, legales, financieros ni de otro tipo.
+- No generas contenido creativo, código ni información general.
+
+## FORMATO DE RESPUESTA
+Responde SIEMPRE con un objeto JSON válido con estos campos exactos:
+{{
+  "intent": "<crear_cita|borrar_cita|consultar_citas|consultar_semana|registrar_habito|fuera_de_scope|aclaracion>",
+  "accion": "<nombre_de_la_accion o null>",
+  "entidades": {{<campos extraídos del mensaje>}},
+  "respuesta_usuario": "<mensaje en español para mostrar al usuario>"
+}}
+
+## EJEMPLOS DE USO CORRECTO
+{ejemplos_correctos}
+
+## EJEMPLOS DE RECHAZO EDUCADO
+{ejemplos_rechazo}
+
+## REGLAS ADICIONALES
+- Las fechas relativas ("mañana", "el viernes", "la próxima semana") las resuelves con la hora actual del contexto.
+- Si falta información obligatoria (fecha u hora para crear una cita), usa intent "aclaracion" y pregunta solo lo que falta.
+- Responde siempre en español, con tono amigable y conciso.
+- Nunca inventes datos que el usuario no haya proporcionado.
+"""
+
+
 class GroqRouter:
-    def __init__(self):
-        self.client = Groq()
-        self.api_client = ApiClient()
-        self.model = "llama-3.3-70b-versatile"
+    """Enruta mensajes de texto a Groq y ejecuta las acciones resultantes."""
 
-    SYSTEM_PROMPT = """Eres THDORA, un agente de bienestar emocional anti-complaciente, directo y honesto.
-No eres un terapeuta ni das consejos médicos. Tu rol es ayudar al usuario a gestionar su vida diaria
-(citas, hábitos, rutinas) y detectar patrones emocionales de forma útil aunque incomode.
+    def __init__(self) -> None:
+        self._api_key: str = os.environ["GROQ_API_KEY"]
+        self._model: str = os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile")
+        self._base_url: str = "https://api.groq.com/openai/v1"
 
-LÍMITES ESTRICTOS:
-- Nunca diagnostiques ni recetes tratamientos.
-- Si el usuario parece necesitar ayuda profesional, recómiendala con respeto.
-- No adules ni valides todo. Di la verdad aunque sea incómoda.
-- No seas carca ni paternalista — sé cercano pero firme.
-
-CAPACIDADES REALES:
-- Crear, listar, editar y borrar citas.
-- Registrar y hacer seguimiento de hábitos.
-- Recordatorios y resumen diario.
-- Detectar patrones en el estado emocional del usuario a lo largo del tiempo.
-
-COMO RESPONDE THDORA (ejemplos):
-
-Usuario: "Estoy muy estresado con el trabajo"
-THDORA: "Entiendo que sientes estrés. ¿Qué cita o hábito concreto te está generando más presión esta semana? Vamos a priorizar una cosa real en lugar de dar vueltas."
-
-Usuario: "Tengo dentista el jueves a las 5"
-THDORA: "Perfecto. Creo la cita 'Dentista' el jueves a las 17:00. ¿Cuánto dura aproximadamente?"
-
-Usuario: "Sí, hoy sí que voy al gimnasio"
-THDORA: "Lo mismo dijiste el lunes. Hoy tienes hueco a las 18:00. Si quieres que lo ponga como cita fija, dímelo."
-
-COMO NO RESPONDE THDORA:
-- "¡Qué bien! ¡Eres increíble!"
-- "Entiendo perfectamente cómo te sientes, eso es muy difícil..."
-- Respuestas largas sin acción concreta.
-
-Responde siempre en español. Tono natural, cercano, sin ser pelota."""
-
-    TOOLS = [
-        {
-            "type": "function",
-            "function": {
-                "name": "create_appointment",
-                "description": "Crea una nueva cita en el calendario del usuario",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "titulo": {"type": "string", "description": "Título de la cita"},
-                        "fecha": {"type": "string", "description": "Fecha en formato YYYY-MM-DD"},
-                        "hora": {"type": "string", "description": "Hora en formato HH:MM"},
-                        "duracion_min": {"type": "integer", "description": "Duración en minutos", "default": 60}
-                    },
-                    "required": ["titulo", "fecha", "hora"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "list_appointments",
-                "description": "Lista las citas de una fecha concreta",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "fecha": {"type": "string", "description": "Fecha en formato YYYY-MM-DD"}
-                    },
-                    "required": ["fecha"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "delete_appointment",
-                "description": "Borra una cita por su ID",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "cita_id": {"type": "integer", "description": "ID de la cita a borrar"}
-                    },
-                    "required": ["cita_id"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "log_habit",
-                "description": "Registra el cumplimiento de un hábito",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "habit_id": {"type": "integer"},
-                        "fecha": {"type": "string", "description": "YYYY-MM-DD"},
-                        "valor": {"type": "number", "description": "Valor o check (1 = cumplido)"}
-                    },
-                    "required": ["habit_id", "fecha"]
-                }
-            }
-        }
-    ]
-
-    async def process_message(
+    async def process(
         self,
-        message: str,
-        user_id: int,
-        citas_hoy: list,
-        habitos: list,
-        history: list,
-        extra_context: str = "",
-    ) -> str:
-        now = datetime.now()
-        dias_es = ["Lunes", "Martes", "Miércoles", "Jueves", "Viernes", "Sábado", "Domingo"]
-        context_str = f"""CONTEXTO ACTUAL:
-Fecha y hora: {now.strftime('%Y-%m-%d %H:%M')} ({dias_es[now.weekday()]})
-Citas de hoy: {json.dumps(citas_hoy, ensure_ascii=False) if citas_hoy else 'Ninguna'}
-Hábitos activos: {json.dumps(habitos, ensure_ascii=False) if habitos else 'Ninguno'}
-Historial reciente: {json.dumps(history, ensure_ascii=False) if history else 'Sin historial previo'}""" + extra_context
+        user_text: str,
+        user_id: int = 0,
+        nombre_usuario: str | None = None,
+        context_str: str = "",
+        timeout: httpx.Timeout | None = None,
+    ) -> str | ToolCallResult | AmbiguityRequest:
+        """Procesa un mensaje de texto y retorna la respuesta o acción correspondiente."""
+        _timeout = timeout or httpx.Timeout(connect=5.0, read=30.0, write=10.0, pool=5.0)
+        system_prompt = build_system_prompt(nombre_usuario)
 
-        messages = [
-            {"role": "system", "content": self.SYSTEM_PROMPT},
-            {"role": "system", "content": context_str},
-            *history,
-            {"role": "user", "content": message}
-        ]
+        messages: list[dict] = [{"role": "system", "content": system_prompt}]
+        if context_str:
+            messages.append({"role": "system", "content": f"CONTEXTO ACTUAL DEL USUARIO:\n{context_str}"})
+        messages.append({"role": "user", "content": user_text})
 
-        response = self.client.chat.completions.create(
-            model=self.model,
-            messages=messages,
-            tools=self.TOOLS,
-            tool_choice="auto",
-            temperature=0.7,
-            max_tokens=800
+        payload = {
+            "model": self._model,
+            "messages": messages,
+            "tools": TOOLS,
+            "tool_choice": "auto",
+            "max_tokens": 1024,
+            "temperature": 0.1,
+        }
+        headers = {
+            "Authorization": f"Bearer {self._api_key}",
+            "Content-Type": "application/json",
+        }
+
+        async with httpx.AsyncClient(timeout=_timeout) as client:
+            resp = await client.post(f"{self._base_url}/chat/completions", json=payload, headers=headers)
+            resp.raise_for_status()
+            data = resp.json()
+
+        choice = data["choices"][0]
+        message = choice["message"]
+
+        if message.get("tool_calls"):
+            return await self._handle_tool_call(message["tool_calls"][0], user_id)
+
+        content = message.get("content", "")
+        try:
+            parsed = json.loads(content)
+            return parsed.get("respuesta_usuario", content)
+        except (json.JSONDecodeError, AttributeError):
+            return content
+
+    async def _handle_tool_call(self, tool_call: dict, user_id: int) -> ToolCallResult | AmbiguityRequest:
+        """Procesa un tool_call de Groq y ejecuta la acción correspondiente."""
+        func_name = tool_call["function"]["name"]
+        try:
+            args = json.loads(tool_call["function"]["arguments"])
+        except json.JSONDecodeError:
+            args = {}
+
+        if func_name == "crear_cita":
+            missing = [f for f in ("fecha", "hora") if not args.get(f)]
+            if missing:
+                preguntas = {
+                    "fecha": "¿Para qué fecha quieres la cita? (ej: mañana, el viernes)",
+                    "hora": "¿A qué hora? (ej: 10:30, por la tarde)",
+                }
+                q = " ".join(preguntas[m] for m in missing)
+                return AmbiguityRequest(intent="crear_cita", missing_fields=missing, question_to_user=q)
+            return ToolCallResult(
+                action="crear_cita", success=True, data=args,
+                message_to_user=f"✅ Cita '{args.get('nombre')}' programada para {args.get('fecha')} a las {args.get('hora', 'hora pendiente')}.",
+            )
+
+        if func_name == "borrar_cita":
+            cita_id = args.get("cita_id")
+            return ToolCallResult(
+                action="borrar_cita", success=True, data={"cita_id": cita_id},
+                message_to_user=f"🗑️ Cita #{cita_id} eliminada correctamente.",
+            )
+
+        if func_name == "consultar_citas":
+            return ToolCallResult(
+                action="consultar_citas", success=True, data=args,
+                message_to_user=f"📅 Consultando citas para {args.get('fecha')}...",
+            )
+
+        return ToolCallResult(
+            action=func_name, success=False, data=args,
+            message_to_user=f"No reconozco la acción '{func_name}'.",
         )
-
-        choice = response.choices[0]
-
-        if choice.message.tool_calls:
-            tool_call = choice.message.tool_calls[0]
-            fn_name = tool_call.function.name
-            args = json.loads(tool_call.function.arguments)
-
-            logger.info(f"Tool call: {fn_name} args:{args} user:{user_id}")
-
-            try:
-                tool_result = await self._execute_tool(fn_name, args, user_id)
-            except Exception as e:
-                logger.error(f"Tool execution error: {fn_name} - {e}")
-                tool_result = {"error": str(e)}
-
-            messages.append(choice.message)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tool_call.id,
-                "content": json.dumps(tool_result, ensure_ascii=False)
-            })
-
-            final = self.client.chat.completions.create(
-                model=self.model,
-                messages=messages,
-                temperature=0.7,
-                max_tokens=400
-            )
-            return final.choices[0].message.content
-
-        return choice.message.content
-
-    async def _execute_tool(self, fn_name: str, args: dict, user_id: int) -> dict:
-        if fn_name == "create_appointment":
-            return self.api_client.create_appointment(
-                user_id=user_id,
-                titulo=args["titulo"],
-                fecha=args["fecha"],
-                hora=args["hora"],
-                duracion_min=args.get("duracion_min", 60)
-            )
-        elif fn_name == "list_appointments":
-            return self.api_client.get_appointments(user_id, args["fecha"])
-        elif fn_name == "delete_appointment":
-            return self.api_client.delete_appointment(args["cita_id"])
-        elif fn_name == "log_habit":
-            return self.api_client.log_habit(
-                user_id=user_id,
-                habit_id=args["habit_id"],
-                fecha=args["fecha"],
-                valor=args.get("valor", 1)
-            )
-        else:
-            raise ValueError(f"Tool desconocida: {fn_name}")
