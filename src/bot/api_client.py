@@ -1,51 +1,4 @@
-"""
-Cliente HTTP asíncrono para la API REST de THDORA.
-
-Centraliza todas las llamadas HTTP del bot Telegram hacia la FastAPI.
-Si la URL de la API cambia, solo hay que tocar este módulo.
-
-Configuración::
-
-    THDORA_API_URL=http://localhost:8000   # por defecto
-
-Métodos disponibles::
-
-    # Salud
-    await api.health()                                             → bool
-
-    # Citas
-    await api.get_appointments("2026-03-27")                       → List[Dict]
-    await api.get_appointments_week("2026-03-27")                  → Dict[str, List[Dict]]
-    await api.create_appointment(date, time, name, type, notes)    → Dict
-    await api.delete_appointment(date, index)                      → bool
-    await api.update_appointment(date, index, ...)                 → Dict
-    await api.check_appointment_conflict(date, time)               → Dict | None
-
-    # Hábitos
-    # Nota: el endpoint /habits/{date} devuelve List[{habit, value}];
-    #       get_habits() lo transforma internamente a Dict[str, str].
-    await api.get_habits("2026-03-27")                             → Dict[str, str]
-    await api.log_habit(date, habit, value)                        → bool
-    await api.delete_habit(date, habit)                            → bool
-    await api.update_habit(date, habit, value)                     → Dict
-
-    # HabitConfig (F9.2)
-    await api.get_habit_config(name)                               → Dict | None
-    await api.get_all_habit_configs()                              → List[Dict]
-    await api.upsert_habit_config(name, habit_type, ...)           → Dict
-    await api.delete_habit_config(name)                            → bool
-
-    # UserConfig (F12)
-    await api.get_user_config(user_id)                             → Dict
-    await api.update_user_config(user_id, ...)                     → Dict
-
-    # Resumen
-    await api.get_summary("2026-03-27")                            → Dict
-
-Todos los métodos (salvo ``health``) lanzan ``ApiError`` ante cualquier
-fallo de red o respuesta HTTP de error.
-"""
-
+# src/bot/api_client.py
 import logging
 import os
 from typing import Any, Dict, List, Optional
@@ -57,8 +10,6 @@ logger = logging.getLogger(__name__)
 _API_BASE = os.getenv("THDORA_API_URL", "http://localhost:8000")
 _TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0)
 
-
-# ── Excepción pública ────────────────────────────────────────────────
 
 class ApiError(Exception):
     def __init__(self, message: str, status_code: int = 0) -> None:
@@ -76,13 +27,14 @@ def _raise_for_status(r: httpx.Response) -> None:
         raise ApiError(f"HTTP {r.status_code}: {detail}", status_code=r.status_code)
 
 
-# ── Cliente ────────────────────────────────────────────────────
+def _validate_user_id(user_id: int) -> None:
+    if not user_id or user_id <= 0:
+        raise ValueError("user_id es obligatorio y debe ser > 0")
+
 
 class ThdoraApiClient:
     def __init__(self, base_url: str = _API_BASE) -> None:
         self.base_url = base_url.rstrip("/")
-
-    # ── Salud ────────────────────────────────────────────────
 
     async def health(self) -> bool:
         try:
@@ -92,57 +44,45 @@ class ThdoraApiClient:
         except httpx.RequestError:
             return False
 
-    # ── Citas ────────────────────────────────────────────────
+    async def get_appointments(self, date_str: str, user_id: int) -> List[Dict[str, Any]]:
+        _validate_user_id(user_id)
+        return await self._get(f"/appointments/{date_str}?user_id={user_id}")
 
-    async def get_appointments(self, date_str: str) -> List[Dict[str, Any]]:
-        return await self._get(f"/appointments/{date_str}")
+    async def get_appointments_week(self, date_str: str, user_id: int) -> Dict[str, List[Dict[str, Any]]]:
+        _validate_user_id(user_id)
+        return await self._get(f"/appointments/week/{date_str}?user_id={user_id}")
 
-    async def get_appointments_week(self, date_str: str) -> Dict[str, List[Dict[str, Any]]]:
-        """Devuelve citas de la semana (lun-dom) que contiene date_str, agrupadas por fecha."""
-        return await self._get(f"/appointments/week/{date_str}")
+    async def create_appointment(self, date_str: str, time: str, name: str, apt_type: str, notes: str = "", *, user_id: int) -> Dict[str, Any]:
+        _validate_user_id(user_id)
+        return await self._post(f"/appointments/{date_str}?user_id={user_id}", json={"time": time, "name": name, "type": apt_type, "notes": notes})
 
-    async def create_appointment(
-        self, date_str: str, time: str, name: str, apt_type: str, notes: str = ""
-    ) -> Dict[str, Any]:
-        return await self._post(
-            f"/appointments/{date_str}",
-            json={"time": time, "name": name, "type": apt_type, "notes": notes},
-        )
-
-    async def delete_appointment(self, date_str: str, index: int) -> bool:
+    async def delete_appointment(self, date_str: str, index: int, user_id: int) -> bool:
+        _validate_user_id(user_id)
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                r = await client.delete(f"{self.base_url}/appointments/{date_str}/{index}")
+                r = await client.delete(f"{self.base_url}/appointments/{date_str}/{index}?user_id={user_id}")
                 if r.status_code == 404:
                     return False
                 _raise_for_status(r)
                 return True
         except httpx.RequestError as exc:
-            raise ApiError(f"Error de red DELETE appointment: {exc}") from exc
+            raise ApiError(f"Error DELETE appointment: {exc}") from exc
 
-    async def update_appointment(
-        self, date_str: str, index: int,
-        time: Optional[str] = None, name: Optional[str] = None,
-        apt_type: Optional[str] = None, notes: Optional[str] = None,
-    ) -> Dict[str, Any]:
+    async def update_appointment(self, date_str: str, index: int, time: Optional[str] = None, name: Optional[str] = None, apt_type: Optional[str] = None, notes: Optional[str] = None, *, user_id: int) -> Dict[str, Any]:
+        _validate_user_id(user_id)
         payload: Dict[str, Any] = {}
-        if time is not None:     payload["time"] = time
-        if name is not None:     payload["name"] = name
+        if time is not None: payload["time"] = time
+        if name is not None: payload["name"] = name
         if apt_type is not None: payload["type"] = apt_type
-        if notes is not None:    payload["notes"] = notes
-        return await self._put(f"/appointments/{date_str}/{index}", json=payload)
+        if notes is not None: payload["notes"] = notes
+        return await self._put(f"/appointments/{date_str}/{index}?user_id={user_id}", json=payload)
 
-    async def check_appointment_conflict(self, date_str: str, time: str) -> Optional[Dict[str, Any]]:
-        """
-        Comprueba si ya existe una cita a esa hora.
-        Devuelve la cita existente (dict) o None si no hay conflicto.
-        """
+    async def check_appointment_conflict(self, date_str: str, time: str, user_id: int) -> Optional[Dict[str, Any]]:
+        _validate_user_id(user_id)
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                r = await client.get(
-                    f"{self.base_url}/appointments/{date_str}/conflict/{time.replace(':', '%3A')}"
-                )
-                if r.status_code == 404:
+                r = await client.get(f"{self.base_url}/appointments/{date_str}/conflict/{time.replace(':', '%3A')}?user_id={user_id}")
+                if r.status_code in (404, 204):
                     return None
                 if r.status_code == 200:
                     return r.json()
@@ -150,114 +90,39 @@ class ThdoraApiClient:
         except Exception:
             return None
 
-    # ── Hábitos ────────────────────────────────────────────────
-
-    async def get_habits(self, date_str: str) -> Dict[str, str]:
-        # El endpoint devuelve List[{habit, value}]; transformamos a Dict[str, str]
-        raw: List[Dict[str, str]] = await self._get(f"/habits/{date_str}")
+    async def get_habits(self, date_str: str, user_id: int) -> Dict[str, str]:
+        _validate_user_id(user_id)
+        raw: List[Dict[str, str]] = await self._get(f"/habits/{date_str}?user_id={user_id}")
         return {item["habit"]: item["value"] for item in raw}
 
-    async def log_habit(self, date_str: str, habit: str, value: str) -> bool:
-        await self._post(f"/habits/{date_str}", json={"habit": habit, "value": value})
+    async def log_habit(self, date_str: str, habit: str, value: str, user_id: int) -> bool:
+        _validate_user_id(user_id)
+        await self._post(f"/habits/{date_str}?user_id={user_id}", json={"habit": habit, "value": value})
         return True
 
-    async def delete_habit(self, date_str: str, habit: str) -> bool:
+    async def delete_habit(self, date_str: str, habit: str, user_id: int) -> bool:
+        _validate_user_id(user_id)
         try:
             async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                r = await client.delete(f"{self.base_url}/habits/{date_str}/{habit}")
+                r = await client.delete(f"{self.base_url}/habits/{date_str}/{habit}?user_id={user_id}")
                 if r.status_code == 404:
                     return False
                 _raise_for_status(r)
                 return True
         except httpx.RequestError as exc:
-            raise ApiError(f"Error de red DELETE habit: {exc}") from exc
+            raise ApiError(f"Error DELETE habit: {exc}") from exc
 
-    async def update_habit(self, date_str: str, habit: str, value: str) -> Dict[str, str]:
-        return await self._put(f"/habits/{date_str}/{habit}", json={"value": value})
+    async def update_habit(self, date_str: str, habit: str, value: str, user_id: int) -> Dict[str, str]:
+        _validate_user_id(user_id)
+        return await self._put(f"/habits/{date_str}/{habit}?user_id={user_id}", json={"value": value})
 
-    # ── HabitConfig (F9.2) ──────────────────────────────────────────
+    async def get_summary(self, date_str: str, user_id: int) -> Dict[str, Any]:
+        _validate_user_id(user_id)
+        return await self._get(f"/summary/{date_str}?user_id={user_id}")
 
-    async def get_habit_config(self, name: str) -> Optional[Dict[str, Any]]:
-        """Devuelve la config de un hábito o None si no existe."""
-        try:
-            return await self._get(f"/habit-config/{name}")
-        except ApiError as e:
-            if e.status_code == 404:
-                return None
-            raise
-
-    async def get_all_habit_configs(self) -> List[Dict[str, Any]]:
-        return await self._get("/habit-config/")
-
-    async def upsert_habit_config(
-        self, name: str, habit_type: str = "text",
-        unit: Optional[str] = None,
-        min_val: Optional[float] = None,
-        max_val: Optional[float] = None,
-        quick_vals: Optional[List[str]] = None,
-        xp_rule: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        return await self._post("/habit-config/", json={
-            "name": name,
-            "habit_type": habit_type,
-            "unit": unit,
-            "min_val": min_val,
-            "max_val": max_val,
-            "quick_vals": quick_vals,
-            "xp_rule": xp_rule,
-        })
-
-    async def delete_habit_config(self, name: str) -> bool:
-        try:
-            async with httpx.AsyncClient(timeout=_TIMEOUT) as client:
-                r = await client.delete(f"{self.base_url}/habit-config/{name}")
-                if r.status_code == 404:
-                    return False
-                _raise_for_status(r)
-                return True
-        except httpx.RequestError as exc:
-            raise ApiError(f"Error de red DELETE habit-config: {exc}") from exc
-
-    # ── UserConfig (F12) ──────────────────────────────────────────
-
-    async def get_user_config(self, user_id: str) -> Dict[str, Any]:
-        """
-        Devuelve la config del usuario.
-        Si no existe, la API la crea con defaults automáticamente.
-        Nunca lanza 404.
-        """
-        return await self._get(f"/user_config/{user_id}")
-
-    async def update_user_config(
-        self,
-        user_id: str,
-        daily_summary_enabled: Optional[bool] = None,
-        daily_summary_time: Optional[str] = None,
-        notif_enabled: Optional[bool] = None,
-        notif_offsets: Optional[List[str]] = None,
-        notif_ask_confirm: Optional[bool] = None,
-        evening_log_enabled: Optional[bool] = None,
-        evening_log_time: Optional[str] = None,
-        timezone: Optional[str] = None,
-    ) -> Dict[str, Any]:
-        """Actualiza solo los campos enviados (semántica PATCH sobre PUT)."""
-        payload: Dict[str, Any] = {}
-        if daily_summary_enabled is not None: payload["daily_summary_enabled"] = daily_summary_enabled
-        if daily_summary_time is not None:    payload["daily_summary_time"]    = daily_summary_time
-        if notif_enabled is not None:         payload["notif_enabled"]         = notif_enabled
-        if notif_offsets is not None:         payload["notif_offsets"]         = notif_offsets
-        if notif_ask_confirm is not None:     payload["notif_ask_confirm"]     = notif_ask_confirm
-        if evening_log_enabled is not None:   payload["evening_log_enabled"]   = evening_log_enabled
-        if evening_log_time is not None:      payload["evening_log_time"]      = evening_log_time
-        if timezone is not None:              payload["timezone"]              = timezone
-        return await self._put(f"/user_config/{user_id}", json=payload)
-
-    # ── Resumen ────────────────────────────────────────────────
-
-    async def get_summary(self, date_str: str) -> Dict[str, Any]:
-        return await self._get(f"/summary/{date_str}")
-
-    # ── Internals ───────────────────────────────────────────────
+    async def get_week_summary(self, date_str: str, user_id: int) -> Dict[str, Dict[str, Any]]:
+        _validate_user_id(user_id)
+        return await self._get(f"/summary/week/{date_str}?user_id={user_id}")
 
     async def _get(self, path: str) -> Any:
         try:
@@ -266,7 +131,7 @@ class ThdoraApiClient:
                 _raise_for_status(r)
                 return r.json()
         except httpx.RequestError as exc:
-            raise ApiError(f"Error de red en GET {path}: {exc}") from exc
+            raise ApiError(f"Error GET {path}: {exc}") from exc
 
     async def _post(self, path: str, json: Dict[str, Any]) -> Any:
         try:
@@ -275,7 +140,7 @@ class ThdoraApiClient:
                 _raise_for_status(r)
                 return r.json()
         except httpx.RequestError as exc:
-            raise ApiError(f"Error de red en POST {path}: {exc}") from exc
+            raise ApiError(f"Error POST {path}: {exc}") from exc
 
     async def _put(self, path: str, json: Dict[str, Any]) -> Any:
         try:
@@ -284,4 +149,4 @@ class ThdoraApiClient:
                 _raise_for_status(r)
                 return r.json()
         except httpx.RequestError as exc:
-            raise ApiError(f"Error de red en PUT {path}: {exc}") from exc
+            raise ApiError(f"Error PUT {path}: {exc}") from exc
