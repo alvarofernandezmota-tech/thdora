@@ -1,16 +1,19 @@
 """
-Router de citas — v2.2 (solapamiento real de 1h).
+Router de citas — v3 (multi-user isolation).
+
+Todos los endpoints requieren `telegram_user_id` como query param obligatorio.
+Devuelven 400 si falta o es 0.
 
 Endpoints::
 
     POST   /appointments/{date}                     → crear cita
     GET    /appointments/{date}                     → citas del día
-    GET    /appointments/{date}/conflict/{time}     → conflicto de hora (solapamiento 1h)
+    GET    /appointments/{date}/conflict/{time}     → conflicto de hora
     DELETE /appointments/{date}/{index}             → borrar por índice
     PUT    /appointments/{date}/{index}             → editar cita
     GET    /appointments/range/{from}/{to}          → citas en rango
     GET    /appointments/upcoming/{from}            → próximas citas
-    GET    /appointments/week/{date}                → citas de la semana (lun–dom)
+    GET    /appointments/week/{date}                → citas de la semana
 """
 
 from datetime import date as date_type, timedelta
@@ -24,11 +27,10 @@ from src.core.impl.sqlite_lifemanager import SQLiteLifeManager
 
 router = APIRouter(prefix="/appointments", tags=["appointments"])
 
-# Duración predeterminada de una cita (minutos)
 _DEFAULT_DURATION_MIN = 60
 
 
-# ── Modelos Pydantic ─────────────────────────────────────────────────────────
+# ── Modelos Pydantic ──────────────────────────────────────────────────────────
 
 class AppointmentCreate(BaseModel):
     time: str
@@ -59,7 +61,7 @@ class AppointmentCreatedResponse(BaseModel):
     index: int
 
 
-# ── Helpers ───────────────────────────────────────────────────────────────
+# ── Helpers ───────────────────────────────────────────────────────────────────
 
 def _parse_date(date_str: str) -> str:
     try:
@@ -67,6 +69,15 @@ def _parse_date(date_str: str) -> str:
         return date_str
     except ValueError:
         raise HTTPException(status_code=422, detail=f"Fecha inválida: '{date_str}'. Usa YYYY-MM-DD.")
+
+
+def _require_uid(telegram_user_id: int) -> int:
+    if not telegram_user_id or telegram_user_id <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="telegram_user_id es obligatorio y debe ser > 0.",
+        )
+    return telegram_user_id
 
 
 def _week_bounds(date_str: str) -> tuple[str, str]:
@@ -85,7 +96,6 @@ def _to_response(apt: dict) -> AppointmentResponse:
 
 
 def _time_to_minutes(time_str: str) -> int:
-    """Convierte 'HH:MM' a minutos desde medianoche."""
     h, m = time_str.split(":")
     return int(h) * 60 + int(m)
 
@@ -93,32 +103,33 @@ def _time_to_minutes(time_str: str) -> int:
 def _find_overlap(
     apts: list, new_time: str, duration: int = _DEFAULT_DURATION_MIN
 ) -> Optional[dict]:
-    """
-    Devuelve la primera cita que solapa con new_time + duration.
-    Solapamiento real: new_start < exist_end AND new_end > exist_start
-    Asume que todas las citas duran 'duration' minutos.
-    """
     new_start = _time_to_minutes(new_time)
-    new_end   = new_start + duration
+    new_end = new_start + duration
     for apt in apts:
         exist_start = _time_to_minutes(apt["time"])
-        exist_end   = exist_start + duration
+        exist_end = exist_start + duration
         if new_start < exist_end and new_end > exist_start:
             return apt
     return None
 
 
-# ── Endpoints ──────────────────────────────────────────────────────────────
+# ── Endpoints ──────────────────────────────────────────────────────────────────
 
 @router.post("/{date_str}", response_model=AppointmentCreatedResponse, status_code=201)
 def create_appointment(
-    date_str: str, body: AppointmentCreate,
+    date_str: str,
+    body: AppointmentCreate,
+    telegram_user_id: int = Query(..., gt=0, description="Telegram user ID del propietario"),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> AppointmentCreatedResponse:
-    """Crea una nueva cita."""
+    """Crea una nueva cita para el usuario indicado."""
     _parse_date(date_str)
+    _require_uid(telegram_user_id)
     try:
-        apt = manager.create_appointment(date_str, body.time, body.type, body.notes, body.name)
+        apt = manager.create_appointment(
+            date_str, body.time, body.type, body.notes, body.name,
+            user_id=telegram_user_id,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))
     return AppointmentCreatedResponse(id=apt["id"], index=apt["index"])
@@ -126,12 +137,15 @@ def create_appointment(
 
 @router.get("/week/{date_str}", response_model=Dict[str, List[AppointmentResponse]])
 def get_appointments_week(
-    date_str: str, manager: SQLiteLifeManager = Depends(get_manager),
+    date_str: str,
+    telegram_user_id: int = Query(..., gt=0),
+    manager: SQLiteLifeManager = Depends(get_manager),
 ) -> Dict[str, List[AppointmentResponse]]:
-    """Citas de la semana (lun–dom) que contiene date_str."""
+    """Citas de la semana (lun–dom) del usuario."""
     _parse_date(date_str)
+    _require_uid(telegram_user_id)
     monday, sunday = _week_bounds(date_str)
-    rows = manager.get_appointments_range(monday, sunday)
+    rows = manager.get_appointments_range(monday, sunday, user_id=telegram_user_id)
     result: Dict[str, List[AppointmentResponse]] = {}
     for apt in rows:
         result.setdefault(apt["date"], []).append(_to_response(apt))
@@ -140,13 +154,16 @@ def get_appointments_week(
 
 @router.get("/range/{date_from}/{date_to}", response_model=Dict[str, List[AppointmentResponse]])
 def get_appointments_range(
-    date_from: str, date_to: str,
+    date_from: str,
+    date_to: str,
+    telegram_user_id: int = Query(..., gt=0),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> Dict[str, List[AppointmentResponse]]:
-    """Citas en rango de fechas agrupadas por día."""
+    """Citas en rango de fechas del usuario."""
     _parse_date(date_from)
     _parse_date(date_to)
-    rows = manager.get_appointments_range(date_from, date_to)
+    _require_uid(telegram_user_id)
+    rows = manager.get_appointments_range(date_from, date_to, user_id=telegram_user_id)
     result: Dict[str, List[AppointmentResponse]] = {}
     for apt in rows:
         result.setdefault(apt["date"], []).append(_to_response(apt))
@@ -156,12 +173,14 @@ def get_appointments_range(
 @router.get("/upcoming/{date_from}", response_model=List[AppointmentResponse])
 def get_upcoming(
     date_from: str,
+    telegram_user_id: int = Query(..., gt=0),
     limit: int = Query(default=10, ge=1, le=50),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> List[AppointmentResponse]:
-    """Próximas citas desde date_from (máx limit)."""
+    """Próximas citas del usuario desde date_from."""
     _parse_date(date_from)
-    rows = manager.get_upcoming_appointments(date_from, limit)
+    _require_uid(telegram_user_id)
+    rows = manager.get_upcoming_appointments(date_from, limit, user_id=telegram_user_id)
     return [_to_response(apt) for apt in rows]
 
 
@@ -169,18 +188,14 @@ def get_upcoming(
 def check_conflict(
     date_str: str,
     time_str: str,
+    telegram_user_id: int = Query(..., gt=0),
     duration: int = Query(default=_DEFAULT_DURATION_MIN, ge=1, le=480),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> Optional[AppointmentResponse]:
-    """
-    Comprueba si la nueva cita (time_str, duración 'duration' min) solapa con alguna existente.
-    Usa solapamiento real: new_start < exist_end AND new_end > exist_start.
-
-    - 200 + cita   → hay solapamiento, devuelve la cita que choca
-    - 404          → franja libre
-    """
+    """Comprueba solapamiento real (60min) para el usuario."""
     _parse_date(date_str)
-    apts = manager.get_appointments(date_str)
+    _require_uid(telegram_user_id)
+    apts = manager.get_appointments(date_str, user_id=telegram_user_id)
     overlap = _find_overlap(apts, time_str, duration)
     if overlap:
         return _to_response(overlap)
@@ -189,36 +204,48 @@ def check_conflict(
 
 @router.get("/{date_str}", response_model=List[AppointmentResponse])
 def get_appointments(
-    date_str: str, manager: SQLiteLifeManager = Depends(get_manager),
+    date_str: str,
+    telegram_user_id: int = Query(..., gt=0),
+    manager: SQLiteLifeManager = Depends(get_manager),
 ) -> List[AppointmentResponse]:
-    """Lista las citas del día ordenadas por hora."""
+    """Citas del día del usuario."""
     _parse_date(date_str)
-    return [_to_response(apt) for apt in manager.get_appointments(date_str)]
+    _require_uid(telegram_user_id)
+    return [_to_response(apt) for apt in manager.get_appointments(date_str, user_id=telegram_user_id)]
 
 
 @router.delete("/{date_str}/{index}", status_code=204)
 def delete_appointment(
-    date_str: str, index: int,
+    date_str: str,
+    index: int,
+    telegram_user_id: int = Query(..., gt=0),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> None:
-    """Borra la cita con ese índice ordinal del día."""
+    """Borra la cita del usuario con ese índice ordinal."""
     _parse_date(date_str)
-    deleted = manager.delete_appointment(date_str, index)
+    _require_uid(telegram_user_id)
+    deleted = manager.delete_appointment(date_str, index, user_id=telegram_user_id)
     if not deleted:
         raise HTTPException(status_code=404, detail=f"Cita índice {index} no encontrada el {date_str}.")
 
 
 @router.put("/{date_str}/{index}", response_model=AppointmentResponse)
 def update_appointment(
-    date_str: str, index: int, body: AppointmentUpdate,
+    date_str: str,
+    index: int,
+    body: AppointmentUpdate,
+    telegram_user_id: int = Query(..., gt=0),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> AppointmentResponse:
-    """Edita campos de una cita. Solo actualiza los campos no-None."""
+    """Edita campos de la cita del usuario."""
     _parse_date(date_str)
+    _require_uid(telegram_user_id)
     try:
         updated = manager.update_appointment(
-            date_str, index, time=body.time, name=body.name,
+            date_str, index,
+            time=body.time, name=body.name,
             apt_type=body.type, notes=body.notes,
+            user_id=telegram_user_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc))

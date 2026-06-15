@@ -1,23 +1,17 @@
 """
 SQLiteLifeManager — implementación persistente de AbstractLifeManager.
 
-Usa SQLAlchemy + SQLite para almacenar citas, hábitos y configuración
-de hábitos de forma persistente entre reinicios.
-
-Diferencias respecto a MemoryLifeManager / JsonLifeManager:
-    - Los datos persisten en ``data/thdora.db``
-    - Los índices son ordinales por día (como en Json)
-    - Thread-safe gracias al context manager de sesión
-    - Soporta búsqueda por rango de fechas (para /agenda y /upcoming)
-    - Soporta HabitConfig (tipos adaptativos F9.2)
-    - Soporta UserConfig (notificaciones proactivas F12)
+v2: aislamiento multi-usuario completo.
+    Todos los métodos que tocan appointments y habits aceptan user_id
+    (telegram_user_id: int) y filtran por él. Sin user_id válido (> 0)
+    se lanza ValueError para evitar accesos cruzados entre usuarios.
 
 Uso::
 
     manager = SQLiteLifeManager()
-    manager.create_appointment("2026-03-27", "10:00", "médica", "Dr. Smith")
-    appointments = manager.get_appointments("2026-03-27")
-    cfg = manager.get_user_config("123456789")  # crea con defaults si no existe
+    manager.create_appointment("2026-03-27", "10:00", "médica", "Dr. Smith",
+                               name="Dentista", user_id=123456789)
+    appointments = manager.get_appointments("2026-03-27", user_id=123456789)
 """
 
 from typing import Any
@@ -29,37 +23,69 @@ from src.db.base import get_session, init_db
 from src.db.models import Appointment, Habit, HabitConfig, UserConfig
 
 
+def _require_user_id(user_id: int) -> None:
+    """Lanza ValueError si user_id no es válido (0 o negativo)."""
+    if not user_id or user_id <= 0:
+        raise ValueError(
+            "telegram_user_id es obligatorio y debe ser > 0. "
+            "Comprueba que el handler extrae update.effective_user.id correctamente."
+        )
+
+
 class SQLiteLifeManager(AbstractLifeManager):
-    """Implementación de AbstractLifeManager con persistencia SQLite."""
+    """Implementación de AbstractLifeManager con persistencia SQLite + aislamiento por usuario."""
 
     def __init__(self) -> None:
-        init_db()  # crea las tablas si no existen
+        init_db()
 
-    # ── Citas ────────────────────────────────────────────────
+    # ── Citas ────────────────────────────────────────────────────────────
 
-    def get_appointments(self, date: str) -> list[dict]:
-        """Devuelve todas las citas de un día ordenadas por hora."""
+    def get_appointments(self, date: str, user_id: int = 0) -> list[dict]:
+        """Devuelve citas del día filtradas por usuario."""
+        _require_user_id(user_id)
         with get_session() as session:
             rows = (
                 session.query(Appointment)
-                .filter(Appointment.date == date)
+                .filter(
+                    and_(
+                        Appointment.date == date,
+                        Appointment.telegram_user_id == user_id,
+                    )
+                )
                 .order_by(Appointment.time)
                 .all()
             )
             return [r.to_dict() for r in rows]
 
     def create_appointment(
-        self, date: str, time: str, apt_type: str, notes: str = "", name: str = ""
+        self,
+        date: str,
+        time: str,
+        apt_type: str,
+        notes: str = "",
+        name: str = "",
+        user_id: int = 0,
     ) -> dict:
-        """Crea una cita y le asigna un índice ordinal para el día."""
+        """Crea una cita con índice ordinal por usuario+día."""
+        _require_user_id(user_id)
         if not self._valid_time(time):
             raise ValueError(f"Hora inválida: {time}")
         if apt_type not in ("médica", "personal", "trabajo", "otra"):
             raise ValueError(f"Tipo inválido: {apt_type}")
 
         with get_session() as session:
-            count = session.query(Appointment).filter(Appointment.date == date).count()
+            count = (
+                session.query(Appointment)
+                .filter(
+                    and_(
+                        Appointment.date == date,
+                        Appointment.telegram_user_id == user_id,
+                    )
+                )
+                .count()
+            )
             apt = Appointment(
+                telegram_user_id=user_id,
                 date=date,
                 time=time,
                 name=name,
@@ -71,12 +97,19 @@ class SQLiteLifeManager(AbstractLifeManager):
             session.flush()
             return apt.to_dict()
 
-    def delete_appointment(self, date: str, index: int) -> bool:
-        """Borra una cita por índice ordinal. Devuelve True si se borró."""
+    def delete_appointment(self, date: str, index: int, user_id: int = 0) -> bool:
+        """Borra una cita por índice, solo si pertenece al usuario."""
+        _require_user_id(user_id)
         with get_session() as session:
             apt = (
                 session.query(Appointment)
-                .filter(and_(Appointment.date == date, Appointment.index == index))
+                .filter(
+                    and_(
+                        Appointment.date == date,
+                        Appointment.index == index,
+                        Appointment.telegram_user_id == user_id,
+                    )
+                )
                 .first()
             )
             if not apt:
@@ -92,12 +125,20 @@ class SQLiteLifeManager(AbstractLifeManager):
         name: str | None = None,
         apt_type: str | None = None,
         notes: str | None = None,
+        user_id: int = 0,
     ) -> dict | None:
-        """Edita una cita. Solo actualiza los campos no-None."""
+        """Edita campos de una cita, solo si pertenece al usuario."""
+        _require_user_id(user_id)
         with get_session() as session:
             apt = (
                 session.query(Appointment)
-                .filter(and_(Appointment.date == date, Appointment.index == index))
+                .filter(
+                    and_(
+                        Appointment.date == date,
+                        Appointment.index == index,
+                        Appointment.telegram_user_id == user_id,
+                    )
+                )
                 .first()
             )
             if not apt:
@@ -114,8 +155,11 @@ class SQLiteLifeManager(AbstractLifeManager):
                 apt.notes = notes
             return apt.to_dict()
 
-    def get_appointments_range(self, date_from: str, date_to: str) -> list[dict]:
-        """Devuelve citas en un rango de fechas. Útil para /agenda."""
+    def get_appointments_range(
+        self, date_from: str, date_to: str, user_id: int = 0
+    ) -> list[dict]:
+        """Citas en rango de fechas para un usuario concreto."""
+        _require_user_id(user_id)
         with get_session() as session:
             rows = (
                 session.query(Appointment)
@@ -123,6 +167,7 @@ class SQLiteLifeManager(AbstractLifeManager):
                     and_(
                         Appointment.date >= date_from,
                         Appointment.date <= date_to,
+                        Appointment.telegram_user_id == user_id,
                     )
                 )
                 .order_by(Appointment.date, Appointment.time)
@@ -130,64 +175,107 @@ class SQLiteLifeManager(AbstractLifeManager):
             )
             return [r.to_dict() for r in rows]
 
-    def get_upcoming_appointments(self, from_date: str, limit: int = 10) -> list[dict]:
-        """Devuelve las próximas citas desde una fecha. Útil para /proximas."""
+    def get_upcoming_appointments(
+        self, from_date: str, limit: int = 10, user_id: int = 0
+    ) -> list[dict]:
+        """Próximas citas desde from_date para un usuario concreto."""
+        _require_user_id(user_id)
         with get_session() as session:
             rows = (
                 session.query(Appointment)
-                .filter(Appointment.date >= from_date)
+                .filter(
+                    and_(
+                        Appointment.date >= from_date,
+                        Appointment.telegram_user_id == user_id,
+                    )
+                )
                 .order_by(Appointment.date, Appointment.time)
                 .limit(limit)
                 .all()
             )
             return [r.to_dict() for r in rows]
 
-    def check_appointment_conflict(self, date: str, time: str) -> dict | None:
-        """Devuelve la cita existente a esa hora, o None si no hay conflicto."""
+    def check_appointment_conflict(
+        self, date: str, time: str, user_id: int = 0
+    ) -> dict | None:
+        """Devuelve cita existente a esa hora para el usuario, o None."""
+        _require_user_id(user_id)
         with get_session() as session:
             apt = (
                 session.query(Appointment)
-                .filter(and_(Appointment.date == date, Appointment.time == time))
+                .filter(
+                    and_(
+                        Appointment.date == date,
+                        Appointment.time == time,
+                        Appointment.telegram_user_id == user_id,
+                    )
+                )
                 .first()
             )
             return apt.to_dict() if apt else None
 
-    # ── Hábitos ────────────────────────────────────────────────
+    # ── Hábitos ──────────────────────────────────────────────────────────
 
-    def get_habits(self, date: str) -> dict[str, str]:
-        """Devuelve los hábitos del día como dict {nombre: valor}."""
+    def get_habits(self, date: str, user_id: int = 0) -> dict[str, str]:
+        """Hábitos del día para un usuario concreto."""
+        _require_user_id(user_id)
         with get_session() as session:
             rows = (
                 session.query(Habit)
-                .filter(Habit.date == date)
+                .filter(
+                    and_(
+                        Habit.date == date,
+                        Habit.telegram_user_id == user_id,
+                    )
+                )
                 .order_by(Habit.habit)
                 .all()
             )
             return {r.habit: r.value for r in rows}
 
-    def log_habit(self, date: str, habit: str, value: str) -> dict:
-        """Registra o actualiza un hábito. Upsert por (date, habit)."""
+    def log_habit(
+        self, date: str, habit: str, value: str, user_id: int = 0
+    ) -> dict:
+        """Registra o actualiza un hábito para el usuario (upsert por user+date+habit)."""
+        _require_user_id(user_id)
         with get_session() as session:
             existing = (
                 session.query(Habit)
-                .filter(and_(Habit.date == date, Habit.habit == habit))
+                .filter(
+                    and_(
+                        Habit.date == date,
+                        Habit.habit == habit,
+                        Habit.telegram_user_id == user_id,
+                    )
+                )
                 .first()
             )
             if existing:
                 existing.value = value
                 return existing.to_dict()
-            else:
-                h = Habit(date=date, habit=habit, value=value)
-                session.add(h)
-                session.flush()
-                return h.to_dict()
+            h = Habit(
+                telegram_user_id=user_id,
+                date=date,
+                habit=habit,
+                value=value,
+            )
+            session.add(h)
+            session.flush()
+            return h.to_dict()
 
-    def delete_habit(self, date: str, habit: str) -> bool:
-        """Borra un hábito por nombre. Devuelve True si se borró."""
+    def delete_habit(self, date: str, habit: str, user_id: int = 0) -> bool:
+        """Borra un hábito del usuario por nombre."""
+        _require_user_id(user_id)
         with get_session() as session:
             h = (
                 session.query(Habit)
-                .filter(and_(Habit.date == date, Habit.habit == habit))
+                .filter(
+                    and_(
+                        Habit.date == date,
+                        Habit.habit == habit,
+                        Habit.telegram_user_id == user_id,
+                    )
+                )
                 .first()
             )
             if not h:
@@ -195,12 +283,21 @@ class SQLiteLifeManager(AbstractLifeManager):
             session.delete(h)
             return True
 
-    def update_habit(self, date: str, habit: str, value: str) -> dict | None:
-        """Actualiza el valor de un hábito existente."""
+    def update_habit(
+        self, date: str, habit: str, value: str, user_id: int = 0
+    ) -> dict | None:
+        """Actualiza el valor de un hábito existente del usuario."""
+        _require_user_id(user_id)
         with get_session() as session:
             h = (
                 session.query(Habit)
-                .filter(and_(Habit.date == date, Habit.habit == habit))
+                .filter(
+                    and_(
+                        Habit.date == date,
+                        Habit.habit == habit,
+                        Habit.telegram_user_id == user_id,
+                    )
+                )
                 .first()
             )
             if not h:
@@ -208,8 +305,11 @@ class SQLiteLifeManager(AbstractLifeManager):
             h.value = value
             return h.to_dict()
 
-    def get_habits_range(self, date_from: str, date_to: str) -> dict[str, dict[str, str]]:
-        """Devuelve hábitos en rango de fechas. Útil para /resumen semana."""
+    def get_habits_range(
+        self, date_from: str, date_to: str, user_id: int = 0
+    ) -> dict[str, dict[str, str]]:
+        """Hábitos en rango de fechas para un usuario."""
+        _require_user_id(user_id)
         with get_session() as session:
             rows = (
                 session.query(Habit)
@@ -217,6 +317,7 @@ class SQLiteLifeManager(AbstractLifeManager):
                     and_(
                         Habit.date >= date_from,
                         Habit.date <= date_to,
+                        Habit.telegram_user_id == user_id,
                     )
                 )
                 .order_by(Habit.date, Habit.habit)
@@ -227,16 +328,14 @@ class SQLiteLifeManager(AbstractLifeManager):
                 result.setdefault(r.date, {})[r.habit] = r.value
             return result
 
-    # ── HabitConfig ──────────────────────────────────────────────
+    # ── HabitConfig (sin user_id — configuración global del sistema) ──────
 
     def get_habit_config(self, name: str) -> dict | None:
-        """Devuelve la config de un hábito por nombre, o None si no existe."""
         with get_session() as session:
             cfg = session.query(HabitConfig).filter(HabitConfig.name == name).first()
             return cfg.to_dict() if cfg else None
 
     def get_all_habit_configs(self) -> list[dict]:
-        """Devuelve la config de todos los hábitos ordenados por nombre."""
         with get_session() as session:
             rows = session.query(HabitConfig).order_by(HabitConfig.name).all()
             return [r.to_dict() for r in rows]
@@ -251,15 +350,9 @@ class SQLiteLifeManager(AbstractLifeManager):
         quick_vals: list[str] | None = None,
         xp_rule: str | None = None,
     ) -> dict:
-        """
-        Crea o actualiza la configuración de un hábito.
-        quick_vals se almacena como string CSV: ["6h","7h"] → "6h,7h"
-        """
         if habit_type not in ("numeric", "time", "boolean", "text"):
             raise ValueError(f"Tipo inválido: {habit_type}. Usa: numeric, time, boolean, text")
-
         quick_str = ",".join(quick_vals) if quick_vals else None
-
         with get_session() as session:
             cfg = session.query(HabitConfig).filter(HabitConfig.name == name).first()
             if cfg:
@@ -284,7 +377,6 @@ class SQLiteLifeManager(AbstractLifeManager):
             return cfg.to_dict()
 
     def delete_habit_config(self, name: str) -> bool:
-        """Borra la configuración de un hábito. Devuelve True si se borró."""
         with get_session() as session:
             cfg = session.query(HabitConfig).filter(HabitConfig.name == name).first()
             if not cfg:
@@ -292,19 +384,13 @@ class SQLiteLifeManager(AbstractLifeManager):
             session.delete(cfg)
             return True
 
-    # ── UserConfig (F12) ─────────────────────────────────────────
+    # ── UserConfig ───────────────────────────────────────────────────────
 
     def get_user_config(self, user_id: str) -> dict:
-        """
-        Devuelve la configuración del usuario.
-        Si no existe, la crea con los valores predeterminados (upsert automático).
-        Nunca devuelve None — el usuario siempre tiene configuración.
-        """
         with get_session() as session:
             cfg = session.query(UserConfig).filter(UserConfig.user_id == user_id).first()
             if cfg:
                 return cfg.to_dict()
-            # Primera vez: crear con defaults
             cfg = UserConfig(user_id=user_id)
             session.add(cfg)
             session.flush()
@@ -322,18 +408,12 @@ class SQLiteLifeManager(AbstractLifeManager):
         evening_log_time: str | None = None,
         timezone: str | None = None,
     ) -> dict:
-        """
-        Actualiza la configuración del usuario. Solo modifica los campos no-None.
-        Si el usuario no tiene fila todavía, la crea con defaults primero.
-        notif_offsets recibe una lista ["60","30","15"] y se almacena como CSV.
-        """
         with get_session() as session:
             cfg = session.query(UserConfig).filter(UserConfig.user_id == user_id).first()
             if not cfg:
                 cfg = UserConfig(user_id=user_id)
                 session.add(cfg)
                 session.flush()
-
             if daily_summary_enabled is not None:
                 cfg.daily_summary_enabled = daily_summary_enabled
             if daily_summary_time is not None:
@@ -350,24 +430,24 @@ class SQLiteLifeManager(AbstractLifeManager):
                 cfg.evening_log_time = evening_log_time
             if timezone is not None:
                 cfg.timezone = timezone
-
             return cfg.to_dict()
 
-    # ── Resumen ────────────────────────────────────────────────
+    # ── Resumen ──────────────────────────────────────────────────────────
 
-    def get_summary(self, date: str) -> dict[str, Any]:
-        """Devuelve resumen del día: citas + hábitos."""
+    def get_summary(self, date: str, user_id: int = 0) -> dict[str, Any]:
+        """Resumen del día: citas + hábitos del usuario."""
+        _require_user_id(user_id)
         return {
             "date": date,
-            "appointments": self.get_appointments(date),
-            "habits": self.get_habits(date),
+            "appointments": self.get_appointments(date, user_id=user_id),
+            "habits": self.get_habits(date, user_id=user_id),
         }
 
-    def get_day_summary(self, date: str) -> dict[str, Any]:
-        """Alias de get_summary para cumplir con AbstractLifeManager."""
-        return self.get_summary(date)
+    def get_day_summary(self, date: str, user_id: int = 0) -> dict[str, Any]:
+        """Alias de get_summary."""
+        return self.get_summary(date, user_id=user_id)
 
-    # ── Helpers ────────────────────────────────────────────────
+    # ── Helpers ──────────────────────────────────────────────────────────
 
     @staticmethod
     def _valid_time(time: str) -> bool:

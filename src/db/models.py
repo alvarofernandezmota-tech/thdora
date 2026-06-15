@@ -10,13 +10,14 @@ Tablas:
 Diseño:
     - `date` almacenado como string ISO (YYYY-MM-DD) para simplicidad
     - `index` calculado al insertar (número ordinal por día)
+    - `telegram_user_id` en appointments y habits garantiza aislamiento multi-usuario
     - No hay FK entre tablas — cada día es independiente
     - `habit_config.quick_vals` almacenado como JSON string (lista separada por comas)
     - `user_config.notif_offsets` almacenado como string CSV ("60,30,15")
     - `user_config` usa upsert por `user_id` — preparado para multi-usuario (F11)
 """
 
-from sqlalchemy import Boolean, Integer, String, Text, Float
+from sqlalchemy import Boolean, Integer, String, Text, Float, Index
 from sqlalchemy.orm import Mapped, mapped_column
 
 from src.db.base import Base
@@ -28,6 +29,7 @@ class Appointment(Base):
     __tablename__ = "appointments"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_user_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, index=True)
     date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)  # YYYY-MM-DD
     time: Mapped[str] = mapped_column(String(5), nullable=False)               # HH:MM
     name: Mapped[str] = mapped_column(String(200), nullable=False, default="")
@@ -35,9 +37,14 @@ class Appointment(Base):
     notes: Mapped[str] = mapped_column(Text, nullable=True)
     index: Mapped[int] = mapped_column(Integer, nullable=False, default=0)     # ordinal por día
 
+    __table_args__ = (
+        Index("ix_appointments_user_date", "telegram_user_id", "date"),
+    )
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "telegram_user_id": self.telegram_user_id,
             "date": self.date,
             "time": self.time,
             "name": self.name,
@@ -53,13 +60,19 @@ class Habit(Base):
     __tablename__ = "habits"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    telegram_user_id: Mapped[int] = mapped_column(Integer, nullable=False, default=0, index=True)
     date: Mapped[str] = mapped_column(String(10), nullable=False, index=True)  # YYYY-MM-DD
     habit: Mapped[str] = mapped_column(String(100), nullable=False)
     value: Mapped[str] = mapped_column(String(100), nullable=False)
 
+    __table_args__ = (
+        Index("ix_habits_user_date", "telegram_user_id", "date"),
+    )
+
     def to_dict(self) -> dict:
         return {
             "id": self.id,
+            "telegram_user_id": self.telegram_user_id,
             "date": self.date,
             "habit": self.habit,
             "value": self.value,
@@ -90,12 +103,12 @@ class HabitConfig(Base):
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(100), nullable=False, unique=True)
-    habit_type: Mapped[str] = mapped_column(String(20), nullable=False, default="text")  # numeric|time|boolean|text
+    habit_type: Mapped[str] = mapped_column(String(20), nullable=False, default="text")
     unit: Mapped[str] = mapped_column(String(20), nullable=True)
     min_val: Mapped[float] = mapped_column(Float, nullable=True)
     max_val: Mapped[float] = mapped_column(Float, nullable=True)
-    quick_vals: Mapped[str] = mapped_column(String(200), nullable=True)  # "6h,7h,8h,9h"
-    xp_rule: Mapped[str] = mapped_column(String(50), nullable=True)      # "gte:7", "any"
+    quick_vals: Mapped[str] = mapped_column(String(200), nullable=True)
+    xp_rule: Mapped[str] = mapped_column(String(50), nullable=True)
 
     def to_dict(self) -> dict:
         return {
@@ -127,9 +140,6 @@ class UserConfig(Base):
     Upsert:
         GET /user_config/{user_id} crea la fila con defaults si no existe.
         El usuario nunca ve un error por "no configurado".
-
-    Multi-usuario (F11):
-        user_id es único e indexado — preparado para múltiples usuarios.
     """
 
     __tablename__ = "user_config"
@@ -137,20 +147,16 @@ class UserConfig(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     user_id: Mapped[str] = mapped_column(String(50), nullable=False, unique=True, index=True)
 
-    # ── Resumen diario ───────────────────────────────────────────────
     daily_summary_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     daily_summary_time: Mapped[str] = mapped_column(String(5), nullable=False, default="08:00")
 
-    # ── Avisos de cita ───────────────────────────────────────────────
     notif_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     notif_offsets: Mapped[str] = mapped_column(String(50), nullable=False, default="60,30,15")
     notif_ask_confirm: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
-    # ── Resumen nocturno de hábitos ─────────────────────────────────
     evening_log_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     evening_log_time: Mapped[str] = mapped_column(String(5), nullable=False, default="22:00")
 
-    # ── Zona horaria ────────────────────────────────────────────────
     timezone: Mapped[str] = mapped_column(String(50), nullable=False, default="Europe/Madrid")
 
     def to_dict(self) -> dict:
