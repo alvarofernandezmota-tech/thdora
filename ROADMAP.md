@@ -4,7 +4,7 @@
 
 ---
 
-## Estado actual — v0.16.4 (14 junio 2026)
+## Estado actual — v0.17.0 (16 junio 2026)
 
 ```
 Bot Telegram (9 comandos + 5 ConversationHandlers + inline buttons + NLP texto libre)
@@ -90,10 +90,10 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 
 | # | Tarea | Estado |
 |---|---|---|
-| 1.1 | Fix `TimedOut` al enviar respuesta Telegram desde NLP | 🔲 **SIGUIENTE** |
-| 1.2 | Mejorar system prompt — rol claro, límites, contexto | 🔲 Pendiente |
-| 1.3 | Pasar contexto dinámico al modelo (citas hoy, hábitos) | 🔲 Pendiente |
-| 1.4 | Function calling — crear/borrar citas desde texto libre | 🔲 Pendiente |
+| 1.1 | Fix TimedOut — timeout read subido a 45s | ✅ v0.17.0 |
+| 1.2 | System prompt Toki — rol + límites + few-shot examples | ✅ v0.17.0 |
+| 1.3 | Contexto dinámico al modelo (citas hoy + hábitos) | ✅ v0.17.0 |
+| 1.4 | Function calling — crear/borrar/consultar citas desde texto | ✅ v0.17.0 |
 
 ### 🟡 Bloque 2 — Citas (continuación)
 
@@ -125,6 +125,16 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 |---|---|---|
 | 5.1 | Tailscale en todos los dispositivos | 🔲 Pendiente |
 | 5.2 | Script auto-update — despliegue sin SSH manual | 🔲 Pendiente |
+
+### 🔴 Bloque 6 — Integración yggdrasil-dew (SIGUIENTE)
+
+| # | Tarea | Estado |
+|---|---|---|
+| 6.1 | src/config.py pydantic-settings + GITHUB_TOKEN | ✅ Sprint 1 |
+| 6.2 | src/services/github_client.py (GitHub Contents API) | ✅ Sprint 1 |
+| 6.3 | src/bot/handlers/diario.py + registrar /diario | ✅ Sprint 1 |
+| 6.4 | Añadir secrets GitHub Actions + docker compose up -d | 🔲 Pendiente |
+| 6.5 | Probar /diario end-to-end en Madre | 🔲 Pendiente |
 
 ---
 
@@ -194,4 +204,4 @@ Fix TimedOut NLP (1.1)
 
 ---
 
-_Última actualización: 14 junio 2026 — 23:48 CEST — v0.16.4 — Servidor Madre operativo_
+_Última actualización: 16 junio 2026 — 23:30 CEST — v0.17.0 — Sprint 1 en curso_
