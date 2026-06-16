@@ -94,6 +94,7 @@ from src.bot.handlers.nlp import nlp_handler
 from src.bot.handlers.nlp_disambig import cb_nlp_disambig
 from src.bot.handlers.onboarding import get_onboarding_handler
 from src.bot.handlers.stats import stats_handler
+from src.bot.handlers.diario import diario_handler  # NUEVO — Sprint 1
 
 load_dotenv()
 
@@ -187,6 +188,7 @@ def build_app(token: str):
     app.add_handler(CommandHandler("semana",   cmd_semana))
     app.add_handler(CommandHandler("resumen",  cmd_resumen))
     app.add_handler(CommandHandler("cancelar", cmd_cancelar))
+    app.add_handler(CommandHandler("diario",   diario_handler))  # NUEVO — Sprint 1
     app.add_handler(CommandHandler("stats",    stats_handler))
 
     # ── 5. Error handler ──────────────────────────────────────────────────────────
