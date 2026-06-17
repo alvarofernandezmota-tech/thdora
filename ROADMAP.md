@@ -1,209 +1,179 @@
 # 🗺️ THDORA — ROADMAP
 
-> **Navegación rápida:** [README](README.md) · [Índice docs](docs/INDEX.md) · [CHANGELOG](CHANGELOG.md)
+> **Navegación rápida:** [README](README.md) · [CONTEXT.md](CONTEXT.md) · [CHANGELOG](CHANGELOG.md)
 
 ---
 
-## Estado actual — v0.17.0 (17 junio 2026)
+## Estado actual — v0.19.0 (17 junio 2026)
 
 ```
-Bot Telegram (9 comandos + 5 ConversationHandlers + inline buttons + NLP texto libre)
-    ↕ httpx async (singleton compartido — Sprint 2)
+Bot Telegram (11 comandos + voz + 5 ConversationHandlers + NLP texto libre)
+    ↕ httpx async (singleton)
+get_router() → GroqRouter | OllamaRouter (con fallback automático >3s)
+    ↕ Groq API (NLP + Whisper) / Ollama local (Madre)
 ThdoraApiClient (9 métodos)
-    ↕ FastAPI REST
-API (14 endpoints: CRUD + semana + rango + stats)
-    ↕ SQLAlchemy ORM
-SQLite (data/thdora.db — persistencia real)
-    ↕ Groq API (NLP gratuito) — 🟢 OPERATIVO
-GroqRouter (intent + entidades + function calling + lru_cache + 256 tokens)
+    ↕ FastAPI REST (14 endpoints)
+SQLite (data/thdora.db)
+Scheduler APScheduler (resumen diario + avisos citas + alerta Ollama caído)
+CD automático: GitHub Actions → SSH → Madre
 ```
 
 🟢 **En producción** en servidor **Madre** (Omarchy, Arch Linux) con Docker desde 14 junio 2026.
-> Migrado de Acer → Madre el 14 junio 2026.
 
 ### Lo que funciona hoy ✅
-- `/start` `/citas` `/habitos` `/habito` `/nueva` `/semana` `/resumen` `/config` `/cancelar` `/diario`
-- Saludo contextual (buenos días/tardes/noches)
-- Navegación ◀️▶️ con fecha real visible en botón central
-- Vista detalle de cita con click en ⏰ hora
-- Inline buttons: borrar/editar/sumar citas y hábitos
-- Conflicto hora en citas: aviso ⚠️ al crear y al editar
-- `/semana` con navegación semanal y botones por día
-- `/config` para configurar tipos de hábitos con botones rápidos
-- Fechas flexibles: `hoy`, `mañana`, `ayer`, `27/03`, nombres de día
-- **Datos persistentes en SQLite** — sobreviven a reinicios
-- **Scheduler F12** — resumen diario + evening log + avisos citas
-- **🤖 NLP Groq — modo Toki (v0.14.0)** — contexto real, crea citas/hábitos, desambiguación
-- **Modelo:** `llama-3.3-70b-versatile` (128k contexto, free tier)
-- **UX borrar cita (v0.16.0):** confirmación muestra nombre + hora antes de borrar ✅
-- **Fixes v0.16.x:** emoji, scheduler, nombre hábito, separador noche, tests ✅
-- **Sprint 1 (v0.17.0):** /diario → yggdrasil-dew, GITHUB_TOKEN, pydantic-settings ✅
-- **Sprint 2 (v0.17.0):** httpx singleton, middleware, lru_cache prompt, 256 tokens, TYPING, filtro triviales, pickle 60s ✅
+- 11 comandos: `/start` `/citas` `/habitos` `/habito` `/nueva` `/semana` `/resumen` `/config` `/cancelar` `/diario` `/stats` `/tiempo`
+- Notas de voz → Whisper (Groq) → flujo NLP
+- NLP con historial conversacional real (`nlp_history` → Groq)
+- LLM switchable: `groq` (producción) | `ollama` (Madre local) con fallback automático
+- CD automático GitHub Actions → Madre por SSH
+- Scheduler: alerta Telegram si Ollama caído al arrancar
+- `/tiempo [ciudad]` vía OpenWeatherMap
+- `conversation_timeout=300` en todos los ConversationHandlers
+- Persistencia SQLite + PicklePersistence (contexto NLP sobrevive reinicios)
 
 ---
 
-## ✅ Completadas
+## ✅ Sprints completados
 
-### F1–F16 — Base, API, Bot, Persistencia, Scheduler, NLP
-> Ver historial completo en [CHANGELOG.md](CHANGELOG.md)
+### Sprint 1 — /diario + pydantic-settings (v0.17.0) ✅
+- `src/config.py` pydantic-settings + GITHUB_TOKEN
+- `src/services/github_client.py` GitHub Contents API
+- `src/bot/handlers/diario.py` + registrar /diario
 
-### Tarea 1.1 — Desambiguación borrar/editar cita ✅
-### Tarea 1.3 — Flujo cancelar cita ✅ (23 abril 2026)
+### Sprint 2 — NLP + infraestructura base (v0.17.0) ✅
+- httpx singleton + connection pooling
+- `@lru_cache` en build_system_prompt + 256 tokens
+- `@require_allowed_user` reutilizable
+- TYPING + filtro mensajes triviales
+- PicklePersistence `update_interval=60`
 
-### Bloque 0 — Infraestructura urgente ✅ RESUELTO (14 junio 2026)
+### Sprint 3 — Voz + historial + CD (v0.18.0) ✅
+- `voice.py`: notas de voz con Whisper
+- `llm_factory.py` + `ollama_router.py`: arquitectura LLM switchable
+- `groq_router.py`: `process()` acepta `history: list[dict]`
+- `nlp.py`: `nlp_history` gestionado en persistence
+- `deploy.yml`: CD automático push→main→SSH→Madre
+- `conversation_timeout=300` en todos los handlers
+- `docker-compose.yml`: healthcheck con `pgrep`
 
-| # | Tarea | Estado |
-|---|---|---|
-| 0.1 | Renovar GROQ_API_KEY + actualizar modelo | ✅ 14-jun |
-| 0.2 | Migrar servidor Acer → Madre (Omarchy) | ✅ 14-jun |
-| 0.3 | Git remote HTTPS → SSH | ✅ 14-jun |
-| 0.4 | Ejecutar checklist de pruebas en producción | 🔲 Parcial |
+### Sprint 4 — Estabilización + API tiempo (v0.19.0) ✅ PARCIAL
+- `llm_factory.py`: fallback automático Ollama→Groq si >3s o error
+- `weather.py`: `/tiempo [ciudad]` vía OpenWeatherMap
+- `src/config.py`: `OWM_API_KEY: str = ""`
+- `scheduler.py`: alerta Ollama caído al arrancar → mensaje privado al owner
 
-### Bloque 3 — Auditoría y refactoring profesional ✅ PARCIAL
-
-| # | Tarea | Estado |
-|---|---|---|
-| 3.1 | Eliminar carpeta `datos/` vacía | ✅ 27-abr |
-| 3.2 | Mover `AGENTE.md` + `COMO_PROCEDER.md` a `.github/` | ✅ 27-abr |
-| 3.7 | README profesional | ✅ 27-abr |
-| 3.8 | GitHub Actions CI | ✅ 27-abr |
-
-### Bugs resueltos
-
-| ID | Descripción | Fix | Test |
-|----|-------------|-----|------|
-| B1 | Emoji `🏆` incorrecto franja Tarde | `🏙️ Tarde` | ✅ v0.16.3 |
-| B6 | `hora_ver_cuartos` mostraba inicio franja | Usa `nueva_hora_temp` | ⚪ handler |
-| B-NEW3 | `_kb_edit_hab_fields` truncaba nombre | Nombre completo en callback | ✅ v0.16.3 |
-| B-NEW5 | Scheduler no arrancaba (PTB v20+) | `ApplicationBuilder().post_init()` | ⚪ n/a |
-| B-NEW6 | Franja noche sin separador visual | Separador `── Madrugada ──` | ✅ v0.16.3 |
-| B-SEC1 | GROQ_API_KEY expuesta en canal externo | Key rotada, `.gitignore` verificado | ✅ 14-jun |
-
----
-
-## 🔶 TRABAJO INMEDIATO — Bloques priorizados
-
-> Un bloque a la vez, en orden.
-
-### 🟢 Bloque 1 — NLP y calidad ✅ COMPLETADO Sprint 2
-
-| # | Tarea | Estado |
-|---|---|---|
-| 1.1 | Fix TimedOut — timeout read subido a 45s | ✅ v0.17.0 |
-| 1.2 | System prompt Toki — rol + límites + few-shot examples | ✅ v0.17.0 |
-| 1.3 | Contexto dinámico al modelo (citas hoy + hábitos) | ✅ v0.17.0 |
-| 1.4 | Function calling — crear/borrar/consultar citas desde texto | ✅ v0.17.0 |
-| 1.5 | httpx singleton + connection pooling | ✅ Sprint 2 |
-| 1.6 | @lru_cache en build_system_prompt + json sin indent | ✅ Sprint 2 |
-| 1.7 | max_tokens 1024→2256 | ✅ Sprint 2 |
-| 1.8 | @require_allowed_user en nlp + diario | ✅ Sprint 2 |
-| 1.9 | TYPING + filtro mensajes triviales | ✅ Sprint 2 |
-| 1.10 | PicklePersistence update_interval=60 | ✅ Sprint 2 |
-| 1.11 | _load_token() → settings.TELEGRAM_BOT_TOKEN | ✅ Sprint 2 |
-| 1.12 | post_shutdown cierra httpx client | ✅ Sprint 2 |
-
-### 🟡 Bloque 2 — Citas (continuación)
-
-| # | Tarea | Estado |
-|---|---|---|
-| 2.1 | Mostrar horario disponible antes de mover una cita | 🔲 Pendiente |
-| 2.2 | Vista semana/días navegable completa desde menú | 🔲 Pendiente |
-
-### 🟠 Bloque 3 — Docs y auditoría (resto)
-
-| # | Tarea | Estado |
-|---|---|---|
-| 3.3 | Eliminar `docs/ECOSISTEMA.md` (duplicado) | 🔲 Pendiente |
-| 3.4 | Fusionar `docs/architecture/` con `docs/ARCHITECTURE.md` | 🔲 Pendiente |
-| 3.5 | Mover `docs/sessions/` y `docs/auditoria/` fuera de docs pública | 🔲 Pendiente |
-| 3.6 | Mover `CLASES_BEGO.md` + `GUIA_BEGO.md` → repo `ejerciciosbego` | 🔲 Pendiente |
-
-### 🔵 Bloque 4 — Multiusuario y despliegue
-
-| # | Tarea | Estado |
-|---|---|---|
-| 4.1 | Multiusuario — API con `user_id` de Telegram | 🔲 Pendiente |
-| 4.2 | CD automático — GitHub Actions deploy a servidor | 🔲 Pendiente |
-| 4.3 | Beta cerrada — compartir con usuarios cercanos | 🔲 Pendiente |
-
-### 🟣 Bloque 5 — Infraestructura
-
-| # | Tarea | Estado |
-|---|---|---|
-| 5.1 | Tailscale en todos los dispositivos | 🔲 Pendiente |
-| 5.2 | Script auto-update — despliegue sin SSH manual | 🔲 Pendiente |
-
-### 🔴 Bloque 6 — Integración yggdrasil-dew
-
-| # | Tarea | Estado |
-|---|---|---|
-| 6.1 | src/config.py pydantic-settings + GITHUB_TOKEN | ✅ Sprint 1 |
-| 6.2 | src/services/github_client.py (GitHub Contents API) | ✅ Sprint 1 |
-| 6.3 | src/bot/handlers/diario.py + registrar /diario | ✅ Sprint 1 |
-| 6.4 | Añadir secrets GitHub Actions + docker compose up -d | 🔲 Pendiente |
-| 6.5 | Probar /diario end-to-end en Madre | 🔲 Pendiente |
-
-### 🔴 Bloque 7 — Agente de voz (Sprint 3 — guinda)
-
-| # | Tarea | Estado |
-|---|---|---|
-| 7.1 | src/bot/handlers/voice.py — descarga .ogg de Telegram | 🔲 Pendiente |
-| 7.2 | GroqRouter.transcribe() — Whisper large-v3 ya implementado | ✅ Sprint 2 |
-| 7.3 | Registrar MessageHandler(filters.VOICE) en main.py | 🔲 Pendiente |
-| 7.4 | Probar voz end-to-end en Madre | 🔲 Pendiente |
+**Pendiente Sprint 4:**
+- [ ] Smoke test end-to-end en producción (voz, historial, CD) → `TESTS.md`
+- [ ] Registrar `/tiempo` en `main.py`
+- [ ] Vista semana navegable en `/citas` → `citas.py`, `keyboards.py`
+- [ ] Limpieza docs: fusionar carpetas huérfanas
+- [ ] Gráfico ASCII semanal en `stats.py`
 
 ---
 
-## 🤖 Visión — Plataforma de Agentes Personales
+## 🟠 Sprint 5 — Multiusuario + Tailscale (v0.19.0 → v0.20.0)
 
-THDORA es la **plantilla base** de una plataforma de agentes personales. La arquitectura es reutilizable:
+| # | Tarea | Archivo(s) | Criterio de hecho | Prioridad |
+|---|-------|------------|-------------------|-----------|
+| 1 | `user_id` Telegram en todos los modelos SQLite y endpoints FastAPI | `models.py`, `api/`, `alembic/` | Migración Alembic; cada endpoint filtra por `user_id`; tests pasan | 🔴 crítica |
+| 2 | Middleware `@require_allowed_user` desde DB en vez de `.env` | `middleware.py`, `models.py` | Tabla `allowed_users`; `/admin_add_user`; recarga sin reiniciar | 🔴 alta |
+| 3 | Tailscale en Madre + `scripts/auto_update.sh` cron diario | `scripts/` | Madre accesible vía Tailscale; cron `git pull + docker compose up -d` | 🔴 alta |
+| 4 | Test aislamiento multiusuario con cuenta beta | `TESTS.md` | Usuario beta; datos no se mezclan con admin | 🔴 alta |
+| 5 | Secrets GitHub Actions: OWM_API_KEY + GROQ_API_KEY | `deploy.yml` | CD inyecta secrets como env vars; verificado en pipeline | 🟡 media |
+| 6 | `/diario` end-to-end en Madre con GITHUB_TOKEN producción | `diary.py`, `deploy.yml` | Commit real desde Madre en yggdrasil-dew | 🟡 media |
+| 7 | Capa regex NLP nivel 0 antes de Ollama/Groq | `nlp.py`, `llm_factory.py` | Intenciones simples ≤200ms sin LLM | 🟡 media |
 
-```
-Docker + FastAPI + SQLite + Bot Telegram + Groq NLP
-         ↑
-   Cambias solo:
-   • System prompt (rol del agente)
-   • Endpoints API (qué datos maneja)
-   • Handlers bot (flujos de conversación)
-```
+---
 
-### Agentes planificados
+## 🔵 Sprint 6 — Plantilla base de agentes + beta cerrada (v0.20.0 → v1.0.0-template)
 
-| Agente | Propósito | Base |
-|--------|-----------|------|
-| **THDORA** ✅ | Citas, hábitos, salud | Producción |
-| Agente gastos | Tickets, presupuesto mensual | THDORA template |
-| Agente estudio | Flashcards, progreso | THDORA template |
-| Agente trabajo | Tareas, deadlines | THDORA template |
-| Bego Bot | Asistente personalizado | THDORA template |
+| # | Tarea | Archivo(s) | Criterio de hecho | Prioridad |
+|---|-------|------------|-------------------|-----------|
+| 1 | Extraer core reutilizable: `thdora-base` módulo Python | `thdora_base/`, `pyproject.toml` | Importable desde proyecto externo; README en 5 pasos | 🔴 crítica |
+| 2 | Agente gastos: esqueleto sobre `thdora-base` | `agents/gastos/` | `/gasto` + `/resumen_gastos`; usa `llm_factory` sin duplicar | 🔴 alta |
+| 3 | Suite tests mínima: 10 tests críticos con pytest | `tests/` | `pytest -v` al 100% local + CI; cubre fallback LLM, user_id, API | 🔴 alta |
+| 4 | Beta cerrada: 2 usuarios externos + `docs/onboarding.md` | `docs/` | 7 días uso real; issues recogidos en GitHub | 🟡 alta |
+| 5 | Ollama 3b nivel 1 (qwen2.5:3b o gemma3:4b) | `llm_factory.py`, `ollama_router.py` | `llm_factory` usa nivel 1 para intenciones medias; Groq 70b para síntesis | 🟡 media |
+| 6 | Bego Bot repo separado sobre `thdora-base` | repo `bego-bot` | Desplegable en ≤10 min siguiendo README | 🟢 media |
+| 7 | Stress test: 50 mensajes en ráfaga | `scripts/stress_test.py` | P95 latencia ≤2s; 0 crashes | 🟢 baja |
 
-### Mejoras NLP planificadas
+---
 
-| Mejora | Descripción | Prioridad |
-|--------|-------------|----------|
-| Historial conversación real | Pasar nlp_history como mensajes a Groq | 🔴 Alta |
-| Resumen semanal inteligente | SQL sobre datos propios + Groq | 🟡 Media |
-| Arquitectura 3 niveles | regex → Ollama 3b → Groq 70b | 🟡 Media |
-| Voz (Whisper) | Mensajes de voz transcritos con Groq | 🟢 Baja |
-| API del tiempo | Contexto externo (OpenWeatherMap gratuito) | 🟢 Baja |
+## 🧠 Investigación: Arquitecturas LLM aplicables a THDORA
+
+> Análisis de cómo las técnicas de chatbots avanzados (2026) se pueden aplicar progresivamente.
+
+### Qué usa THDORA hoy
+- Ventana de contexto: `nlp_history` → últimos 10 mensajes inyectados en Groq (128k context)
+- LLM: decoder-only Transformer (llama-3.3-70b) vía Groq API
+- Arquitectura 3 niveles planificada: regex → Ollama 3b → Groq 70b
+
+### Aplicaciones por prioridad
+
+#### 🔴 Aplicar ya (Sprint 5-6)
+| Técnica | Aplicación en THDORA | Esfuerzo |
+|---------|---------------------|----------|
+| **Arquitectura 3 niveles NLP** | regex (nivel 0) → Ollama 3b (nivel 1) → Groq 70b (nivel 2) | Sprint 5 |
+| **Memoria persistente de usuario** | Guardar perfil: nombre, objetivos, preferencias de notificación en SQLite | Sprint 6 |
+| **Contexto dinámico (RAG leve)** | Inyectar citas del día + hábitos recientes en cada llamada Groq | Ya parcial |
+| **Resumen conversación** | Comprimir `nlp_history` cuando supera 20 mensajes en vez de truncar | Sprint 5 |
+
+#### 🟡 Aplicar en v2.0
+| Técnica | Aplicación en THDORA | Esfuerzo |
+|---------|---------------------|----------|
+| **Tool Use / Function Calling avanzado** | Agentes que ejecutan múltiples herramientas en cadena (crear cita + registrar hábito + guardar diario en un mensaje) | Medio |
+| **Memoria semántica (RAG real)** | Base de datos vectorial local (ChromaDB) para recordar entradas del diario y contexto de semanas anteriores | Alto |
+| **Resumen automático largo plazo** | Groq genera resumen semanal/mensual que se guarda como memoria comprimida | Medio |
+| **Perfil usuario dinámico** | El agente actualiza el perfil del usuario después de cada sesión (ej: detecta que el usuario hace deporte los lunes) | Alto |
+
+#### 🟢 Visión a largo plazo (v3.0+)
+| Técnica | Aplicación en THDORA |
+|---------|---------------------|
+| **Agentic RAG** | THDORA razona, recupera contexto de meses, actúa y actualiza memoria de forma autónoma |
+| **MoE local** | Modelo local con expertos especializados: uno para citas, otro para hábitos, otro para diario |
+| **Reasoning interno** | Chain-of-thought oculto antes de responder (ya disponible en Groq con DeepSeek-R1) |
+| **Memoria continua** | Estado interno que persiste entre sesiones sin necesidad de inyectar historial |
+
+### Conclusión de la investigación
+THDORA ya implementa la base correcta. El camino natural es:
+1. **Ahora**: regex NLP + compresión historial inteligente
+2. **v2.0**: RAG con ChromaDB local + perfil dinámico de usuario
+3. **v3.0**: Agente autónomo con memoria continua y razonamiento profundo
 
 ---
 
 ## 🧪 Checklist de pruebas en producción
 
-| Test | Versión | Unit test | Producción |
-|------|---------|-----------|------------|
-| Flujo /nueva completo con franjas | v0.16.1 | ⚪ parcial | 🔲 Pendiente |
-| Emoji 🏙️ Tarde correcto (B1) | v0.16.1 | ✅ v0.16.3 | 🔲 Pendiente |
-| Cuártos respetan hora seleccionada (B6) | v0.16.1 | ⚪ mock | 🔲 Pendiente |
-| Hábito nombre >15 chars editable (B-NEW3) | v0.16.2 | ✅ v0.16.3 | 🔲 Pendiente |
-| Separador Madrugada en franja noche (B-NEW6) | v0.16.2 | ✅ v0.16.3 | 🔲 Pendiente |
-| Borrar cita muestra nombre+hora | v0.16.0 | ⚪ pendiente | 🔲 Pendiente |
-| NLP texto libre (modo Toki) | v0.14.0 | ⚪ mock | 🔲 Pendiente |
-| NLP crea cita desde texto | v0.14.0 | ⚪ mock | 🔲 Pendiente |
-| /diario guarda en yggdrasil-dew | v0.17.0 | ⚪ pendiente | 🔲 Pendiente |
-| Voz → transcripción → NLP | Sprint 3 | 🔲 Pendiente | 🔲 Pendiente |
+| Test | Versión | Estado |
+|------|---------|--------|
+| Voz → transcripción → NLP | Sprint 3 | 🔲 Pendiente |
+| Historial NLP real (nlp_history) | Sprint 3 | 🔲 Pendiente |
+| CD automático push→Madre | Sprint 3 | 🔲 Pendiente |
+| Fallback Ollama→Groq >3s | Sprint 4 | 🔲 Pendiente |
+| /tiempo [ciudad] | Sprint 4 | 🔲 Pendiente |
+| Alerta Ollama caído al arrancar | Sprint 4 | 🔲 Pendiente |
+| Multiusuario aislamiento user_id | Sprint 5 | 🔲 Pendiente |
+| /diario end-to-end en producción | Sprint 5 | 🔲 Pendiente |
 
 ---
 
-_Última actualización: 17 junio 2026 — 02:05 CEST — v0.17.0 — Sprint 2 completo_
+## 🤖 Visión — Plataforma de Agentes Personales
+
+```
+Docker + FastAPI + SQLite + Bot Telegram + Groq/Ollama NLP
+         ↑
+   thdora-base (módulo reutilizable)
+   Cambias solo: system prompt + endpoints API + handlers bot
+```
+
+| Agente | Propósito | Estado |
+|--------|-----------|--------|
+| **THDORA** | Citas, hábitos, salud | 🟢 Producción |
+| Agente gastos | Tickets, presupuesto mensual | 🔲 Sprint 6 |
+| Bego Bot | Asistente personalizado | 🔲 Sprint 6 |
+| Agente estudio | Flashcards, progreso | 🔲 v2.0 |
+| Agente trabajo | Tareas, deadlines | 🔲 v2.0 |
+
+---
+
+_Última actualización: 17 jun 2026 — 04:00 CEST — v0.19.0 — Sprint 3+4 completados + investigación LLM_
