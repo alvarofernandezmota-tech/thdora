@@ -12,7 +12,7 @@
 #   • .env (pasado como env_file en docker-compose)
 # ──────────────────────────────────────────────────────────────────────────
 
-# ─ Stage 1: dependencias ──────────────────────────────────────────────────────────
+# ─ Stage 1: dependencias ─────────────────────────────────────────────────────
 FROM python:3.12-slim AS builder
 
 WORKDIR /build
@@ -27,11 +27,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 
-# ─ Stage 2: imagen final ───────────────────────────────────────────────────────────
+# ─ Stage 2: imagen final ───────────────────────────────────────────────────────
 FROM python:3.12-slim
 
-# Usuario no-root para seguridad
-RUN groupadd -r thdora && useradd -r -g thdora thdora
+# Usuario no-root con UID/GID 1000 para que coincida con el usuario del host
+# y tenga permisos de escritura en el bind mount ./data
+RUN groupadd -g 1000 thdora && useradd -u 1000 -g thdora -s /sbin/nologin thdora
 
 WORKDIR /app
 
@@ -43,7 +44,7 @@ COPY src/ ./src/
 COPY pyproject.toml .
 
 # Carpeta de datos (será montada como volumen — se crea para permisos)
-RUN mkdir -p /app/data && chown -R thdora:thdora /app
+RUN mkdir -p /app/data /app/logs && chown -R thdora:thdora /app
 
 # Copiar entrypoints
 COPY docker/entrypoint-api.sh /entrypoint-api.sh
