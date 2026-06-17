@@ -3,6 +3,7 @@ import logging
 from datetime import datetime, timedelta
 
 import httpx
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from telegram.ext import Application
 
 from src.config import settings
@@ -11,6 +12,19 @@ logger = logging.getLogger(__name__)
 
 _OLLAMA_HEALTH_TIMEOUT = httpx.Timeout(5.0)
 
+# ── Singleton APScheduler (usado por main.py + scheduler_tasks) ────────────────────
+_scheduler: AsyncIOScheduler | None = None
+
+
+def get_scheduler() -> AsyncIOScheduler:
+    """Devuelve (o crea) el scheduler global AsyncIO de APScheduler."""
+    global _scheduler
+    if _scheduler is None:
+        _scheduler = AsyncIOScheduler(timezone="Europe/Madrid")
+    return _scheduler
+
+
+# ── Scheduler de Telegram (recordatorios + resumen mañana) ───────────────────────
 
 class Scheduler:
     def __init__(self, app: Application, api_client, user_ids: list[int]):
