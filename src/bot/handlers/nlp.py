@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 import re
 import traceback
+from datetime import datetime, timedelta
 
 from telegram import Update
 from telegram.constants import ChatAction
@@ -22,9 +23,9 @@ logger = logging.getLogger(__name__)
 
 # Nivel 0 — regex (orden importa: más específicos primero)
 _REGEX_RULES: list[tuple[re.Pattern, str]] = [
-    (re.compile(r'^(hola|buenos?\s*(d[ií]as?|noches?|tardes?)|hey|buenas?)[\.!]?$', re.I),
+    (re.compile(r'^(hola|buenos?\s*(d[ií]as?|noches?|tardes?)|hey|buenas?)[\.,!]?$', re.I),
      "👋 ¡Hola! ¿En qué te ayudo hoy?"),
-    (re.compile(r'^(adiós|adios|chau|hasta luego|nos vemos|bye|hasta pronto)[\.!]?$', re.I),
+    (re.compile(r'^(adiós|adios|chau|hasta luego|nos vemos|bye|hasta pronto)[\.,!]?$', re.I),
      "👋 ¡Hasta pronto! Cuídate."),
     (re.compile(r'(crear|programar|nueva|añadir|pon|agrega)\b.{0,30}\b(cita|reunión|reunion|dentista|médico|medico|recordatorio)', re.I),
      "📅 Vamos a crear una cita. Usa /nueva para empezar."),
@@ -36,12 +37,70 @@ _REGEX_RULES: list[tuple[re.Pattern, str]] = [
      "📊 Usa /habitos para ver tu progreso."),
     (re.compile(r'(qué|que)\s+(tiempo|clima)\s+(hay|hace|está|esta)', re.I),
      "🌤️ Usa /tiempo [ciudad] para ver el clima."),
-    (re.compile(r'^(gracias|de nada|perfecto|genial|ok|vale|bien|super|sí|si|no)[\s\.!]?$', re.I),
+    (re.compile(r'^(gracias|de nada|perfecto|genial|ok|vale|bien|super|sí|si|no)[\s\.,!]?$', re.I),
      "😊 ¿Hay algo más en lo que pueda ayudarte?"),
 ]
 
 _TRIVIALES: frozenset[str] = frozenset({"👍", "👌", "❤️", "🙏", "😀", "😄"})
 
+
+# ── Utilidades de horario visual (usadas por citas.py) ────────────────────────
+
+def _end_time(time_str: str, duration_minutes: int = 60) -> str:
+    """
+    Calcula la hora de fin sumando duration_minutes a time_str (HH:MM).
+    Devuelve la hora en formato HH:MM. Si falla el parse, devuelve '?'.
+    """
+    try:
+        dt = datetime.strptime(time_str, "%H:%M")
+        dt_end = dt + timedelta(minutes=duration_minutes)
+        return dt_end.strftime("%H:%M")
+    except Exception:
+        return "?"
+
+
+def _build_day_schedule(
+    apts: list[dict],
+    date_str: str,
+    highlight_time: str | None = None,
+    duration: int = 60,
+) -> str:
+    """
+    Construye un horario visual del día en texto.
+
+    Muestra las citas del día en orden cronológico. Si highlight_time
+    está presente, marca ese slot con ⚠️ (conflicto).
+
+    Args:
+        apts:           Lista de citas del día (dicts con 'time' y 'name'/'type').
+        date_str:       Fecha en formato YYYY-MM-DD (solo para título).
+        highlight_time: Hora HH:MM a marcar como conflicto (⚠️).
+        duration:       Duración en minutos para calcular fin.
+
+    Returns:
+        Bloque de texto Markdown con el horario visual del día.
+    """
+    if not apts:
+        return "📅 _Ningún otro evento este día_"
+
+    lines = ["🗓 *Agenda del día:*"]
+    sorted_apts = sorted(apts, key=lambda a: a.get("time", "00:00"))
+
+    for apt in sorted_apts:
+        t = apt.get("time", "?")
+        name = apt.get("name") or apt.get("type", "Cita")
+        t_end = _end_time(t, duration)
+        line = f"  • {t}–{t_end} — {name}"
+        lines.append(line)
+
+    if highlight_time:
+        h_end = _end_time(highlight_time, duration)
+        lines.append(f"  ⚠️ {highlight_time}–{h_end} — _(solicitado — conflicto)_")
+
+    return "\n".join(lines)
+
+
+# ───────────────────────────────────────────────────────────────────────────────
 
 def _try_regex(text: str) -> str | None:
     for pattern, response in _REGEX_RULES:
