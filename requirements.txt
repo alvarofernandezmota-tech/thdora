@@ -1,4 +1,4 @@
-# THDORA v0.20.1 — dependencias
+# THDORA v0.21.1 — dependencias
 python-telegram-bot[job-queue]>=21.0
 fastapi>=0.111.0
 uvicorn[standard]>=0.29.0
@@ -17,6 +17,10 @@ langgraph>=0.2.0
 langchain-core>=0.3.0
 langchain-groq>=0.2.0
 langchain-community>=0.3.0
+
+# Monitoring (Prometheus)
+prometheus-client>=0.20.0
+prometheus-fastapi-instrumentator>=6.1.0
 
 # Opcional: Ollama local
 # ollama>=0.2.0
