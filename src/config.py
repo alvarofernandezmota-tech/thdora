@@ -1,8 +1,4 @@
-"""Configuración centralizada de THDORA usando pydantic-settings.
-
-Todas las variables de entorno se leen desde aquí.
-Importar `settings` para acceder a cualquier valor de configuración.
-"""
+"""Configuración centralizada de THDORA usando pydantic-settings."""
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -30,7 +26,7 @@ class Settings(BaseSettings):
     # API FastAPI interna
     API_HOST: str = "0.0.0.0"
     API_PORT: int = 8000
-    THDORA_API_URL: str = "http://localhost:8001"  # URL para el bot (Docker: http://api:8000)
+    THDORA_API_URL: str = "http://localhost:8001"
 
     # Logging
     LOG_LEVEL: str = "INFO"
@@ -39,6 +35,9 @@ class Settings(BaseSettings):
     GITHUB_TOKEN: str = Field(min_length=1)
     GITHUB_OWNER: str = "alvarofernandezmota-tech"
     GITHUB_REPO: str = "yggdrasil-dew"
+
+    # OpenWeatherMap — Sprint 4
+    OWM_API_KEY: str = ""
 
 
 settings = Settings()
