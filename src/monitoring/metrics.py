@@ -59,10 +59,8 @@ thdora_info.info({"version": "0.21.1", "agent": "LangGraph", "llm": "Groq-Llama3
 
 def setup_prometheus(app) -> None:
     """
-    Instrumenta FastAPI con Prometheus y expone /metrics.
-
-    Llama a esto UNA sola vez en el arranque de src/api/main.py.
-    Requiere: pip install prometheus-fastapi-instrumentator
+    Expone /metrics con prometheus_client nativo (sin prometheus-fastapi-instrumentator).
+    Evita el bug '_IncludedRouter has no attribute path' con FastAPI + sub-routers.
 
     Args:
         app: Instancia FastAPI.
@@ -71,13 +69,15 @@ def setup_prometheus(app) -> None:
     if not monitoring_config.enable_prometheus:
         logger.warning("⚠️ Prometheus deshabilitado (MONITORING_ENABLE_PROMETHEUS=false)")
         return
-    try:
-        from prometheus_fastapi_instrumentator import Instrumentator
-        Instrumentator(
-            should_group_status_codes=False,
-            should_ignore_untemplated=True,
-            excluded_handlers=["/metrics", "/health/live"],
-        ).instrument(app).expose(app, endpoint=monitoring_config.metrics_endpoint)
-        logger.info("✅ Prometheus configurado → %s", monitoring_config.metrics_endpoint)
-    except ImportError:
-        logger.warning("⚠️ prometheus-fastapi-instrumentator no instalado — métricas desactivadas")
+
+    from fastapi import Response
+    from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+    @app.get(monitoring_config.metrics_endpoint, include_in_schema=False)
+    def metrics() -> Response:
+        return Response(
+            content=generate_latest(),
+            media_type=CONTENT_TYPE_LATEST,
+        )
+
+    logger.info("✅ Prometheus configurado → %s", monitoring_config.metrics_endpoint)
