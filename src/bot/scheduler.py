@@ -12,7 +12,7 @@ logger = logging.getLogger(__name__)
 
 _OLLAMA_HEALTH_TIMEOUT = httpx.Timeout(5.0)
 
-# ── Singleton APScheduler (usado por main.py + scheduler_tasks) ────────────────────
+# ── Singleton APScheduler ─────────────────────────────────────────────────
 _scheduler: AsyncIOScheduler | None = None
 
 
@@ -24,7 +24,107 @@ def get_scheduler() -> AsyncIOScheduler:
     return _scheduler
 
 
-# ── Scheduler de Telegram (recordatorios + resumen mañana) ───────────────────────
+# ── Helpers de recordatorio por cita (usados por citas.py) ──────────────────────
+
+def _reminder_job_ids(user_id: str, apt_id) -> list[str]:
+    """Devuelve los job_ids asociados a una cita para poder cancelarlos."""
+    return [
+        f"reminder_30_{user_id}_{apt_id}",
+        f"reminder_0_{user_id}_{apt_id}",
+    ]
+
+
+async def _send_reminder(bot, user_id: str, text: str) -> None:
+    try:
+        await bot.send_message(chat_id=int(user_id), text=text, parse_mode="Markdown")
+    except Exception as exc:
+        logger.warning("No se pudo enviar reminder a %s: %s", user_id, exc)
+
+
+def schedule_apt_reminders(bot, user_id: str, apt: dict, cfg: dict) -> None:
+    """
+    Programa recordatorios APScheduler para una cita.
+
+    Programa dos jobs:
+    - 30 minutos antes de la cita
+    - En el momento exacto de la cita
+
+    Si las notificaciones están desactivadas en cfg o la hora ya pasó, no programa.
+
+    Args:
+        bot:     Instancia de telegram.Bot.
+        user_id: ID Telegram del usuario como str.
+        apt:     Dict con al menos 'date', 'time', 'name'/'type'.
+        cfg:     Dict de configuración del usuario (notificaciones, etc.).
+    """
+    if not cfg.get("notifications_enabled", True):
+        return
+
+    date_str = apt.get("date") or apt.get("date_str", "")
+    time_str = apt.get("time", "")
+    if not date_str or not time_str:
+        logger.warning("schedule_apt_reminders: datos incompletos apt=%s", apt)
+        return
+
+    try:
+        apt_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+    except ValueError:
+        logger.warning("schedule_apt_reminders: formato fecha/hora inválido %s %s", date_str, time_str)
+        return
+
+    nombre = apt.get("name") or apt.get("type", "cita")
+    apt_id = apt.get("index", apt.get("id", f"{date_str}_{time_str}"))
+    scheduler = get_scheduler()
+    now = datetime.now()
+
+    # Job 30 min antes
+    run_at_30 = apt_dt - timedelta(minutes=30)
+    job_id_30 = f"reminder_30_{user_id}_{apt_id}"
+    if run_at_30 > now:
+        scheduler.add_job(
+            _send_reminder,
+            trigger="date",
+            run_date=run_at_30,
+            args=[bot, user_id, f"⏰ *Recordatorio* — en 30 min tienes: *{nombre}* a las {time_str}"],
+            id=job_id_30,
+            replace_existing=True,
+            misfire_grace_time=120,
+        )
+        logger.info("Reminder 30min programado: %s @ %s", job_id_30, run_at_30)
+
+    # Job en el momento exacto
+    job_id_0 = f"reminder_0_{user_id}_{apt_id}"
+    if apt_dt > now:
+        scheduler.add_job(
+            _send_reminder,
+            trigger="date",
+            run_date=apt_dt,
+            args=[bot, user_id, f"🔔 *Ahora tienes:* *{nombre}*"],
+            id=job_id_0,
+            replace_existing=True,
+            misfire_grace_time=120,
+        )
+        logger.info("Reminder exacto programado: %s @ %s", job_id_0, apt_dt)
+
+
+def cancel_apt_reminders(user_id: str, apt_id) -> None:
+    """
+    Cancela los jobs de recordatorio asociados a una cita.
+
+    Args:
+        user_id: ID Telegram del usuario como str.
+        apt_id:  Índice o ID de la cita.
+    """
+    scheduler = get_scheduler()
+    for job_id in _reminder_job_ids(user_id, apt_id):
+        try:
+            scheduler.remove_job(job_id)
+            logger.info("Reminder cancelado: %s", job_id)
+        except Exception:
+            pass  # Si no existe el job, no es un error
+
+
+# ── Scheduler de Telegram (recordatorios por polling + resumen mañana) ───────────
 
 class Scheduler:
     def __init__(self, app: Application, api_client, user_ids: list[int]):
@@ -33,24 +133,19 @@ class Scheduler:
         self.user_ids = user_ids
 
     async def start(self) -> None:
-        # Sprint 4: alerta si Ollama está caído al arrancar (no bloquea)
         asyncio.create_task(self._check_ollama_on_startup())
         asyncio.create_task(self._loop_reminders())
         asyncio.create_task(self._loop_morning_summary())
 
     async def _check_ollama_on_startup(self) -> None:
-        """Si LLM_BACKEND=ollama, comprueba salud de Ollama y avisa al owner si está caído."""
         if getattr(settings, "LLM_BACKEND", "groq").lower() != "ollama":
             return
-
         owner_id = getattr(settings, "OWNER_TELEGRAM_ID", 0)
         ollama_host = getattr(settings, "OLLAMA_HOST", "http://localhost:11434")
-
         try:
             async with httpx.AsyncClient(timeout=_OLLAMA_HEALTH_TIMEOUT) as client:
                 resp = await client.get(f"{ollama_host}/api/tags")
             if resp.status_code == 200:
-                logger.info("Ollama health check OK en %s", ollama_host)
                 return
             motivo = f"HTTP {resp.status_code}"
         except httpx.TimeoutException:
@@ -59,13 +154,9 @@ class Scheduler:
             motivo = "conexión rechazada"
         except Exception as exc:
             motivo = str(exc) or type(exc).__name__
-
         logger.warning("Ollama no responde al arrancar: %s", motivo)
-
         if not owner_id:
-            logger.warning("OWNER_TELEGRAM_ID no configurado, no se puede enviar alerta Ollama")
             return
-
         try:
             await self.app.bot.send_message(
                 chat_id=owner_id,
