@@ -1,4 +1,4 @@
-"""Agente principal THDORA con LangGraph + SqliteSaver (memoria persistente) — v0.20.1."""
+"""Agente principal THDORA — LangGraph + SqliteSaver + memory persistente — v0.20.2."""
 from __future__ import annotations
 import logging
 from functools import lru_cache
@@ -15,14 +15,18 @@ logger = logging.getLogger(__name__)
 
 
 async def _agent_node(state: ThdoraState):
-    """Nodo LLM: inyecta perfil + contexto dinámico + llama al modelo con tools."""
     user_memory = thdora_memory.get_user_memory(state["user_id"])
     system_prompt = get_system_prompt(
         nombre=state.get("nombre_usuario") or user_memory["profile"].get("nombre"),
         context_summary=state.get("context_summary", ""),
         long_term=user_memory.get("summary", ""),
     )
-    llm = ChatGroq(model=settings.GROQ_MODEL, temperature=0.1, api_key=settings.GROQ_API_KEY)
+    llm = ChatGroq(
+        model=settings.GROQ_MODEL,
+        temperature=0.3,
+        max_tokens=1024,
+        api_key=settings.GROQ_API_KEY,
+    )
     llm_with_tools = llm.bind_tools(TOOLS)
     messages = [{"role": "system", "content": system_prompt}] + list(state["messages"])
     response = await llm_with_tools.ainvoke(messages)
@@ -39,9 +43,9 @@ def build_thdora_graph():
     workflow.add_node("agent", _agent_node)
     workflow.add_node("tools", ToolNode(TOOLS))
     workflow.add_edge(START, "agent")
-    workflow.add_conditional_edges("agent", tools_condition)
-    workflow.add_edge("tools", "agent")  # ciclo ReAct
+    workflow.add_conditional_edges("agent", tools_condition, {"tools": "tools", END: END})
+    workflow.add_edge("tools", "agent")
 
     graph = workflow.compile(checkpointer=checkpointer)
-    logger.info("🧠 LangGraph ThdoraAgent compilado con SqliteSaver")
+    logger.info("🧠 LangGraph ThdoraAgent compilado con SqliteSaver + memoria persistente")
     return graph

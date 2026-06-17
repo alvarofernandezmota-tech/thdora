@@ -1,5 +1,5 @@
 """
-Entrypoint del bot Telegram de THDORA — v0.20.0
+Entrypoint del bot Telegram de THDORA — v0.20.2
 """
 import asyncio
 import logging
@@ -74,26 +74,25 @@ async def _check_api() -> None:
     if ok:
         logger.info("✅ API de THDORA disponible en %s", api.base_url)
     else:
-        logger.warning("⚠️  API de THDORA no responde en %s — el bot arranca igualmente.", api.base_url)
-
-
-def _load_token() -> str:
-    return settings.TELEGRAM_BOT_TOKEN
+        logger.warning("⚠️  API no responde en %s — el bot arranca igualmente.", api.base_url)
 
 
 async def _post_init(application) -> None:
     scheduler = get_scheduler()
     if not scheduler.running:
         scheduler.start()
-    logger.info("⏰ Scheduler F12 iniciado")
+    logger.info("⏰ Scheduler APScheduler iniciado")
 
-    # Pre-compilar el grafo LangGraph al arrancar (cacheado por lru_cache)
+    # LangGraph + memoria persistente
     try:
         from src.bot.agents.thdora_agent import build_thdora_graph
-        build_thdora_graph()
-        logger.info("🧠 LangGraph ThdoraAgent listo")
-    except ImportError:
-        logger.warning("⚠️ langgraph no instalado — NLP usará GroqRouter como fallback")
+        from src.bot.agents.scheduler_tasks import setup_memory_scheduler
+        graph = build_thdora_graph()
+        application.bot_data["thdora_graph"] = graph
+        setup_memory_scheduler(scheduler)
+        logger.info("🧠 LangGraph ThdoraAgent + memoria persistente + tareas programadas listos")
+    except ImportError as exc:
+        logger.warning("⚠️ langgraph no instalado — NLP usará GroqRouter como fallback: %s", exc)
 
 
 async def _post_shutdown(application) -> None:
@@ -112,7 +111,6 @@ def build_app(token: str):
         .build()
     )
 
-    # 1. ConversationHandlers
     app.add_handler(get_onboarding_handler())
     app.add_handler(build_nueva_handler())
     app.add_handler(build_habito_handler())
@@ -120,7 +118,6 @@ def build_app(token: str):
     app.add_handler(build_edit_hab_handler())
     app.add_handler(build_config_handler())
 
-    # 2. CallbackQueryHandlers globales
     app.add_handler(CallbackQueryHandler(cb_menu_home,          pattern=r"^menu_home$"))
     app.add_handler(CallbackQueryHandler(cb_citas_nav,          pattern=r"^citas_nav_"))
     app.add_handler(CallbackQueryHandler(cb_habitos_nav,        pattern=r"^habitos_nav_"))
@@ -134,13 +131,9 @@ def build_app(token: str):
     app.add_handler(CallbackQueryHandler(cb_cancel_action,      pattern=r"^cancel_action$"))
     app.add_handler(CallbackQueryHandler(cb_nlp_disambig,       pattern=r"^nlp_disambig|"))
 
-    # Voice handler Sprint 3 — ANTES del handler de texto libre
     app.add_handler(voice_handler)
-
-    # 3. Texto libre → LangGraph o GroqRouter
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _route_free_text))
 
-    # 4. Comandos
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("citas",    cmd_citas))
     app.add_handler(CommandHandler("habitos",  cmd_habitos))
@@ -151,9 +144,7 @@ def build_app(token: str):
     app.add_handler(CommandHandler("stats",    stats_handler))
     app.add_handler(CommandHandler("tiempo",   weather_handler))
 
-    # 5. Error handler
     app.add_error_handler(error_handler)
-
     return app
 
 
@@ -165,14 +156,10 @@ async def _route_free_text(update, context) -> None:
 
 
 def main() -> None:
-    token = _load_token()
     asyncio.run(_check_api())
-    app = build_app(token)
-    logger.info("🧠 THDORA bot v0.20.0 arrancando (polling)…")
-    app.run_polling(
-        drop_pending_updates=True,
-        allowed_updates=["message", "callback_query"],
-    )
+    app = build_app(settings.TELEGRAM_BOT_TOKEN)
+    logger.info("🧠 THDORA bot v0.20.2 arrancando (polling)…")
+    app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
 
 
 if __name__ == "__main__":
