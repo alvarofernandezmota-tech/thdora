@@ -20,7 +20,7 @@ langchain-community>=0.3.0
 
 # Monitoring (Prometheus)
 prometheus-client>=0.20.0
-prometheus-fastapi-instrumentator>=6.1.0
+prometheus-fastapi-instrumentator>=6.1.0,<7.0.0
 
 # Opcional: Ollama local
 # ollama>=0.2.0
