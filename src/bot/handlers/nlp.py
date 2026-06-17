@@ -1,91 +1,98 @@
-import logging
-import time
-import asyncio
-from datetime import datetime
-from telegram import Update
-from telegram.ext import ContextTypes
-from telegram.error import TimedOut
+"""Handler NLP: texto libre → GroqRouter con seguridad, TYPING y filtro de triviales."""
+from __future__ import annotations
 
-from src.bot.groq_router import GroqRouter
-from src.bot.api_client import ApiClient
-from src.agents.mood_detector import MoodDetector
+import logging
+import traceback
+
+import httpx
+from telegram import Update
+from telegram.constants import ChatAction
+from telegram.error import NetworkError, TimedOut
+from telegram.ext import ContextTypes
+
+from src.bot.groq_router import AmbiguityRequest, GroqRouter, ToolCallResult
+from src.bot.middleware import require_allowed_user
 
 logger = logging.getLogger(__name__)
 
+# Mensajes triviales que no merecen una llamada a Groq
+_TRIVIALES = {"hola", "ok", "vale", "gracias", "de nada", "\ud83d\udc4d", "\ud83d\udc4c", "si", "s\u00ed", "no", "buenas", "hey"}
 
-class NLPHandler:
-    def __init__(self):
-        self.router = GroqRouter()
-        self.api_client = ApiClient()
-        self.mood_detector = MoodDetector(groq_api_key=__import__('os').environ.get('GROQ_API_KEY', ''))
 
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user = update.effective_user
-        message_text = update.message.text
-        chat_id = update.effective_chat.id
-        user_id = user.id
+@require_allowed_user
+async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Procesa mensajes de texto libre vía GroqRouter con patrón provisional+edición."""
+    if not update.message or not update.message.text:
+        return
 
-        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
-        start_time = time.time()
+    user_text = update.message.text
+    user_id = update.effective_user.id if update.effective_user else 0
+    chat_id = update.effective_chat.id if update.effective_chat else 0
 
-        try:
-            today = datetime.now().date().isoformat()
-            citas_hoy, habitos_activos, history = await asyncio.gather(
-                self.api_client.get_appointments(user_id, today),
-                self.api_client.get_active_habits(user_id),
-                self.api_client.get_history(user_id, limit=5),
-            )
+    # Pre-filtro: mensajes triviales — respuesta instantánea sin llamar a Groq
+    text_lower = user_text.strip().lower()
+    if text_lower in _TRIVIALES or len(text_lower) < 3:
+        await update.message.reply_text("\ud83d� \u00bfEn qué puedo ayudarte?")
+        return
 
-            # Mood detection cada 5 mensajes
-            msg_count = context.user_data.get("msg_count", 0) + 1
-            context.user_data["msg_count"] = msg_count
-            if msg_count % 5 == 0:
-                recent_texts = [m["content"] for m in history if m["role"] == "user"]
-                recent_texts.append(message_text)
-                asyncio.create_task(
-                    self.mood_detector.analyze(recent_texts, user_id)
-                )
+    # Indicador visual de procesamiento
+    await update.effective_chat.send_action(ChatAction.TYPING)
 
-            mood_context = ""
-            if await self.mood_detector.should_mention(user_id):
-                mood_context = (
-                    "\n[CONTEXTO INTERNO: el usuario lleva varios dias con estado "
-                    "emocional bajo. Muestra empatia de forma natural, sin ser invasivo.]"
-                )
+    provisional = await update.message.reply_text("\u23f3 Procesando...")
 
-            response = await self.router.process_message(
-                message=message_text,
-                user_id=user_id,
-                citas_hoy=citas_hoy,
-                habitos=habitos_activos,
-                history=history,
-                extra_context=mood_context,
-            )
+    groq_router: GroqRouter = context.bot_data.get("groq_router") or GroqRouter()
 
-            for attempt in range(3):
-                try:
-                    await update.message.reply_text(response)
-                    break
-                except TimedOut:
-                    if attempt == 2:
-                        await update.message.reply_text(
-                            "THDORA esta pensando... dame un segundo mas."
-                        )
-                    else:
-                        await asyncio.sleep(0.5 * (2 ** attempt))
-                        await context.bot.send_chat_action(chat_id=chat_id, action="typing")
+    try:
+        result = await groq_router.process(
+            user_text=user_text,
+            user_id=user_id,
+        )
 
-            await asyncio.gather(
-                self.api_client.save_message(user_id, "user", message_text),
-                self.api_client.save_message(user_id, "assistant", response),
-            )
+        # Resolver el tipo de respuesta
+        if isinstance(result, ToolCallResult):
+            response_text = result.message_to_user
+        elif isinstance(result, AmbiguityRequest):
+            response_text = result.question_to_user
+        else:
+            response_text = str(result)
 
-            elapsed = time.time() - start_time
-            logger.info("NLP ok - user:%s time:%.2fs", user_id, elapsed)
+        await context.bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=provisional.message_id,
+            text=response_text,
+        )
 
-        except Exception as e:
-            elapsed = time.time() - start_time
-            logger.error("NLP error user:%s time:%.2fs - %s", user_id, elapsed, str(e), exc_info=True)
-            await update.message.reply_text(
-                "Lo siento, tuve un problema interno. Intentalo de nuevo."
-            )
+    except httpx.TimeoutException:
+        logger.error("TimeoutException en NLP para user_id=%s: %s", user_id, traceback.format_exc())
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=provisional.message_id,
+            text="\u231b El servicio tardó demasiado en responder. Inténtalo de nuevo.",
+        )
+
+    except httpx.ConnectError:
+        logger.error("ConnectError en NLP para user_id=%s: %s", user_id, traceback.format_exc())
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=provisional.message_id,
+            text="\ud83d� No se pudo conectar con el servicio de IA. Verifica la conexión.",
+        )
+
+    except TimedOut:
+        logger.error("TimedOut de Telegram en NLP para user_id=%s: %s", user_id, traceback.format_exc())
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=provisional.message_id,
+            text="\u231b Telegram agotó el tiempo de espera. Inténtalo de nuevo.",
+        )
+
+    except NetworkError:
+        logger.error("NetworkError de Telegram en NLP para user_id=%s: %s", user_id, traceback.format_exc())
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=provisional.message_id,
+            text="\ud83d� Error de red. Comprueba tu conexión e inténtalo de nuevo.",
+        )
+
+    except Exception:
+        logger.error("Error inesperado en NLP para user_id=%s: %s", user_id, traceback.format_exc())
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=provisional.message_id,
+            text="\u274c Ocurrió un error inesperado. El equipo ha sido notificado.",
+        )

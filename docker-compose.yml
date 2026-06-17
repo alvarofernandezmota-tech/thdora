@@ -22,7 +22,7 @@ services:
     command: /entrypoint-api.sh
     restart: always
     ports:
-      - "8001:8000"          # 8001 en host → 8000 dentro del contenedor
+      - "8001:8000"
     volumes:
       - thdora_data:/app/data
     env_file:
@@ -58,6 +58,13 @@ services:
       - .env
     environment:
       - THDORA_API_URL=http://api:8000
+    # Variables para /diario: GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO (vienen de .env)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     logging:
       driver: "json-file"
       options:
@@ -67,8 +74,3 @@ services:
 volumes:
   thdora_data:
     driver: local
-    # Para persistencia en host en lugar de volumen Docker:
-    # driver_opts:
-    #   type: none
-    #   o: bind
-    #   device: ./data
