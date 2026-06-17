@@ -1,21 +1,10 @@
 """
-Router de configuración de hábitos (F9.2).
-
-Endpoints::
-
-    GET    /habit-config                  → lista toda la configuración
-    GET    /habit-config/{name}           → config de un hábito concreto
-    POST   /habit-config                  → crear o actualizar config (upsert)
-    DELETE /habit-config/{name}           → borrar config de un hábito
-
-Uso:
-    La config define el tipo (numeric/time/boolean/text), unidad,
-    valores rápidos para el bot y regla de XP para el RPG (F10).
+Router de configuración de hábitos (multi-user).
 """
 
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, field_validator
 
 from src.api.deps import get_manager
@@ -26,16 +15,14 @@ router = APIRouter(prefix="/habit-config", tags=["habit-config"])
 VALID_TYPES = ("numeric", "time", "boolean", "text")
 
 
-# ── Modelos Pydantic ─────────────────────────────────────────────────
-
 class HabitConfigCreate(BaseModel):
     name: str
     habit_type: str = "text"
     unit: Optional[str] = None
     min_val: Optional[float] = None
     max_val: Optional[float] = None
-    quick_vals: Optional[List[str]] = None   # ["6h", "7h", "8h"]
-    xp_rule: Optional[str] = None            # "gte:7", "any", "eq:0"
+    quick_vals: Optional[List[str]] = None
+    xp_rule: Optional[str] = None
 
     @field_validator("habit_type")
     @classmethod
@@ -56,57 +43,45 @@ class HabitConfigResponse(BaseModel):
     xp_rule: Optional[str]
 
 
-# ── Endpoints ───────────────────────────────────────────────────────
-
 @router.get("/", response_model=List[HabitConfigResponse])
 def list_habit_configs(
+    user_id: int = Query(..., description="Telegram User ID"),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> List[HabitConfigResponse]:
-    """Lista la configuración de todos los hábitos."""
-    return manager.get_all_habit_configs()
+    return manager.get_all_habit_configs(user_id=user_id)
 
 
 @router.get("/{name}", response_model=HabitConfigResponse)
 def get_habit_config(
     name: str,
+    user_id: int = Query(..., description="Telegram User ID"),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> HabitConfigResponse:
-    """Devuelve la config de un hábito concreto."""
-    cfg = manager.get_habit_config(name)
+    cfg = manager.get_habit_config(name, user_id=user_id)
     if not cfg:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No hay config para el hábito '{name}'.",
-        )
+        raise HTTPException(status_code=404, detail=f"No hay config para el hábito '{name}'.")
     return cfg
 
 
 @router.post("/", status_code=201, response_model=HabitConfigResponse)
 def upsert_habit_config(
     body: HabitConfigCreate,
+    user_id: int = Query(..., description="Telegram User ID"),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> HabitConfigResponse:
-    """Crea o actualiza la configuración de un hábito (upsert por nombre)."""
     return manager.upsert_habit_config(
-        name=body.name,
-        habit_type=body.habit_type,
-        unit=body.unit,
-        min_val=body.min_val,
-        max_val=body.max_val,
-        quick_vals=body.quick_vals,
-        xp_rule=body.xp_rule,
+        name=body.name, habit_type=body.habit_type, unit=body.unit,
+        min_val=body.min_val, max_val=body.max_val, quick_vals=body.quick_vals,
+        xp_rule=body.xp_rule, user_id=user_id,
     )
 
 
 @router.delete("/{name}", status_code=204)
 def delete_habit_config(
     name: str,
+    user_id: int = Query(..., description="Telegram User ID"),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> None:
-    """Borra la configuración de un hábito."""
-    deleted = manager.delete_habit_config(name)
+    deleted = manager.delete_habit_config(name, user_id=user_id)
     if not deleted:
-        raise HTTPException(
-            status_code=404,
-            detail=f"No hay config para el hábito '{name}'.",
-        )
+        raise HTTPException(status_code=404, detail=f"No hay config para el hábito '{name}'.")

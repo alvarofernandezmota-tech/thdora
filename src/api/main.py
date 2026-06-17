@@ -1,13 +1,5 @@
 """
-Entrypoint de la API REST de THDORA.
-
-Usa FastAPI para exponer el LifeManager como servicio HTTP.
-
-Ejecución::
-
-    uvicorn src.api.main:app --reload
-    # Swagger UI: http://localhost:8000/docs
-    # ReDoc:      http://localhost:8000/redoc
+Entrypoint de la API REST de THDORA — v0.12.0
 """
 
 from fastapi import FastAPI
@@ -15,8 +7,7 @@ from fastapi import FastAPI
 from src.api.routers import appointments, habits, summary
 from src.api.routers import habit_config
 from src.api.routers import user_config
-from src.api.deps import get_manager
-from src.core.impl.sqlite_lifemanager import SQLiteLifeManager
+from src.api.routers import admin
 
 app = FastAPI(
     title="THDORA API",
@@ -30,7 +21,8 @@ app.include_router(appointments.router)
 app.include_router(habits.router)
 app.include_router(summary.router)
 app.include_router(habit_config.router)
-app.include_router(user_config.router)   # F12 — notificaciones
+app.include_router(user_config.router)
+app.include_router(admin.router)
 
 
 @app.get("/", tags=["health"])

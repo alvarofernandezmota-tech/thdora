@@ -1,16 +1,11 @@
 """
-Router de resumen diario — v2 con SQLiteLifeManager.
-
-Endpoints::
-
-    GET /summary/{date}          → resumen del día (citas + hábitos)
-    GET /summary/week/{date}     → resumen de la semana
+Router de resumen diario — multi-user.
 """
 
 from datetime import date as date_type, timedelta
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 
 from src.api.deps import get_manager
 from src.core.impl.sqlite_lifemanager import SQLiteLifeManager
@@ -29,24 +24,20 @@ def _parse_date(date_str: str) -> str:
 @router.get("/{date_str}")
 def get_summary(
     date_str: str,
+    user_id: int = Query(..., description="Telegram User ID"),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> Dict[str, Any]:
-    """Resumen completo del día: citas + hábitos."""
     _parse_date(date_str)
-    return manager.get_summary(date_str)
+    return manager.get_summary(date_str, user_id=user_id)
 
 
 @router.get("/week/{date_str}")
 def get_summary_week(
     date_str: str,
+    user_id: int = Query(..., description="Telegram User ID"),
     manager: SQLiteLifeManager = Depends(get_manager),
 ) -> List[Dict[str, Any]]:
-    """Resumen de cada día de la semana que contiene date_str."""
     _parse_date(date_str)
     d = date_type.fromisoformat(date_str)
     monday = d - timedelta(days=d.weekday())
-    result = []
-    for i in range(7):
-        day = str(monday + timedelta(days=i))
-        result.append(manager.get_summary(day))
-    return result
+    return [manager.get_summary(str(monday + timedelta(days=i)), user_id=user_id) for i in range(7)]
