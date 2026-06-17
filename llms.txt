@@ -1,0 +1,37 @@
+# thdora — Índice de archivos para LLMs
+# Lee CONTEXT.md primero, luego los archivos que necesites.
+# https://github.com/alvarofernandezmota-tech/thdora
+
+## Punto de entrada
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/CONTEXT.md
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/ROADMAP.md
+
+## Configuración
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/config.py
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/requirements.txt
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/.env.example
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/docker-compose.yml
+
+## Bot — núcleo
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/main.py
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/groq_router.py
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/http_client.py
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/api_client.py
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/middleware.py
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/scheduler.py
+
+## Bot — handlers
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/nlp.py
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/diario.py
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/citas.py
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/habitos.py
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/onboarding.py
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/stats.py
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/nlp_disambig.py
+
+## Servicios
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/services/github_client.py
+
+## Infra
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/Dockerfile
+https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/Makefile
