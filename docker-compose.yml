@@ -1,15 +1,18 @@
-# THDORA v0.21.2 — Stack completo: app + Prometheus + Grafana
+# THDORA v0.21.2 — Stack completo: api + bot + Prometheus + Grafana
 # Arrancar: docker compose up -d
+# API:       http://localhost:8000
 # Métricas:  http://localhost:9090
 # Grafana:   http://localhost:3000  (admin/admin)
-# API:       http://localhost:8000
 
 services:
+
+  # ── API ──────────────────────────────────────────────────────────────────────────
   thdora:
     build: .
     container_name: thdora
     restart: unless-stopped
     command: ["/entrypoint-api.sh"]
+    user: "1000:1000"
     ports:
       - "8000:8000"
     env_file:
@@ -18,14 +21,43 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
+      test:
+        - "CMD"
+        - "python3"
+        - "-c"
+        - |
+          import urllib.request, sys
+          try:
+              r = urllib.request.urlopen('http://localhost:8000/health/live', timeout=5)
+              sys.exit(0 if r.status == 200 else 1)
+          except Exception as e:
+              print(e); sys.exit(1)
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 15s
+      start_period: 20s
     depends_on:
       - prometheus
 
+  # ── Bot ──────────────────────────────────────────────────────────────────────────
+  bot:
+    build: .
+    container_name: thdora-bot
+    restart: unless-stopped
+    command: ["/entrypoint-bot.sh"]
+    user: "1000:1000"
+    env_file:
+      - .env
+    environment:
+      THDORA_API_URL: "http://thdora:8000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+    depends_on:
+      thdora:
+        condition: service_healthy
+
+  # ── Prometheus ─────────────────────────────────────────────────────────────────
   prometheus:
     image: prom/prometheus:latest
     container_name: prometheus
@@ -41,6 +73,7 @@ services:
       - "--storage.tsdb.retention.time=30d"
       - "--web.enable-lifecycle"
 
+  # ── Grafana ────────────────────────────────────────────────────────────────────
   grafana:
     image: grafana/grafana:latest
     container_name: grafana

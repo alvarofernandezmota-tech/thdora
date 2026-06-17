@@ -1,20 +1,20 @@
 #!/bin/sh
 # Entrypoint del servicio `bot`
-# Espera a que la API responda con 200 antes de arrancar el bot.
+# Espera a que la API responda 200 en /health/live antes de arrancar el bot.
 set -e
 
-API_URL="${THDORA_API_URL:-http://api:8000}"
+API_URL="${THDORA_API_URL:-http://thdora:8000}"
 MAX_RETRIES=30
 RETRY_INTERVAL=2
 
-echo "⏳ Esperando a que la API esté disponible en ${API_URL}/..."
+echo "⏳ Esperando a que la API esté disponible en ${API_URL}/health/live..."
 i=0
 while [ $i -lt $MAX_RETRIES ]; do
-    if python -c "
+    if python3 -c "
 import urllib.request, sys
 try:
-    urllib.request.urlopen('${API_URL}/')
-    sys.exit(0)
+    r = urllib.request.urlopen('${API_URL}/health/live', timeout=5)
+    sys.exit(0 if r.status == 200 else 1)
 except Exception:
     sys.exit(1)
 " 2>/dev/null; then
