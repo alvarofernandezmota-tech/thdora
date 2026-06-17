@@ -1,5 +1,5 @@
 """
-Entrypoint del bot Telegram de THDORA — v4.5
+Entrypoint del bot Telegram de THDORA — v0.20.0
 """
 import asyncio
 import logging
@@ -50,7 +50,8 @@ from src.bot.handlers.nlp_disambig import cb_nlp_disambig
 from src.bot.handlers.onboarding import get_onboarding_handler
 from src.bot.handlers.stats import stats_handler
 from src.bot.handlers.diario import diario_handler
-from src.bot.handlers.voice import voice_handler  # Sprint 3
+from src.bot.handlers.voice import voice_handler
+from src.bot.handlers.weather import weather_handler
 
 os.makedirs("data", exist_ok=True)
 
@@ -86,6 +87,14 @@ async def _post_init(application) -> None:
         scheduler.start()
     logger.info("⏰ Scheduler F12 iniciado")
 
+    # Pre-compilar el grafo LangGraph al arrancar (cacheado por lru_cache)
+    try:
+        from src.bot.agents.thdora_agent import build_thdora_graph
+        build_thdora_graph()
+        logger.info("🧠 LangGraph ThdoraAgent listo")
+    except ImportError:
+        logger.warning("⚠️ langgraph no instalado — NLP usará GroqRouter como fallback")
+
 
 async def _post_shutdown(application) -> None:
     await close_client()
@@ -93,10 +102,7 @@ async def _post_shutdown(application) -> None:
 
 
 def build_app(token: str):
-    persistence = PicklePersistence(
-        filepath=_PERSISTENCE_PATH,
-        update_interval=60,
-    )
+    persistence = PicklePersistence(filepath=_PERSISTENCE_PATH, update_interval=60)
     app = (
         ApplicationBuilder()
         .token(token)
@@ -131,7 +137,7 @@ def build_app(token: str):
     # Voice handler Sprint 3 — ANTES del handler de texto libre
     app.add_handler(voice_handler)
 
-    # 3. Texto libre
+    # 3. Texto libre → LangGraph o GroqRouter
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _route_free_text))
 
     # 4. Comandos
@@ -143,6 +149,7 @@ def build_app(token: str):
     app.add_handler(CommandHandler("cancelar", cmd_cancelar))
     app.add_handler(CommandHandler("diario",   diario_handler))
     app.add_handler(CommandHandler("stats",    stats_handler))
+    app.add_handler(CommandHandler("tiempo",   weather_handler))
 
     # 5. Error handler
     app.add_error_handler(error_handler)
@@ -161,7 +168,7 @@ def main() -> None:
     token = _load_token()
     asyncio.run(_check_api())
     app = build_app(token)
-    logger.info("🧠 THDORA bot v4.5 arrancando (polling)…")
+    logger.info("🧠 THDORA bot v0.20.0 arrancando (polling)…")
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=["message", "callback_query"],
