@@ -1,5 +1,5 @@
 """
-Entrypoint del bot Telegram de THDORA — v0.20.2
+Entrypoint del bot Telegram de THDORA — v0.21.0
 """
 import asyncio
 import logging
@@ -25,24 +25,11 @@ from src.bot.handlers import (
     build_edit_apt_handler,
     build_edit_hab_handler,
     build_config_handler,
-    cb_citas_nav,
-    cb_habitos_nav,
-    cb_semana_nav,
-    cb_menu_home,
-    cb_apt_delete,
-    cb_apt_delete_confirm,
-    cb_cita_detail,
-    cb_hab_delete,
-    cb_hab_delete_confirm,
-    cb_hab_add,
-    cb_hab_add_value,
+    cb_citas_nav, cb_habitos_nav, cb_semana_nav, cb_menu_home,
+    cb_apt_delete, cb_apt_delete_confirm, cb_cita_detail,
+    cb_hab_delete, cb_hab_delete_confirm, cb_hab_add, cb_hab_add_value,
     cb_cancel_action,
-    cmd_start,
-    cmd_citas,
-    cmd_habitos,
-    cmd_semana,
-    cmd_resumen,
-    cmd_cancelar,
+    cmd_start, cmd_citas, cmd_habitos, cmd_semana, cmd_resumen, cmd_cancelar,
     error_handler,
 )
 from src.bot.handlers.nlp import nlp_handler
@@ -60,9 +47,8 @@ logging.basicConfig(
     level=logging.INFO,
     stream=sys.stdout,
 )
-logging.getLogger("httpx").setLevel(logging.WARNING)
-logging.getLogger("telegram.ext").setLevel(logging.WARNING)
-logging.getLogger("apscheduler").setLevel(logging.WARNING)
+for noisy in ("httpx", "telegram.ext", "apscheduler"):
+    logging.getLogger(noisy).setLevel(logging.WARNING)
 logger = logging.getLogger(__name__)
 
 _PERSISTENCE_PATH = os.path.join("data", "bot_persistence.pkl")
@@ -71,10 +57,8 @@ _PERSISTENCE_PATH = os.path.join("data", "bot_persistence.pkl")
 async def _check_api() -> None:
     api = ThdoraApiClient()
     ok = await api.health()
-    if ok:
-        logger.info("✅ API de THDORA disponible en %s", api.base_url)
-    else:
-        logger.warning("⚠️  API no responde en %s — el bot arranca igualmente.", api.base_url)
+    status = "✅" if ok else "⚠️ "
+    logger.info("%s API THDORA en %s", status, api.base_url)
 
 
 async def _post_init(application) -> None:
@@ -83,16 +67,14 @@ async def _post_init(application) -> None:
         scheduler.start()
     logger.info("⏰ Scheduler APScheduler iniciado")
 
-    # LangGraph + memoria persistente
     try:
-        from src.bot.agents.thdora_agent import build_thdora_graph
-        from src.bot.agents.scheduler_tasks import setup_memory_scheduler
-        graph = build_thdora_graph()
-        application.bot_data["thdora_graph"] = graph
+        from src.agents import build_thdora_graph
+        from src.agents.scheduler_tasks import setup_memory_scheduler
+        build_thdora_graph()  # pre-compila y cachea
         setup_memory_scheduler(scheduler)
-        logger.info("🧠 LangGraph ThdoraAgent + memoria persistente + tareas programadas listos")
+        logger.info("🧠 LangGraph ThdoraAgent + memoria persistente + scheduler listos")
     except ImportError as exc:
-        logger.warning("⚠️ langgraph no instalado — NLP usará GroqRouter como fallback: %s", exc)
+        logger.warning("⚠️ langgraph no instalado — usando GroqRouter fallback: %s", exc)
 
 
 async def _post_shutdown(application) -> None:
@@ -158,7 +140,7 @@ async def _route_free_text(update, context) -> None:
 def main() -> None:
     asyncio.run(_check_api())
     app = build_app(settings.TELEGRAM_BOT_TOKEN)
-    logger.info("🧠 THDORA bot v0.20.2 arrancando (polling)…")
+    logger.info("🧠 THDORA bot v0.21.0 arrancando (polling)…")
     app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
 
 

@@ -1,4 +1,13 @@
-"""Handler NLP — LangGraph (thread_id=user_id) con fallback a GroqRouter — v0.20.1."""
+"""
+Handler NLP: texto libre → src.agents (LangGraph) con fallback a GroqRouter.
+
+Flujo:
+    Mensaje usuario
+    → (¿langgraph instalado?) → ThdoraAgent con thread_id=user_id
+    → (fallback) → GroqRouter legacy
+
+Memoria persistente: config={"configurable": {"thread_id": str(user_id)}}
+"""
 from __future__ import annotations
 import logging
 import traceback
@@ -16,8 +25,9 @@ _TRIVIALES = {"hola", "ok", "vale", "gracias", "de nada", "👍", "👌", "si", 
 
 
 def _get_graph():
+    """Importación lazy del grafo — no falla si langgraph no está instalado."""
     try:
-        from src.bot.agents.thdora_agent import build_thdora_graph
+        from src.agents import build_thdora_graph
         return build_thdora_graph()
     except ImportError:
         return None
@@ -42,29 +52,25 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
     await update.effective_chat.send_action(ChatAction.TYPING)
     provisional = await update.message.reply_text("⏳ Procesando...")
-
     graph = _get_graph()
 
     try:
         if graph is not None:
-            # —— LangGraph con memoria persistente por usuario ——
             config = {"configurable": {"thread_id": str(user_id)}}
             inputs = {
                 "messages": [HumanMessage(content=user_text)],
                 "user_id": user_id,
-                "nombre_usuario": nombre_usuario,
+                "user_name": nombre_usuario,
                 "context_summary": context.user_data.get("context_summary", ""),
                 "long_term_memory": "",
                 "pending_action": None,
-                "last_appointments": context.user_data.get("last_appointments", []),
-                "last_habits": context.user_data.get("last_habits", []),
+                "metadata": {},
             }
             result = await graph.ainvoke(inputs, config=config)
             response_text = result["messages"][-1].content
         else:
-            # —— Fallback GroqRouter ——
             from src.bot.llm_factory import get_router
-            from src.bot.groq_router import AmbiguityRequest, ToolCallResult
+            from src.bot.groq_router import AmbiguityRequest
             nlp_history = context.user_data.setdefault("nlp_history", [])
             router = get_router()
             result = await router.process(
@@ -77,7 +83,6 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
                 response_text = result.message_to_user
             else:
                 response_text = str(result)
-            nlp_history = context.user_data.setdefault("nlp_history", [])
             nlp_history.append({"role": "user", "content": user_text})
             nlp_history.append({"role": "assistant", "content": response_text})
             if len(nlp_history) > 20:
@@ -88,21 +93,21 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         )
 
     except httpx.TimeoutException:
-        logger.error("Timeout NLP user_id=%s: %s", user_id, traceback.format_exc())
+        logger.error("Timeout NLP user_id=%s", user_id)
         await context.bot.edit_message_text(chat_id=chat_id, message_id=provisional.message_id,
             text="⏳ El servicio tardó demasiado. Inténtalo de nuevo.")
     except httpx.ConnectError:
-        logger.error("ConnectError NLP user_id=%s: %s", user_id, traceback.format_exc())
+        logger.error("ConnectError NLP user_id=%s", user_id)
         await context.bot.edit_message_text(chat_id=chat_id, message_id=provisional.message_id,
             text="🔌 No se pudo conectar con el servicio de IA.")
     except TimedOut:
-        logger.error("TimedOut NLP user_id=%s: %s", user_id, traceback.format_exc())
+        logger.error("TimedOut NLP user_id=%s", user_id)
         await context.bot.edit_message_text(chat_id=chat_id, message_id=provisional.message_id,
             text="⏳ Telegram agotó el tiempo. Inténtalo de nuevo.")
     except NetworkError:
-        logger.error("NetworkError NLP user_id=%s: %s", user_id, traceback.format_exc())
+        logger.error("NetworkError NLP user_id=%s", user_id)
         await context.bot.edit_message_text(chat_id=chat_id, message_id=provisional.message_id,
-            text="🔌 Error de red. Comprueba tu conexión.")
+            text="🔌 Error de red.")
     except Exception:
         logger.error("Error inesperado NLP user_id=%s: %s", user_id, traceback.format_exc())
         await context.bot.edit_message_text(chat_id=chat_id, message_id=provisional.message_id,
