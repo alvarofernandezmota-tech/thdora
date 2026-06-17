@@ -12,12 +12,17 @@ class Settings(BaseSettings):
     # Telegram
     TELEGRAM_BOT_TOKEN: str = Field(min_length=1)
 
-    # LLM backend (groq | ollama)
+    # LLM backend
     LLM_BACKEND: str = "groq"
     GROQ_API_KEY: str = Field(min_length=1)
     GROQ_MODEL: str = "llama-3.3-70b-versatile"
     OLLAMA_HOST: str = "http://localhost:11434"
     OLLAMA_MODEL: str = "llama3.2:3b"
+
+    # Sprint 5/6 — multi-nivel LLM
+    ADMIN_TOKEN: str = ""
+    OLLAMA_MODEL_LEVEL1: str = "qwen2.5:3b-instruct"
+    OLLAMA_MODEL_LEVEL2: str = "llama3.2:3b"
 
     # Control de acceso
     ALLOWED_USERS: str = ""
@@ -36,7 +41,7 @@ class Settings(BaseSettings):
     GITHUB_OWNER: str = "alvarofernandezmota-tech"
     GITHUB_REPO: str = "yggdrasil-dew"
 
-    # OpenWeatherMap — Sprint 4
+    # OpenWeatherMap
     OWM_API_KEY: str = ""
 
 

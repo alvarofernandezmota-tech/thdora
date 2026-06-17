@@ -1,62 +1,113 @@
-"""LLM Factory: devuelve el router NLP según LLM_BACKEND en la configuración.
+"""LLM Factory — Arquitectura de 3 niveles (Sprint 5/6).
 
-Sprint 4 — fallback automático: si OllamaRouter.process() tarda más de 3s
-o lanza excepción, reintenta con GroqRouter. Log WARNING "fallback groq: <motivo>".
+Nivel 0: Regex        → nlp.py (NO toca este archivo)
+Nivel 1: Ollama local → qwen2.5:3b-instruct, timeout 500ms, temp 0.0
+Nivel 2: Groq cloud   → llama-3.3-70b-versatile, historial completo
 """
 from __future__ import annotations
 
-import asyncio
+import json
 import logging
+
+import httpx
 
 from src.config import settings
 
 logger = logging.getLogger(__name__)
 
-_OLLAMA_TIMEOUT_S = 3.0
+_INTENT_RESPONSES: dict[str, str] = {
+    "saludo": "¡Hola! ¿En qué te ayudo hoy?",
+    "despedida": "¡Hasta luego! Cuídate.",
+    "ver_citas": "Mostrando tus citas...",
+    "ver_habitos": "Mostrando tus hábitos...",
+    "ver_resumen": "Generando resumen...",
+    "tiempo": "Consultando el clima...",
+}
+
+_SYSTEM_PROMPT_L1 = (
+    "Eres un clasificador de intenciones. Responde ÚNICAMENTE con JSON válido, sin texto extra.\n"
+    'Formato: {"intent": "<intención>", "confidence": <0.0-1.0>}\n'
+    "Intenciones posibles: saludo, despedida, crear_cita, ver_citas, crear_habito, "
+    "ver_habitos, ver_resumen, ver_stats, tiempo, diario, otro"
+)
 
 
-class _RouterWithFallback:
-    """Wrapper que intenta OllamaRouter y cae a GroqRouter si falla o tarda > 3s."""
+class Level1OllamaClassifier:
+    """Nivel 1: Clasificador rápido local con Ollama (qwen2.5:3b)."""
 
-    def __init__(self, primary, fallback):
-        self._primary = primary
-        self._fallback = fallback
+    def __init__(self) -> None:
+        self.host = settings.OLLAMA_HOST.rstrip("/")
+        self.model = settings.OLLAMA_MODEL_LEVEL1
+        self._timeout = httpx.Timeout(0.5)  # 500 ms
 
-    async def process(self, *args, **kwargs):
+    async def classify(self, text: str) -> dict | None:
+        payload = {
+            "model": self.model,
+            "messages": [
+                {"role": "system", "content": _SYSTEM_PROMPT_L1},
+                {"role": "user", "content": text},
+            ],
+            "temperature": 0.0,
+            "stream": False,
+        }
         try:
-            result = await asyncio.wait_for(
-                self._primary.process(*args, **kwargs),
-                timeout=_OLLAMA_TIMEOUT_S,
+            async with httpx.AsyncClient(timeout=self._timeout) as client:
+                resp = await client.post(f"{self.host}/api/chat", json=payload)
+                resp.raise_for_status()
+                content = resp.json()["message"]["content"].strip()
+                parsed = json.loads(content)
+                if "intent" in parsed and "confidence" in parsed:
+                    return {
+                        "intent": str(parsed["intent"]),
+                        "confidence": float(parsed["confidence"]),
+                    }
+        except (httpx.TimeoutException, json.JSONDecodeError, KeyError, Exception) as exc:
+            logger.debug("Nivel 1 falló (%s): %s", type(exc).__name__, exc)
+        return None
+
+
+class LLMFactory:
+    """Gestor de enrutamiento multinivel. Interfaz pública: process()."""
+
+    def __init__(self) -> None:
+        self.classifier = Level1OllamaClassifier()
+
+    async def process(
+        self, user_text: str, user_id: int, history: list[dict]
+    ) -> dict:
+        """Procesa el mensaje aplicando los niveles 1 y 2.
+
+        Nivel 0 (regex) ya fue ejecutado por nlp.py antes de llegar aquí.
+        Retorna: {"text": str, "intent": str, "level_used": int}
+        """
+        # ── Nivel 1 ──────────────────────────────────────────────────────────
+        classification = await self.classifier.classify(user_text)
+
+        if classification and classification.get("confidence", 0.0) >= 0.75:
+            intent = classification["intent"]
+            logger.info(
+                "[user=%s] Nivel 1 → intent=%s conf=%.2f",
+                user_id, intent, classification["confidence"],
             )
-            return result
-        except asyncio.TimeoutError:
-            motivo = f"timeout >{_OLLAMA_TIMEOUT_S}s"
-            logger.warning("fallback groq: %s", motivo)
-            return await self._fallback.process(*args, **kwargs)
-        except Exception as exc:
-            motivo = str(exc) or type(exc).__name__
-            logger.warning("fallback groq: %s", motivo)
-            return await self._fallback.process(*args, **kwargs)
+            return {
+                "text": _INTENT_RESPONSES.get(intent, "Entendido."),
+                "intent": intent,
+                "level_used": 1,
+            }
 
-    async def transcribe(self, audio_bytes: bytes) -> str:
-        """Transcripción siempre via Groq (Ollama no soporta Whisper)."""
-        return await self._fallback.transcribe(audio_bytes)
+        # ── Nivel 2: Groq ─────────────────────────────────────────────────────
+        logger.info("[user=%s] Escalando a Nivel 2 (Groq)", user_id)
+        from src.bot.groq_router import GroqRouter  # import lazy — no rompe imports existentes
+
+        groq = GroqRouter()
+        result = await groq.process(user_text, user_id=user_id, history=history)
+        return {
+            "text": result.get("text", "No pude procesar el mensaje."),
+            "intent": result.get("intent", "otro"),
+            "level_used": 2,
+        }
 
 
-def get_router():
-    """Devuelve el router NLP según settings.LLM_BACKEND.
-
-    LLM_BACKEND="groq"   → GroqRouter (default, producción)
-    LLM_BACKEND="ollama" → _RouterWithFallback(OllamaRouter, GroqRouter)
-    """
-    backend = getattr(settings, "LLM_BACKEND", "groq").lower()
-
-    if backend == "ollama":
-        from src.bot.ollama_router import OllamaRouter
-        from src.bot.groq_router import GroqRouter
-        logger.debug("LLM backend: OllamaRouter con fallback a GroqRouter (timeout=%ss)", _OLLAMA_TIMEOUT_S)
-        return _RouterWithFallback(OllamaRouter(), GroqRouter())
-
-    from src.bot.groq_router import GroqRouter
-    logger.debug("LLM backend: GroqRouter")
-    return GroqRouter()
+def get_router() -> LLMFactory:
+    """Devuelve instancia del router. Interfaz compatible con nlp.py."""
+    return LLMFactory()
