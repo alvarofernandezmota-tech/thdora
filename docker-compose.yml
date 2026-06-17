@@ -1,20 +1,5 @@
-# ──────────────────────────────────────────────────────────────────────────
 # THDORA — docker-compose.yml
-#
-# Uso:
-#   cp docker/.env.docker.example .env        # primera vez
-#   docker compose up -d                       # arrancar
-#   docker compose logs -f                     # ver logs
-#   docker compose down                        # parar
-#   docker compose exec api sqlite3 /app/data/thdora.db  # consola DB
-#
-# Volumen `thdora_data` persiste la base de datos SQLite entre reinicios.
-# Puertos: 8001 = thdora-api | 8000 = ai-toolkit/litellm
-# ──────────────────────────────────────────────────────────────────────────
-
 services:
-
-  # ─────────────────────────────────────────────────────────────────
   api:
     build: .
     image: thdora:latest
@@ -28,10 +13,9 @@ services:
     env_file:
       - .env
     environment:
-      - THDORA_DB_PATH=/app/data/thdora.db
+      THDORA_DB_PATH=/app/data/thdora.db
     healthcheck:
-      test: ["CMD", "python", "-c",
-             "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
       interval: 15s
       timeout: 5s
       retries: 5
@@ -42,7 +26,6 @@ services:
         max-size: "10m"
         max-file: "3"
 
-  # ─────────────────────────────────────────────────────────────────
   bot:
     build: .
     image: thdora:latest
@@ -58,9 +41,8 @@ services:
       - .env
     environment:
       - THDORA_API_URL=http://api:8000
-    # Variables para /diario: GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO (vienen de .env)
     healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      test: ["CMD", "pgrep", "-f", "python.*bot"]
       interval: 30s
       timeout: 5s
       retries: 3

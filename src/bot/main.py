@@ -1,45 +1,9 @@
 """
 Entrypoint del bot Telegram de THDORA — v4.5
-
-Variables de entorno::
-    TELEGRAM_BOT_TOKEN   → token de @BotFather (obligatorio)
-    THDORA_API_URL       → URL de la FastAPI (por defecto http://localhost:8000)
-    GROQ_API_KEY         → API key de Groq para NLP (obligatorio para texto libre)
-
-Orden de registro de handlers:
-    1. ConversationHandlers (mayor prioridad; incluyen sus propios entry_points)
-       - get_onboarding_handler()  /start + /onboarding
-       - build_nueva_handler()     /nueva + quick_nueva_*
-       - build_habito_handler()    /habito + quick_habito_*
-       - build_edit_apt_handler()  ^ae_
-       - build_edit_hab_handler()  ^he_
-       - build_config_handler()    /config + ^quick_config$
-    2. CallbackQueryHandlers globales (navegación, borrado, detalle, desambiguación)
-    3. MessageHandler texto libre (acumulación hab fuera de flujos → NLP)
-    4. CommandHandlers simples
-    5. Error handler
-
-Persistencia (PicklePersistence):
-    - Archivo: data/bot_persistence.pkl (excluido en .gitignore)
-    - Persiste: user_data (nlp_history, api_context_cache, nlp_pending_changes, preferencias)
-    - Efecto: el contexto NLP y los flujos activos sobreviven reinicios del bot
-    - update_interval=60: escribe a disco cada 60s (no en cada update) — Sprint 2
-
-Scheduler (F12):
-    - Se arranca en post_init (dentro del event loop de PTB, evita RuntimeError)
-    - FIX B-NEW5 (v4.3): post_init se registra correctamente via
-      ApplicationBuilder().post_init(_post_init) en lugar de asignación directa
-    - Los jobs diarios (daily_summary / evening_log) se programan en cmd_start
-      y se reprograman cuando el usuario cambia horarios en /config
-    - Los jobs one-shot de cita se gestionan en handlers/citas.py
-
-NOTA: quick_config NO se registra como handler global independiente.
-      Es entry_point de build_config_handler() para entrar en el
-      ConversationHandler directamente desde el botón del menú.
 """
-
 import asyncio
 import logging
+import os
 import sys
 
 from telegram.ext import (
@@ -56,37 +20,29 @@ from src.bot.http_client import close_client
 from src.bot.scheduler import get_scheduler
 from src.config import settings
 from src.bot.handlers import (
-    # Factories
     build_nueva_handler,
     build_habito_handler,
     build_edit_apt_handler,
     build_edit_hab_handler,
     build_config_handler,
-    # Navegación
     cb_citas_nav,
     cb_habitos_nav,
     cb_semana_nav,
-    # Menú
     cb_menu_home,
-    # Citas
     cb_apt_delete,
     cb_apt_delete_confirm,
     cb_cita_detail,
-    # Hábitos
     cb_hab_delete,
     cb_hab_delete_confirm,
     cb_hab_add,
     cb_hab_add_value,
-    # Genérico
     cb_cancel_action,
-    # Comandos
     cmd_start,
     cmd_citas,
     cmd_habitos,
     cmd_semana,
     cmd_resumen,
     cmd_cancelar,
-    # Error
     error_handler,
 )
 from src.bot.handlers.nlp import nlp_handler
@@ -94,8 +50,8 @@ from src.bot.handlers.nlp_disambig import cb_nlp_disambig
 from src.bot.handlers.onboarding import get_onboarding_handler
 from src.bot.handlers.stats import stats_handler
 from src.bot.handlers.diario import diario_handler
+from src.bot.handlers.voice import voice_handler  # Sprint 3
 
-import os
 os.makedirs("data", exist_ok=True)
 
 logging.basicConfig(
@@ -106,52 +62,41 @@ logging.basicConfig(
 logging.getLogger("httpx").setLevel(logging.WARNING)
 logging.getLogger("telegram.ext").setLevel(logging.WARNING)
 logging.getLogger("apscheduler").setLevel(logging.WARNING)
-
 logger = logging.getLogger(__name__)
 
 _PERSISTENCE_PATH = os.path.join("data", "bot_persistence.pkl")
 
 
 async def _check_api() -> None:
-    """Verifica la disponibilidad de la API de THDORA al arranque."""
     api = ThdoraApiClient()
     ok = await api.health()
     if ok:
-        logger.info("\u2705 API de THDORA disponible en %s", api.base_url)
+        logger.info("✅ API de THDORA disponible en %s", api.base_url)
     else:
-        logger.warning("\u26a0\ufe0f  API de THDORA no responde en %s — el bot arranca igualmente.", api.base_url)
+        logger.warning("⚠️  API de THDORA no responde en %s — el bot arranca igualmente.", api.base_url)
 
 
 def _load_token() -> str:
-    """Lee TELEGRAM_BOT_TOKEN desde settings (pydantic-settings valida que no esté vacío)."""
     return settings.TELEGRAM_BOT_TOKEN
 
 
 async def _post_init(application) -> None:
-    """Arranca el scheduler APScheduler dentro del event loop de PTB.
-
-    FIX B-NEW5 (v4.3): esta función se pasa a ApplicationBuilder().post_init()
-    en lugar de asignarla directamente.
-    """
     scheduler = get_scheduler()
     if not scheduler.running:
         scheduler.start()
-        logger.info("\u23f0 Scheduler F12 iniciado")
+    logger.info("⏰ Scheduler F12 iniciado")
 
 
 async def _post_shutdown(application) -> None:
-    """Cierra el cliente httpx compartido limpiamente al apagar el bot."""
     await close_client()
-    logger.info("\ud83d� HTTP client cerrado")
+    logger.info("🔌 HTTP client cerrado")
 
 
 def build_app(token: str):
-    """Construye y configura la Application de Python-Telegram-Bot."""
     persistence = PicklePersistence(
         filepath=_PERSISTENCE_PATH,
-        update_interval=60,  # escribe a disco cada 60s, no en cada update — Sprint 2
+        update_interval=60,
     )
-
     app = (
         ApplicationBuilder()
         .token(token)
@@ -161,15 +106,15 @@ def build_app(token: str):
         .build()
     )
 
-    # ── 1. ConversationHandlers ──────────────────────────────────────────────────────────────
-    app.add_handler(get_onboarding_handler())      # /start + /onboarding (PRIMERO)
-    app.add_handler(build_nueva_handler())         # /nueva + quick_nueva_*
-    app.add_handler(build_habito_handler())        # /habito + quick_habito_*
-    app.add_handler(build_edit_apt_handler())      # ^ae_
-    app.add_handler(build_edit_hab_handler())      # ^he_
-    app.add_handler(build_config_handler())        # /config + ^quick_config$
+    # 1. ConversationHandlers
+    app.add_handler(get_onboarding_handler())
+    app.add_handler(build_nueva_handler())
+    app.add_handler(build_habito_handler())
+    app.add_handler(build_edit_apt_handler())
+    app.add_handler(build_edit_hab_handler())
+    app.add_handler(build_config_handler())
 
-    # ── 2. CallbackQueryHandlers globales ────────────────────────────────────
+    # 2. CallbackQueryHandlers globales
     app.add_handler(CallbackQueryHandler(cb_menu_home,          pattern=r"^menu_home$"))
     app.add_handler(CallbackQueryHandler(cb_citas_nav,          pattern=r"^citas_nav_"))
     app.add_handler(CallbackQueryHandler(cb_habitos_nav,        pattern=r"^habitos_nav_"))
@@ -181,12 +126,15 @@ def build_app(token: str):
     app.add_handler(CallbackQueryHandler(cb_hab_delete_confirm, pattern=r"^hdc_"))
     app.add_handler(CallbackQueryHandler(cb_hab_add,            pattern=r"^ha_"))
     app.add_handler(CallbackQueryHandler(cb_cancel_action,      pattern=r"^cancel_action$"))
-    app.add_handler(CallbackQueryHandler(cb_nlp_disambig,       pattern=r"^nlp_disambig\|"))
+    app.add_handler(CallbackQueryHandler(cb_nlp_disambig,       pattern=r"^nlp_disambig|"))
 
-    # ── 3. Texto libre (acumulación hábito → NLP) ──────────────────────────────
+    # Voice handler Sprint 3 — ANTES del handler de texto libre
+    app.add_handler(voice_handler)
+
+    # 3. Texto libre
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _route_free_text))
 
-    # ── 4. Comandos ──────────────────────────────────────────────────────────────────
+    # 4. Comandos
     app.add_handler(CommandHandler("start",    cmd_start))
     app.add_handler(CommandHandler("citas",    cmd_citas))
     app.add_handler(CommandHandler("habitos",  cmd_habitos))
@@ -196,14 +144,13 @@ def build_app(token: str):
     app.add_handler(CommandHandler("diario",   diario_handler))
     app.add_handler(CommandHandler("stats",    stats_handler))
 
-    # ── 5. Error handler ─────────────────────────────────────────────────────────────
+    # 5. Error handler
     app.add_error_handler(error_handler)
 
     return app
 
 
 async def _route_free_text(update, context) -> None:
-    """Enrúta texto libre fuera de ConversationHandlers."""
     if context.user_data.get("acum_hab_nombre"):
         await cb_hab_add_value(update, context)
         return
@@ -211,12 +158,10 @@ async def _route_free_text(update, context) -> None:
 
 
 def main() -> None:
-    """Punto de entrada principal del bot THDORA."""
     token = _load_token()
     asyncio.run(_check_api())
     app = build_app(token)
-
-    logger.info("\ud83e� THDORA bot v4.5 arrancando (polling)…")
+    logger.info("🧠 THDORA bot v4.5 arrancando (polling)…")
     app.run_polling(
         drop_pending_updates=True,
         allowed_updates=["message", "callback_query"],
