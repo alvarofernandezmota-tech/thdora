@@ -9,6 +9,7 @@ services:
     build: .
     container_name: thdora
     restart: unless-stopped
+    command: ["/entrypoint-api.sh"]
     ports:
       - "8000:8000"
     env_file:
