@@ -4,25 +4,25 @@
 
 ---
 
-## Estado actual — v0.17.0 (16 junio 2026)
+## Estado actual — v0.17.0 (17 junio 2026)
 
 ```
 Bot Telegram (9 comandos + 5 ConversationHandlers + inline buttons + NLP texto libre)
-    ↕ httpx async
+    ↕ httpx async (singleton compartido — Sprint 2)
 ThdoraApiClient (9 métodos)
     ↕ FastAPI REST
 API (14 endpoints: CRUD + semana + rango + stats)
     ↕ SQLAlchemy ORM
 SQLite (data/thdora.db — persistencia real)
     ↕ Groq API (NLP gratuito) — 🟢 OPERATIVO
-GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
+GroqRouter (intent + entidades + function calling + lru_cache + 256 tokens)
 ```
 
 🟢 **En producción** en servidor **Madre** (Omarchy, Arch Linux) con Docker desde 14 junio 2026.
 > Migrado de Acer → Madre el 14 junio 2026.
 
 ### Lo que funciona hoy ✅
-- `/start` `/citas` `/habitos` `/habito` `/nueva` `/semana` `/resumen` `/config` `/cancelar`
+- `/start` `/citas` `/habitos` `/habito` `/nueva` `/semana` `/resumen` `/config` `/cancelar` `/diario`
 - Saludo contextual (buenos días/tardes/noches)
 - Navegación ◀️▶️ con fecha real visible en botón central
 - Vista detalle de cita con click en ⏰ hora
@@ -34,12 +34,11 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 - **Datos persistentes en SQLite** — sobreviven a reinicios
 - **Scheduler F12** — resumen diario + evening log + avisos citas
 - **🤖 NLP Groq — modo Toki (v0.14.0)** — contexto real, crea citas/hábitos, desambiguación
-- **Modelo:** `llama-3.3-70b-versatile` (128k contexto, free tier) — actualizado 14 jun 2026
+- **Modelo:** `llama-3.3-70b-versatile` (128k contexto, free tier)
 - **UX borrar cita (v0.16.0):** confirmación muestra nombre + hora antes de borrar ✅
-- **Fix B1/B6 (v0.16.1):** emoji 🌆 correcto + cuartos respetan hora seleccionada ✅
-- **Fix B-NEW3/B-NEW5/B-NEW6 (v0.16.2):** nombre hábito sin truncar, scheduler fiable, separador noche ✅
-- **Tests B-NEW3/B-NEW6/B1 (v0.16.3):** cobertura unit tests añadida ✅
-- **Fix Groq 401 + modelo (v0.16.4):** key rotada, modelo actualizado, Git → SSH ✅
+- **Fixes v0.16.x:** emoji, scheduler, nombre hábito, separador noche, tests ✅
+- **Sprint 1 (v0.17.0):** /diario → yggdrasil-dew, GITHUB_TOKEN, pydantic-settings ✅
+- **Sprint 2 (v0.17.0):** httpx singleton, middleware, lru_cache prompt, 256 tokens, TYPING, filtro triviales, pickle 60s ✅
 
 ---
 
@@ -73,7 +72,7 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 
 | ID | Descripción | Fix | Test |
 |----|-------------|-----|------|
-| B1 | Emoji `🏆` incorrecto franja Tarde | `🌆 Tarde` | ✅ v0.16.3 |
+| B1 | Emoji `🏆` incorrecto franja Tarde | `🏙️ Tarde` | ✅ v0.16.3 |
 | B6 | `hora_ver_cuartos` mostraba inicio franja | Usa `nueva_hora_temp` | ⚪ handler |
 | B-NEW3 | `_kb_edit_hab_fields` truncaba nombre | Nombre completo en callback | ✅ v0.16.3 |
 | B-NEW5 | Scheduler no arrancaba (PTB v20+) | `ApplicationBuilder().post_init()` | ⚪ n/a |
@@ -86,7 +85,7 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 
 > Un bloque a la vez, en orden.
 
-### 🔴 Bloque 1 — NLP y calidad (SIGUIENTE)
+### 🟢 Bloque 1 — NLP y calidad ✅ COMPLETADO Sprint 2
 
 | # | Tarea | Estado |
 |---|---|---|
@@ -94,6 +93,14 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 | 1.2 | System prompt Toki — rol + límites + few-shot examples | ✅ v0.17.0 |
 | 1.3 | Contexto dinámico al modelo (citas hoy + hábitos) | ✅ v0.17.0 |
 | 1.4 | Function calling — crear/borrar/consultar citas desde texto | ✅ v0.17.0 |
+| 1.5 | httpx singleton + connection pooling | ✅ Sprint 2 |
+| 1.6 | @lru_cache en build_system_prompt + json sin indent | ✅ Sprint 2 |
+| 1.7 | max_tokens 1024→2256 | ✅ Sprint 2 |
+| 1.8 | @require_allowed_user en nlp + diario | ✅ Sprint 2 |
+| 1.9 | TYPING + filtro mensajes triviales | ✅ Sprint 2 |
+| 1.10 | PicklePersistence update_interval=60 | ✅ Sprint 2 |
+| 1.11 | _load_token() → settings.TELEGRAM_BOT_TOKEN | ✅ Sprint 2 |
+| 1.12 | post_shutdown cierra httpx client | ✅ Sprint 2 |
 
 ### 🟡 Bloque 2 — Citas (continuación)
 
@@ -126,7 +133,7 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 | 5.1 | Tailscale en todos los dispositivos | 🔲 Pendiente |
 | 5.2 | Script auto-update — despliegue sin SSH manual | 🔲 Pendiente |
 
-### 🔴 Bloque 6 — Integración yggdrasil-dew (SIGUIENTE)
+### 🔴 Bloque 6 — Integración yggdrasil-dew
 
 | # | Tarea | Estado |
 |---|---|---|
@@ -135,6 +142,15 @@ GroqRouter (intent + entidades + chat conversacional + CONTEXTO REAL modo Toki)
 | 6.3 | src/bot/handlers/diario.py + registrar /diario | ✅ Sprint 1 |
 | 6.4 | Añadir secrets GitHub Actions + docker compose up -d | 🔲 Pendiente |
 | 6.5 | Probar /diario end-to-end en Madre | 🔲 Pendiente |
+
+### 🔴 Bloque 7 — Agente de voz (Sprint 3 — guinda)
+
+| # | Tarea | Estado |
+|---|---|---|
+| 7.1 | src/bot/handlers/voice.py — descarga .ogg de Telegram | 🔲 Pendiente |
+| 7.2 | GroqRouter.transcribe() — Whisper large-v3 ya implementado | ✅ Sprint 2 |
+| 7.3 | Registrar MessageHandler(filters.VOICE) en main.py | 🔲 Pendiente |
+| 7.4 | Probar voz end-to-end en Madre | 🔲 Pendiente |
 
 ---
 
@@ -165,9 +181,9 @@ Docker + FastAPI + SQLite + Bot Telegram + Groq NLP
 
 | Mejora | Descripción | Prioridad |
 |--------|-------------|----------|
-| System prompt rico | Rol claro + contexto del usuario + límites | 🔴 Alta |
-| Contexto dinámico | Citas del día + hábitos en cada llamada | 🔴 Alta |
-| Function calling | Crear/editar/borrar desde texto natural | 🟡 Media |
+| Historial conversación real | Pasar nlp_history como mensajes a Groq | 🔴 Alta |
+| Resumen semanal inteligente | SQL sobre datos propios + Groq | 🟡 Media |
+| Arquitectura 3 niveles | regex → Ollama 3b → Groq 70b | 🟡 Media |
 | Voz (Whisper) | Mensajes de voz transcritos con Groq | 🟢 Baja |
 | API del tiempo | Contexto externo (OpenWeatherMap gratuito) | 🟢 Baja |
 
@@ -178,30 +194,16 @@ Docker + FastAPI + SQLite + Bot Telegram + Groq NLP
 | Test | Versión | Unit test | Producción |
 |------|---------|-----------|------------|
 | Flujo /nueva completo con franjas | v0.16.1 | ⚪ parcial | 🔲 Pendiente |
-| Emoji 🌆 Tarde correcto (B1) | v0.16.1 | ✅ v0.16.3 | 🔲 Pendiente |
+| Emoji 🏙️ Tarde correcto (B1) | v0.16.1 | ✅ v0.16.3 | 🔲 Pendiente |
 | Cuártos respetan hora seleccionada (B6) | v0.16.1 | ⚪ mock | 🔲 Pendiente |
 | Hábito nombre >15 chars editable (B-NEW3) | v0.16.2 | ✅ v0.16.3 | 🔲 Pendiente |
 | Separador Madrugada en franja noche (B-NEW6) | v0.16.2 | ✅ v0.16.3 | 🔲 Pendiente |
 | Borrar cita muestra nombre+hora | v0.16.0 | ⚪ pendiente | 🔲 Pendiente |
 | NLP texto libre (modo Toki) | v0.14.0 | ⚪ mock | 🔲 Pendiente |
 | NLP crea cita desde texto | v0.14.0 | ⚪ mock | 🔲 Pendiente |
+| /diario guarda en yggdrasil-dew | v0.17.0 | ⚪ pendiente | 🔲 Pendiente |
+| Voz → transcripción → NLP | Sprint 3 | 🔲 Pendiente | 🔲 Pendiente |
 
 ---
 
-## Orden recomendado
-
-```
-Fix TimedOut NLP (1.1)
-    → Mejorar system prompt (1.2)
-    → Contexto dinámico (1.3)
-    → Function calling (1.4)
-    → Bloque 2 (citas)
-    → Bloque 3 resto (docs)
-    → Bloque 4 (multi-usuario)
-    → Bloque 5 (infra)
-    → Agentes nuevos sobre plantilla THDORA
-```
-
----
-
-_Última actualización: 16 junio 2026 — 23:30 CEST — v0.17.0 — Sprint 1 en curso_
+_Última actualización: 17 junio 2026 — 02:05 CEST — v0.17.0 — Sprint 2 completo_
