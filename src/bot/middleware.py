@@ -1,45 +1,59 @@
-"""Decoradores de seguridad para handlers del bot."""
+"""
+Middleware de autorización — Sprint 5.
+Lee allowed_users desde DB con cache TTL 60s.
+Antes usaba lista estática de .env — ahora 100% desde base de datos.
+"""
 from __future__ import annotations
 
-import functools
 import logging
-from collections.abc import Callable
+import time
+from functools import wraps
+from typing import Any
 
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from src.config import settings
+from src.db.session import get_db
+from src.db.models import AllowedUser
 
 logger = logging.getLogger(__name__)
 
-
-def _allowed_ids() -> set[int]:
-    """Parsea ALLOWED_USERS del entorno y devuelve un set de Telegram user_ids."""
-    raw = settings.ALLOWED_USERS.strip()
-    if not raw:
-        return set()
-    return {int(u.strip()) for u in raw.split(",") if u.strip().isdigit()}
+_CACHE: dict[str, Any] = {"users": set(), "ts": 0.0}
+_CACHE_TTL = 60
 
 
-def require_allowed_user(func: Callable) -> Callable:
-    """Decorador que rechaza el handler si el usuario no está en ALLOWED_USERS.
+def _get_allowed_users() -> set[int]:
+    now = time.monotonic()
+    if now - _CACHE["ts"] < _CACHE_TTL and _CACHE["users"]:
+        return _CACHE["users"]
+    try:
+        with get_db() as db:
+            rows = db.query(AllowedUser.user_id).all()
+            _CACHE["users"] = {row[0] for row in rows}
+            _CACHE["ts"] = now
+            logger.debug("🔄 Cache allowed_users: %d usuarios", len(_CACHE["users"]))
+    except Exception as exc:
+        logger.error("❌ Error cargando allowed_users desde DB: %s", exc)
+    return _CACHE["users"]
 
-    Si ALLOWED_USERS está vacío, permite a todos (modo desarrollo).
-    En producción siempre debe tener al menos un ID configurado.
-    """
 
-    @functools.wraps(func)
+def invalidate_allowed_users_cache() -> None:
+    """Llamar tras /admin_add_user para forzar refresco inmediato."""
+    _CACHE["ts"] = 0.0
+
+
+def require_allowed_user(func):
+    """Decorador: bloquea usuarios no registrados en allowed_users."""
+    @wraps(func)
     async def wrapper(update: Update, context: ContextTypes.DEFAULT_TYPE, *args, **kwargs):
-        allowed = _allowed_ids()
-        if not allowed:
-            return await func(update, context, *args, **kwargs)
-        user_id = update.effective_user.id if update.effective_user else 0
-        if user_id not in allowed:
-            logger.warning(
-                "Acceso denegado | user_id=%s | handler=%s", user_id, func.__name__
-            )
-            await update.effective_message.reply_text("\u26d4 No tienes acceso a este bot.")
+        user = update.effective_user
+        user_id = user.id if user else None
+        if not user_id or user_id not in _get_allowed_users():
+            logger.warning("⛔️ Acceso denegado a user_id=%s", user_id)
+            if update.message:
+                await update.message.reply_text(
+                    "❌ No tienes permiso para usar THDORA. Contacta al administrador."
+                )
             return
         return await func(update, context, *args, **kwargs)
-
     return wrapper
