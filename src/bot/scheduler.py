@@ -24,10 +24,9 @@ def get_scheduler() -> AsyncIOScheduler:
     return _scheduler
 
 
-# ── Helpers de recordatorio por cita (usados por citas.py) ──────────────────────
+# ── Helpers de recordatorio por cita (usados por citas.py) ───────────────
 
 def _reminder_job_ids(user_id: str, apt_id) -> list[str]:
-    """Devuelve los job_ids asociados a una cita para poder cancelarlos."""
     return [
         f"reminder_30_{user_id}_{apt_id}",
         f"reminder_0_{user_id}_{apt_id}",
@@ -43,19 +42,8 @@ async def _send_reminder(bot, user_id: str, text: str) -> None:
 
 def schedule_apt_reminders(bot, user_id: str, apt: dict, cfg: dict) -> None:
     """
-    Programa recordatorios APScheduler para una cita.
-
-    Programa dos jobs:
-    - 30 minutos antes de la cita
-    - En el momento exacto de la cita
-
-    Si las notificaciones están desactivadas en cfg o la hora ya pasó, no programa.
-
-    Args:
-        bot:     Instancia de telegram.Bot.
-        user_id: ID Telegram del usuario como str.
-        apt:     Dict con al menos 'date', 'time', 'name'/'type'.
-        cfg:     Dict de configuración del usuario (notificaciones, etc.).
+    Programa recordatorios APScheduler para una cita (30 min antes + momento exacto).
+    Respeta cfg.notifications_enabled.
     """
     if not cfg.get("notifications_enabled", True):
         return
@@ -69,7 +57,7 @@ def schedule_apt_reminders(bot, user_id: str, apt: dict, cfg: dict) -> None:
     try:
         apt_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
     except ValueError:
-        logger.warning("schedule_apt_reminders: formato fecha/hora inválido %s %s", date_str, time_str)
+        logger.warning("schedule_apt_reminders: formato inválido %s %s", date_str, time_str)
         return
 
     nombre = apt.get("name") or apt.get("type", "cita")
@@ -77,54 +65,126 @@ def schedule_apt_reminders(bot, user_id: str, apt: dict, cfg: dict) -> None:
     scheduler = get_scheduler()
     now = datetime.now()
 
-    # Job 30 min antes
     run_at_30 = apt_dt - timedelta(minutes=30)
     job_id_30 = f"reminder_30_{user_id}_{apt_id}"
     if run_at_30 > now:
         scheduler.add_job(
-            _send_reminder,
-            trigger="date",
-            run_date=run_at_30,
+            _send_reminder, trigger="date", run_date=run_at_30,
             args=[bot, user_id, f"⏰ *Recordatorio* — en 30 min tienes: *{nombre}* a las {time_str}"],
-            id=job_id_30,
-            replace_existing=True,
-            misfire_grace_time=120,
+            id=job_id_30, replace_existing=True, misfire_grace_time=120,
         )
-        logger.info("Reminder 30min programado: %s @ %s", job_id_30, run_at_30)
 
-    # Job en el momento exacto
     job_id_0 = f"reminder_0_{user_id}_{apt_id}"
     if apt_dt > now:
         scheduler.add_job(
-            _send_reminder,
-            trigger="date",
-            run_date=apt_dt,
+            _send_reminder, trigger="date", run_date=apt_dt,
             args=[bot, user_id, f"🔔 *Ahora tienes:* *{nombre}*"],
-            id=job_id_0,
-            replace_existing=True,
-            misfire_grace_time=120,
+            id=job_id_0, replace_existing=True, misfire_grace_time=120,
         )
-        logger.info("Reminder exacto programado: %s @ %s", job_id_0, apt_dt)
 
 
 def cancel_apt_reminders(user_id: str, apt_id) -> None:
-    """
-    Cancela los jobs de recordatorio asociados a una cita.
-
-    Args:
-        user_id: ID Telegram del usuario como str.
-        apt_id:  Índice o ID de la cita.
-    """
+    """Cancela los jobs de recordatorio de una cita."""
     scheduler = get_scheduler()
     for job_id in _reminder_job_ids(user_id, apt_id):
         try:
             scheduler.remove_job(job_id)
-            logger.info("Reminder cancelado: %s", job_id)
         except Exception:
-            pass  # Si no existe el job, no es un error
+            pass
 
 
-# ── Scheduler de Telegram (recordatorios por polling + resumen mañana) ───────────
+# ── Jobs diarios por usuario (usado por config.py) ───────────────────────
+
+async def _send_daily_summary(bot, user_id: str) -> None:
+    """Envía el resumen diario al usuario."""
+    try:
+        await bot.send_message(
+            chat_id=int(user_id),
+            text="☀️ *Resumen diario THDORA*\n\nUsa /citas para ver tu agenda de hoy.",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        logger.warning("No se pudo enviar resumen diario a %s: %s", user_id, exc)
+
+
+async def _send_evening_log(bot, user_id: str) -> None:
+    """Envía el evening log al usuario."""
+    try:
+        await bot.send_message(
+            chat_id=int(user_id),
+            text="🌙 *Evening log THDORA*\n\nUsa /habitos para registrar tu progreso de hoy.",
+            parse_mode="Markdown",
+        )
+    except Exception as exc:
+        logger.warning("No se pudo enviar evening log a %s: %s", user_id, exc)
+
+
+def schedule_user_jobs(bot, user_id: str, cfg: dict) -> None:
+    """
+    (Re)programa los jobs diarios de un usuario según su configuración.
+
+    - Resumen diario: si cfg.daily_summary_enabled, a cfg.daily_summary_time
+    - Evening log:    si cfg.evening_log_enabled,   a cfg.evening_log_time
+
+    Siempre cancela los jobs previos antes de reprogramar para evitar duplicados.
+
+    Args:
+        bot:     Instancia de telegram.Bot.
+        user_id: ID Telegram del usuario como str.
+        cfg:     Dict de configuración del usuario obtenido de la API.
+    """
+    scheduler = get_scheduler()
+
+    # ── Resumen diario ──────────────────────────────────────────────────
+    job_id_summary = f"daily_summary_{user_id}"
+    try:
+        scheduler.remove_job(job_id_summary)
+    except Exception:
+        pass
+
+    if cfg.get("daily_summary_enabled", True):
+        hora_str = cfg.get("daily_summary_time", "08:00")
+        try:
+            h, m = hora_str.split(":")
+            scheduler.add_job(
+                _send_daily_summary,
+                trigger="cron",
+                hour=int(h), minute=int(m),
+                args=[bot, user_id],
+                id=job_id_summary,
+                replace_existing=True,
+                misfire_grace_time=300,
+            )
+            logger.info("Resumen diario programado para %s a las %s", user_id, hora_str)
+        except Exception as exc:
+            logger.warning("No se pudo programar resumen diario %s: %s", user_id, exc)
+
+    # ── Evening log ─────────────────────────────────────────────────────
+    job_id_evening = f"evening_log_{user_id}"
+    try:
+        scheduler.remove_job(job_id_evening)
+    except Exception:
+        pass
+
+    if cfg.get("evening_log_enabled", True):
+        hora_str = cfg.get("evening_log_time", "21:00")
+        try:
+            h, m = hora_str.split(":")
+            scheduler.add_job(
+                _send_evening_log,
+                trigger="cron",
+                hour=int(h), minute=int(m),
+                args=[bot, user_id],
+                id=job_id_evening,
+                replace_existing=True,
+                misfire_grace_time=300,
+            )
+            logger.info("Evening log programado para %s a las %s", user_id, hora_str)
+        except Exception as exc:
+            logger.warning("No se pudo programar evening log %s: %s", user_id, exc)
+
+
+# ── Scheduler de Telegram (polling + resumen mañana) ─────────────────────
 
 class Scheduler:
     def __init__(self, app: Application, api_client, user_ids: list[int]):
