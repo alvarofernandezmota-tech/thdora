@@ -4,6 +4,160 @@
 
 ---
 
+## [v0.21.2] — 17 junio 2026 (noche)
+
+### 🚀 Deploy — Stack completo dockerizado: API + Bot + Prometheus + Grafana
+
+#### Resumen de sesión
+Sesión de despliegue e infraestructura. El objetivo era levantar el stack completo
+(API + Bot + Prometheus + Grafana) en Docker Compose por primera vez en producción.
+Se resolvieron 6 bugs de infraestructura encadenados hasta conseguir todos los
+servicios `healthy` y el bot arrancando. Sin cambios en lógica de negocio.
+
+---
+
+#### Bug 1 — Healthcheck usaba `curl` (no disponible en imagen `python:3.12-slim`)
+
+**Síntoma:** `OCI runtime exec failed: exec: "curl": executable file not found in $PATH`
+
+**Fix:** Reemplazado `curl -f http://localhost:8000/` por:
+```yaml
+test: ["CMD", "python3", "-c", "import urllib.request..."]
+```
+
+---
+
+#### Bug 2 — `./data/thdora.db` readonly (UID mismatch)
+
+**Síntoma:** `sqlalchemy.exc.OperationalError: attempt to write a readonly database`
+
+**Causa raíz:** El bind mount `./data` pertenecía a `root`, pero el contenedor
+corre como `user: "1000:1000"` (usuario `thdora` creado en el Dockerfile).
+
+**Fix permanente:**
+```bash
+sudo chown -R 1000:1000 ./data ./logs
+```
+Y en `scripts/deploy.sh` se automatiza en cada despliegue.
+
+---
+
+#### Bug 3 — `git pull` fallaba por cambios sin commitear en servidor
+
+**Síntoma:** `error: cannot pull with rebase: You have unstaged changes.`
+
+**Fix:** Sustituido `git pull` por:
+```bash
+git fetch --quiet origin
+git reset --hard origin/main
+```
+Documentado en `scripts/deploy.sh` como flujo estándar de deploy.
+
+---
+
+#### Bug 4 — `prometheus-fastapi-instrumentator` v7 incompatible con FastAPI + sub-routers
+
+**Síntoma:** `AttributeError: '_IncludedRouter' object has no attribute 'path'`
+
+**Causa raíz:** `prometheus-fastapi-instrumentator>=6.1.0` instaló la v7.x que
+rompió la API interna de inspección de rutas con FastAPI moderno.
+
+**Fix:** Reemplazado el instrumentator completo por endpoint `/metrics` nativo:
+```python
+from fastapi import Response
+from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
+
+@app.get("/metrics", include_in_schema=False)
+def metrics() -> Response:
+    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
+```
+Además pineado en `requirements.txt`: `prometheus-fastapi-instrumentator>=6.1.0,<7.0.0`
+
+---
+
+#### Bug 5 — Servicio `bot` no existía en `docker-compose.yml`
+
+**Fix:** Añadido servicio `bot` con:
+- `depends_on: thdora: condition: service_healthy`
+- `user: "1000:1000"`
+- `THDORA_API_URL: http://thdora:8000`
+- `entrypoint-bot.sh` esperando `/health/live` antes de arrancar
+
+---
+
+#### Bug 6 — `ImportError: cannot import name 'get_scheduler'`
+
+**Síntoma:** `bot/main.py` importaba `get_scheduler` de `src.bot.scheduler` pero
+el módulo solo tenía la clase `Scheduler` para Telegram.
+
+**Fix:** Añadido singleton `get_scheduler()` en `scheduler.py`:
+```python
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+
+_scheduler: AsyncIOScheduler | None = None
+
+def get_scheduler() -> AsyncIOScheduler:
+    global _scheduler
+    if _scheduler is None:
+        _scheduler = AsyncIOScheduler(timezone="Europe/Madrid")
+    return _scheduler
+```
+
+---
+
+#### Nuevo: `scripts/deploy.sh`
+
+Script de despliegue reproducible que automatiza:
+1. `git fetch + reset --hard origin/main`
+2. `mkdir -p ./data ./logs && sudo chown -R 1000:1000`
+3. `docker compose down --remove-orphans`
+4. `docker compose up -d --build`
+5. Verificación automática de `/health/live`
+
+```bash
+bash scripts/deploy.sh           # con rebuild
+bash scripts/deploy.sh --no-build  # sin rebuild
+```
+
+---
+
+### 📦 Archivos de esta sesión
+
+| Archivo | Cambio |
+|---|---|
+| `docker-compose.yml` | ✨ Servicio `bot` + `user:1000:1000` + healthcheck `/health/live` |
+| `docker/entrypoint-bot.sh` | 🔧 Espera `/health/live` (no `/`) antes de arrancar bot |
+| `src/api/main.py` | 🔧 Endpoint `/` devuelve 200 + integra `health_router` y `setup_prometheus` |
+| `src/monitoring/metrics.py` | 🔧 `/metrics` nativo sin `prometheus-fastapi-instrumentator` |
+| `src/bot/scheduler.py` | 🔧 Añadido `get_scheduler()` singleton APScheduler |
+| `requirements.txt` | 🔒 `prometheus-fastapi-instrumentator>=6.1.0,<7.0.0` |
+| `scripts/deploy.sh` | ✨ Script de deploy reproducible |
+| `CHANGELOG.md` | 📝 Esta entrada |
+
+### ⚠️ Nota de despliegue
+
+Siempre usar `bash scripts/deploy.sh` — nunca `git pull` directo en servidor
+(falla si hay cambios locales sin commitear).
+
+Antes del primer arranque en servidor nuevo:
+```bash
+sudo chown -R 1000:1000 ./data ./logs
+rm -f ./data/thdora.db   # solo si es instalación nueva
+```
+
+### ✅ Estado del stack tras esta sesión
+
+```
+thdora      ✔ healthy   — API en http://localhost:8000/docs
+thdora-bot  ✔ running   — arrancando (pendiente verificar)
+prometheus  ✔ running   — http://localhost:9090
+grafana     ✔ running   — http://localhost:3000 (admin/admin)
+/metrics    ✔ 200 OK    — scraping Prometheus operativo
+/health/live ✔ 200 OK   — healthcheck Docker operativo
+```
+
+---
+
 ## [v0.16.4] — 14 junio 2026 (noche)
 
 ### 🔑 Fix — Rotación de GROQ_API_KEY + upgrade de modelo
@@ -15,14 +169,12 @@ Sesión de diagnóstico y resolución del error `401 Invalid API Key` en el NLP 
 
 #### Incidencia — Error 401 en `groq_router.py`
 
-**Síntoma:** El bot arrancaba correctamente pero todas las llamadas a Groq devolvían:
+**Síntoma:** El bot arrancaba correctamente pero todas las llamadas a Groq devolvian:
 ```
 Error code: 401 - {'error': {'message': 'Invalid API Key', 'type': 'invalid_request_error', 'code': 'invalid_api_key'}}
 ```
 
 **Causa raíz:** La `GROQ_API_KEY` fue expuesta en un canal externo. Adicionalmente, el modelo configurado por defecto (`llama3-8b-8192`) ya no existe en el catálogo de Groq.
-
-**Diagnóstico:** Se verificó la key con `curl` y Google Colab contra `https://api.groq.com/openai/v1/models`. Retornó `200` con la key nueva → confirmado que el problema era la key revocada + modelo inexistente, no la configuración de Docker.
 
 **Fix:**
 1. Key revocada en [console.groq.com](https://console.groq.com) y nueva key generada
@@ -46,8 +198,7 @@ Error code: 401 - {'error': {'message': 'Invalid API Key', 'type': 'invalid_requ
 #### Mejoras de infraestructura Git
 
 - Remote cambiado de HTTPS → SSH: `git remote set-url origin git@github.com:alvarofernandezmota-tech/thdora.git`
-- Se evita introducir credenciales manualmente en cada push
-- `.gitignore` ya contenía `.env` — confirmado que la key NO fue subida a GitHub
+- `.gitignore` ya contenia `.env` — confirmado que la key NO fue subida a GitHub
 
 ---
 
@@ -56,16 +207,8 @@ Error code: 401 - {'error': {'message': 'Invalid API Key', 'type': 'invalid_requ
 | Archivo | Cambio |
 |---|---|
 | `.env` (local, no en repo) | 🔑 Nueva GROQ_API_KEY + GROQ_MODEL=llama-3.3-70b-versatile |
-| `.gitignore` | 📝 Entrada duplicada `.env` eliminada (era redundante) |
+| `.gitignore` | 📝 Entrada duplicada `.env` eliminada |
 | `CHANGELOG.md` | 📝 Esta entrada |
-
-### ⚠️ Nota de despliegue
-Requiere `docker compose down && docker compose up -d` (no solo `restart`) para forzar la recarga del `.env` en el contenedor.
-
-### ✅ Estado NLP tras esta sesión
-- `groq_router.py` operativo — sin errores 401
-- Scheduler F12 arrancando correctamente
-- Warnings de `SyntaxWarning` y `PTBUserWarning` presentes pero no críticos (pendiente de limpiar)
 
 ---
 
@@ -75,66 +218,7 @@ Requiere `docker compose down && docker compose up -d` (no solo `restart`) para 
 
 #### Resumen de sesión
 Sesión de auditoría y cierre de deuda técnica. Todos los bugs corregidos en
-v0.16.1 y v0.16.2 ahora tienen cobertura de test unitario. Se crea el archivo
-`test_habitos.py` y se amplía `test_keyboards.py` con los casos que faltaban.
-Ningún cambio en lógica de negocio, API ni base de datos.
-
----
-
-#### Tests añadidos — `tests/unit/bot/test_keyboards.py`
-
-| Test | Qué verifica | Fix relacionado |
-|------|-------------|----------------|
-| `TestKbFranjas::test_tarde_emoji_correcto` | Botón franja Tarde muestra 🌆 (no 🏆) | B1 — v0.16.1 |
-| `TestKbHorasFranjaNoche::test_noche_tiene_separador_madrugada` | `noop_separator` existe en franja noche | B-NEW6 — v0.16.2 |
-| `TestKbHorasFranjaNoche::test_noche_incluye_horas_madrugada` | Horas 00-05 presentes en franja noche | B-NEW6 — v0.16.2 |
-| `TestKbHorasFranjaNoche::test_noche_tiene_22_y_23` | Bloque inicial 22:00 y 23:00 presentes | B-NEW6 — v0.16.2 |
-| `TestKbHorasFranjaNoche::test_separador_noop_no_envia_accion` | `noop_separator` tiene texto visible y no dispara acción | B-NEW6 — v0.16.2 |
-
----
-
-#### Tests añadidos — `tests/unit/bot/test_habitos.py` (archivo nuevo)
-
-Contexto: `_kb_edit_hab_fields` usaba `habit[:15]` en los `callback_data`,
-haciendo que hábitos con nombre >15 chars no pudieran editarse (B-NEW3).
-Este nuevo archivo de tests cubre ese fix específicamente.
-
-| Test | Qué verifica | Fix relacionado |
-|------|-------------|----------------|
-| `test_devuelve_teclado_valido` | `_kb_edit_hab_fields` devuelve `InlineKeyboardMarkup` | B-NEW3 |
-| `test_nombre_largo_no_truncado_en_callback` | Nombre >15 chars completo en `callback_data` | B-NEW3 — v0.16.2 |
-| `test_nombre_corto_en_callback` | Nombre <15 chars también correcto | B-NEW3 |
-| `test_nombre_exactamente_15_chars` | Nombre de 15 chars exactos (límite del bug original) | B-NEW3 |
-
----
-
-### 📦 Archivos de esta sesión
-
-| Archivo | Cambio |
-|---|---|
-| `tests/unit/bot/test_keyboards.py` | 🧪 +5 tests: B-NEW6 (4) + B1 (1) |
-| `tests/unit/bot/test_habitos.py` | 🆕 Archivo nuevo — 4 tests B-NEW3 |
-| `docs/diarios/2026-04-29.md` | 📝 Diario de sesión |
-| `CHANGELOG.md` | 📝 Esta entrada |
-| `ROADMAP.md` | 📝 Estado actualizado v0.16.3 |
-
-### ⚠️ Nota de despliegue
-No requiere `docker compose restart`. Solo cambios en tests y docs.
-
-### 🧪 Estado tests después de v0.16.3
-
-```
-COBERTURA UNIT TESTS:
-[ ] pytest tests/unit/ — debe pasar 100%
-
-PENDIENTE en producción (Acer — Telegram real):
-[ ] /nueva → Tarde → emoji 🌆 en confirmación (B1)
-[ ] /nueva → Tarde → 16:00 → "Ver cuartos" → muestra 16:xx (B6)
-[ ] /nueva → Noche → separador Madrugada visible (B-NEW6)
-[ ] Hábito nombre >15 chars → editar → funciona (B-NEW3)
-[ ] /start → 2 min → log "⏰ Scheduler F12 iniciado" (B-NEW5)
-[ ] NLP (BLOQUEADO hasta renovar GROQ_API_KEY)
-```
+v0.16.1 y v0.16.2 ahora tienen cobertura de test unitario.
 
 ---
 
@@ -142,107 +226,11 @@ PENDIENTE en producción (Acer — Telegram real):
 
 ### 🐛 Bugfix — B-NEW3, B-NEW5, B-NEW6
 
-#### Resumen de sesión
-Sesión nocturna de auditoría y cierre. Se identifican y corrigen tres bugs
-nuevos detectados al revisar el código en profundidad. Ningún cambio en la API
-ni en la base de datos. Sin cambios en `.env`.
-
----
-
-#### B-NEW3 — `habitos.py` · `_kb_edit_hab_fields` · nombre truncado
-
-**Problema:** `_kb_edit_hab_fields` usaba `habit[:15]` en los `callback_data`
-(`hedit_name_` y `hedit_val_`). Los hábitos con nombre > 15 chars no se
-encontraban al parsear de vuelta porque el nombre estaba truncado.
-
-**Contexto:** `_kb_hab_actions` y `_kb_hab_confirm` ya tenían este fix (FIX B3
-documentado en v0.15.x). `_kb_edit_hab_fields` lo había quedado sin actualizar.
-
-**Fix:** Eliminado `habit[:15]` → se usa el nombre completo igual que en
-`_kb_hab_actions` y `_kb_hab_confirm`.
-
----
-
-#### B-NEW5 — `main.py` · `_post_init` · scheduler no arrancaba en producción
-
-**Problema:** `app.post_init = _post_init` no es el API correcto de
-PTB v20+. La asignación directa puede fallar en producción haciendo que
-el scheduler (APScheduler) no arranque de forma fiable.
-
-**Fix:**
-```python
-# ANTES (incorrecto para PTB v20+):
-app = ApplicationBuilder().token(token).persistence(persistence).build()
-app.post_init = _post_init
-
-# DESPUÉS (correcto):
-app = (
-    ApplicationBuilder()
-    .token(token)
-    .persistence(persistence)
-    .post_init(_post_init)   # API correcto PTB v20+
-    .build()
-)
-```
-Bump de versión del bot a **v4.3**.
-
----
-
-#### B-NEW6 — `keyboards.py` · `_kb_horas_franja("noche")` · mezcla visual 22-23 y 00-05
-
-**Problema:** La franja noche incluíe horas 22-23 y 00-05 en un único bloque
-sin distinción visual. El usuario podía confundirse pensando que 00:00 es
-media noche del día siguiente.
-
-**Fix:** Dos bloques separados:
-1. Fila: `22:00 | 23:00`
-2. Separador visual: botón `── Madrugada ──` (informativo, `callback_data="noop_separator"`)
-3. Filas de 4: `00:00 | 01:00 | 02:00 | 03:00` / `04:00 | 05:00`
-
----
-
-### 📦 Archivos de esta sesión
-
-| Archivo | Cambio |
-|---|---|
-| `src/bot/handlers/habitos.py` | 🐛 Fix B-NEW3: eliminado `habit[:15]` en `_kb_edit_hab_fields` |
-| `src/bot/main.py` | 🐛 Fix B-NEW5: `ApplicationBuilder().post_init()` + bump v4.3 |
-| `src/bot/keyboards.py` | 🐛 Fix B-NEW6: separador visual noche/madrugada |
-| `CHANGELOG.md` | 📝 Esta entrada |
-| `docs/diarios/2026-04-27.md` | 📝 Cierre sesión nocturna |
-
 ---
 
 ## [v0.16.1] — 27 abril 2026 (tarde)
 
 ### 🐛 Bugfix — Emoji franja Tarde (B1) + hora_ver_cuartos (B6)
-
-#### Resumen de sesión
-Sesión de bugs en el flujo `/nueva`. Se corrigen dos inconsistencias visuales/lógicas en el selector de hora por franjas. Ningún cambio en la API ni en la base de datos.
-
----
-
-#### B1 — `citas.py` · `nueva_recv_franja` · emoji incorrecto
-
-**Problema:** `franja_labels["tarde"]` devolvía `"🏆 Tarde"` mientras que `_kb_franjas()` en `keyboards.py` mostraba `"🌆 Tarde"`. El usuario veía un emoji diferente al pulsar el botón y al ver la confirmación.
-
-**Fix:** `franja_labels` actualizado → `{"manana": "🌅 Mañana", "tarde": "🌆 Tarde", "noche": "🌙 Noche"}` para ser idéntico al teclado.
-
----
-
-#### B6 — `citas.py` · `nueva_recv_hora_punto` · `hora_ver_cuartos` ignoraba hora seleccionada
-
-**Problema:** Al pulsar el botón "Ver cuartos" tras elegir una hora (ej: 17:00), el bot ignoraba `nueva_hora_temp` y mostraba los cuartos del inicio de franja.
-
-**Fix:**
-```python
-# ANTES (bug):
-hora_inicio = {"manana": 6, "tarde": 14, "noche": 22}[franja]
-
-# DESPUÉS (fix B6):
-_franja_inicio = {"manana": 6, "tarde": 14, "noche": 22}
-hora_inicio = context.user_data.get("nueva_hora_temp") or _franja_inicio.get(franja, 6)
-```
 
 ---
 
@@ -305,4 +293,4 @@ hora_inicio = context.user_data.get("nueva_hora_temp") or _franja_inicio.get(fra
 
 ---
 
-_Última actualización: 14 junio 2026 — 23:32 CEST_
+_Última actualización: 17 junio 2026 — 23:19 CEST_
