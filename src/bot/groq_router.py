@@ -1,13 +1,10 @@
 """GroqRouter: NLP vía Groq API con system prompt estructurado, few-shot y function calling."""
 from __future__ import annotations
-
 import json
 import logging
 from dataclasses import dataclass
 from functools import lru_cache
-
 import httpx
-
 from src.bot.http_client import get_client
 from src.config import settings
 
@@ -16,8 +13,6 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ToolCallResult:
-    """Resultado de una llamada a herramienta exitosa."""
-
     action: str
     success: bool
     data: dict
@@ -26,8 +21,6 @@ class ToolCallResult:
 
 @dataclass
 class AmbiguityRequest:
-    """Solicitud de aclaración cuando faltan campos obligatorios."""
-
     intent: str
     missing_fields: list[str]
     question_to_user: str
@@ -85,7 +78,6 @@ TOOLS: list[dict] = [
     },
 ]
 
-# Ejemplos compactos — sin indent=2 para ahorrar ~300 tokens por llamada
 _EJEMPLOS_OK = json.dumps(
     [
         {
@@ -125,43 +117,38 @@ _EJEMPLOS_RECHAZO = json.dumps(
     ensure_ascii=False,
 )
 
-
-@lru_cache(maxsize=32)
-def build_system_prompt(nombre_usuario: str | None = None) -> str:
-    """Construye el system prompt para Groq. Cacheado por nombre de usuario."""
-    nombre = nombre_usuario or "Usuario"
-    return f"""Eres Toki, asistente personal de {nombre}. Gestionas citas y hábitos.
-
-## ROL
-Ayudas a {nombre} con agenda y hábitos. Interpretas lenguaje natural en español.
-
-## LÍMITES
-- SOLO agenda, citas, recordatorios y hábitos.
-- Sin consejos médicos, legales, financieros ni contenido creativo.
-
-## RESPUESTA
-Responde SIEMPRE con JSON válido:
-{{"intent":"<crear_cita|borrar_cita|consultar_citas|consultar_semana|registrar_habito|fuera_de_scope|aclaracion>","accion":"<accion o null>","entidades":{{}},"respuesta_usuario":"<mensaje en español>"}}
-
-## EJEMPLOS
-{_EJEMPLOS_OK}
-
-## RECHAZO
-{_EJEMPLOS_RECHAZO}
-
-## REGLAS
-- Fechas relativas las resuelves con la hora del contexto.
-- Si falta fecha/hora obligatoria: intent "aclaracion", pregunta solo lo que falta.
-- Responde en español, tono amigable y conciso. No inventes datos.
-"""
-
-
 _GROQ_TIMEOUT = httpx.Timeout(connect=5.0, read=45.0, write=10.0, pool=5.0)
 
 
-class GroqRouter:
-    """Router NLP que usa Groq para clasificar intents y ejecutar function calling."""
+@lru_cache(maxsize=32)
+def build_system_prompt(nombre_usuario: str | None = None) -> str:
+    nombre = nombre_usuario or "Usuario"
+    return f"""Eres Toki, asistente personal de {nombre}. Gestionas citas y hábitos.
 
+ROL
+Ayudas a {nombre} con agenda y hábitos. Interpretas lenguaje natural en español.
+
+LÍMITES
+SOLO agenda, citas, recordatorios y hábitos.
+Sin consejos médicos, legales, financieros ni contenido creativo.
+
+RESPUESTA
+Responde SIEMPRE con JSON válido:
+{{"intent":"<crear_cita|borrar_cita|consultar_citas|consultar_semana|registrar_habito|fuera_de_scope|aclaracion>","accion":"<accion o null>","entidades":{{}},"respuesta_usuario":"<mensaje en español>"}}
+
+EJEMPLOS
+{_EJEMPLOS_OK}
+
+RECHAZO
+{_EJEMPLOS_RECHAZO}
+
+REGLAS
+Fechas relativas las resuelves con la hora del contexto.
+Si falta fecha/hora obligatoria: intent "aclaracion", pregunta solo lo que falta.
+Responde en español, tono amigable y conciso. No inventes datos."""
+
+
+class GroqRouter:
     def __init__(self) -> None:
         self._api_key: str = settings.GROQ_API_KEY
         self._model: str = settings.GROQ_MODEL
@@ -173,17 +160,18 @@ class GroqRouter:
         user_id: int = 0,
         nombre_usuario: str | None = None,
         context_str: str = "",
+        history: list[dict] | None = None,
         timeout: httpx.Timeout | None = None,
     ) -> str | ToolCallResult | AmbiguityRequest:
-        """Procesa un mensaje de texto libre y devuelve una respuesta o una acción."""
+        """Procesa un mensaje de texto libre. Soporta history para contexto conversacional."""
         _timeout = timeout or _GROQ_TIMEOUT
         system_prompt = build_system_prompt(nombre_usuario)
-
         messages: list[dict] = [{"role": "system", "content": system_prompt}]
+        if history:
+            messages.extend(history[-10:])
         if context_str:
             messages.append({"role": "system", "content": f"CONTEXTO:\n{context_str}"})
         messages.append({"role": "user", "content": user_text})
-
         payload = {
             "model": self._model,
             "messages": messages,
@@ -196,7 +184,6 @@ class GroqRouter:
             "Authorization": f"Bearer {self._api_key}",
             "Content-Type": "application/json",
         }
-
         resp = await get_client().post(
             f"{self._base_url}/chat/completions",
             json=payload,
@@ -205,13 +192,10 @@ class GroqRouter:
         )
         resp.raise_for_status()
         data = resp.json()
-
         choice = data["choices"][0]
         message = choice["message"]
-
         if message.get("tool_calls"):
             return await self._handle_tool_call(message["tool_calls"][0], user_id)
-
         content = message.get("content", "")
         try:
             parsed = json.loads(content)
@@ -219,16 +203,12 @@ class GroqRouter:
         except (json.JSONDecodeError, AttributeError):
             return content
 
-    async def _handle_tool_call(
-        self, tool_call: dict, user_id: int
-    ) -> ToolCallResult | AmbiguityRequest:
-        """Procesa el resultado de un tool_call de Groq y devuelve la acción correspondiente."""
+    async def _handle_tool_call(self, tool_call: dict, user_id: int) -> ToolCallResult | AmbiguityRequest:
         func_name = tool_call["function"]["name"]
         try:
             args = json.loads(tool_call["function"]["arguments"])
         except json.JSONDecodeError:
             args = {}
-
         if func_name == "crear_cita":
             missing = [f for f in ("fecha", "hora") if not args.get(f)]
             if missing:
@@ -242,37 +222,24 @@ class GroqRouter:
                     question_to_user=" ".join(preguntas[m] for m in missing),
                 )
             return ToolCallResult(
-                action="crear_cita",
-                success=True,
-                data=args,
+                action="crear_cita", success=True, data=args,
                 message_to_user=f"\u2705 Cita '{args.get('nombre')}' programada para {args.get('fecha')} a las {args.get('hora', 'hora pendiente')}.",
             )
-
         if func_name == "borrar_cita":
             return ToolCallResult(
-                action="borrar_cita",
-                success=True,
-                data={"cita_id": args.get("cita_id")},
+                action="borrar_cita", success=True, data={"cita_id": args.get("cita_id")},
                 message_to_user=f"\ud83d\uddd1\ufe0f Cita #{args.get('cita_id')} eliminada correctamente.",
             )
-
         if func_name == "consultar_citas":
             return ToolCallResult(
-                action="consultar_citas",
-                success=True,
-                data=args,
+                action="consultar_citas", success=True, data=args,
                 message_to_user=f"\ud83d\udcc5 Consultando citas para {args.get('fecha')}...",
             )
-
-        return ToolCallResult(
-            action=func_name,
-            success=False,
-            data=args,
-            message_to_user=f"No reconozco la acción '{func_name}'.",
-        )
+        return ToolCallResult(action=func_name, success=False, data=args,
+                              message_to_user=f"No reconozco la acción '{func_name}'.")
 
     async def transcribe(self, audio_bytes: bytes) -> str:
-        """Transcribe audio usando Groq Whisper large-v3. Para el handler de voz (Sprint 3)."""
+        """Transcribe audio usando Groq Whisper large-v3."""
         files = {"file": ("audio.ogg", audio_bytes, "audio/ogg")}
         data = {"model": "whisper-large-v3", "language": "es"}
         r = await get_client().post(

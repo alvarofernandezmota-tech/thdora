@@ -25,7 +25,7 @@ GOAL_MAP = {
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text(
-        "👋 Hola, soy *THDORA*, tu agente de bienestar personal.\n\n"
+        "👋 Hola, soy THDORA, tu agente de bienestar personal.\n\n"
         "Estoy aqui para ayudarte con tu agenda, tus habitos y tu estado emocional.\n\n"
         "Para empezar, como te llamas?",
         parse_mode="Markdown",
@@ -39,12 +39,10 @@ async def received_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     if not name or len(name) > 50:
         await update.message.reply_text("Escribeme tu nombre, sin prisa. 😊")
         return ASK_NAME
-
     context.user_data["name"] = name
-
     keyboard = ReplyKeyboardMarkup(GOAL_OPTIONS, one_time_keyboard=True, resize_keyboard=True)
     await update.message.reply_text(
-        f"Encantada, *{name}* 🙂\n\n"
+        f"Encantada, {name} 🙂\n\n"
         "En que quieres que te ayude principalmente?\n\n"
         "a) 📅 Citas y agenda\n"
         "b) ✅ Habitos saludables\n"
@@ -59,21 +57,18 @@ async def received_name(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
 async def received_goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     text = update.message.text.strip().lower()
     key = text[0] if text else ""
-
     if key not in GOAL_MAP:
         await update.message.reply_text(
             "Elige una opcion: a, b, c o d.",
             reply_markup=ReplyKeyboardMarkup(GOAL_OPTIONS, one_time_keyboard=True, resize_keyboard=True),
         )
         return ASK_GOAL
-
     goal = GOAL_MAP[key]
     context.user_data["goal"] = goal
     name = context.user_data.get("name", "")
-
     await update.message.reply_text(
-        f"✅ Perfecto, *{name}*.\n\n"
-        f"Me enfocaere en ayudarte con *{goal}*.\n\n"
+        f"✅ Perfecto, {name}.\n\n"
+        f"Me enfocaere en ayudarte con {goal}.\n\n"
         "Aqui tienes los comandos principales:\n"
         "📅 /citas — gestiona tus citas\n"
         "✅ /habitos — registra tus habitos\n"
@@ -82,8 +77,6 @@ async def received_goal(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
         parse_mode="Markdown",
         reply_markup=ReplyKeyboardRemove(),
     )
-
-    # TODO futuro: guardar en BD user_profile (user_id, name, goal, created_at)
     return ConversationHandler.END
 
 
@@ -102,14 +95,11 @@ def get_onboarding_handler() -> ConversationHandler:
             CommandHandler("onboarding", start),
         ],
         states={
-            ASK_NAME: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, received_name)
-            ],
-            ASK_GOAL: [
-                MessageHandler(filters.TEXT & ~filters.COMMAND, received_goal)
-            ],
+            ASK_NAME: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_name)],
+            ASK_GOAL: [MessageHandler(filters.TEXT & ~filters.COMMAND, received_goal)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
         name="onboarding",
         persistent=False,
+        conversation_timeout=300,
     )
