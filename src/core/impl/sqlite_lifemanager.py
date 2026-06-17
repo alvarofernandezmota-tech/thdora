@@ -1,245 +1,208 @@
+"""Implementación SQLite de LifeManager para THDORA — v4 con soporte multi-usuario.
+
+Todos los métodos aceptan user_id: int = 0.
+Cuando user_id > 0 filtra por ese usuario.
+Cuando user_id == 0 devuelve todos (compatibilidad con datos legacy pre-Sprint5).
 """
-SQLiteLifeManager — implementación persistente de AbstractLifeManager.
+from __future__ import annotations
 
-Usa SQLAlchemy + SQLite para almacenar citas, hábitos y configuración
-de hábitos de forma persistente entre reinicios.
-
-Diferencias respecto a MemoryLifeManager / JsonLifeManager:
-    - Los datos persisten en ``data/thdora.db``
-    - Los índices son ordinales por día (como en Json)
-    - Thread-safe gracias al context manager de sesión
-    - Soporta búsqueda por rango de fechas (para /agenda y /upcoming)
-    - Soporta HabitConfig (tipos adaptativos F9.2)
-    - Soporta UserConfig (notificaciones proactivas F12)
-
-Uso::
-
-    manager = SQLiteLifeManager()
-    manager.create_appointment("2026-03-27", "10:00", "médica", "Dr. Smith")
-    appointments = manager.get_appointments("2026-03-27")
-    cfg = manager.get_user_config("123456789")  # crea con defaults si no existe
-"""
-
+import json
+import logging
+from datetime import date as date_type, timedelta
 from typing import Any
 
-from sqlalchemy import and_
+from sqlalchemy.orm import Session
 
-from src.core.interfaces.abstract_lifemanager import AbstractLifeManager
-from src.db.base import get_session, init_db
 from src.db.models import Appointment, Habit, HabitConfig, UserConfig
 
+logger = logging.getLogger(__name__)
 
-class SQLiteLifeManager(AbstractLifeManager):
-    """Implementación de AbstractLifeManager con persistencia SQLite."""
 
-    def __init__(self) -> None:
-        init_db()  # crea las tablas si no existen
+class SQLiteLifeManager:
+    """Gestor de datos SQLite. Recibe una SQLAlchemy Session síncrona."""
 
-    # ── Citas ────────────────────────────────────────────────
+    def __init__(self, session: Session) -> None:
+        self.session = session
 
-    def get_appointments(self, date: str) -> list[dict]:
-        """Devuelve todas las citas de un día ordenadas por hora."""
-        with get_session() as session:
-            rows = (
-                session.query(Appointment)
-                .filter(Appointment.date == date)
-                .order_by(Appointment.time)
-                .all()
-            )
-            return [r.to_dict() for r in rows]
+    # ── Helpers ────────────────────────────────────────────────────────────
+
+    def _filter_user(self, query, model, user_id: int):
+        """Aplica filtro user_id si > 0."""
+        if user_id > 0:
+            query = query.filter(model.user_id == user_id)
+        return query
+
+    # ── Appointments ────────────────────────────────────────────────────
+
+    def get_appointments(self, date_str: str, user_id: int = 0) -> list[dict]:
+        q = self.session.query(Appointment).filter(Appointment.date == date_str)
+        q = self._filter_user(q, Appointment, user_id)
+        return [a.to_dict() for a in q.order_by(Appointment.time).all()]
+
+    def get_appointments_range(
+        self, date_from: str, date_to: str, user_id: int = 0
+    ) -> list[dict]:
+        q = self.session.query(Appointment).filter(
+            Appointment.date >= date_from,
+            Appointment.date <= date_to,
+        )
+        q = self._filter_user(q, Appointment, user_id)
+        return [a.to_dict() for a in q.order_by(Appointment.date, Appointment.time).all()]
+
+    def get_upcoming_appointments(
+        self, date_from: str, limit: int = 10, user_id: int = 0
+    ) -> list[dict]:
+        q = self.session.query(Appointment).filter(Appointment.date >= date_from)
+        q = self._filter_user(q, Appointment, user_id)
+        return [
+            a.to_dict()
+            for a in q.order_by(Appointment.date, Appointment.time).limit(limit).all()
+        ]
 
     def create_appointment(
-        self, date: str, time: str, apt_type: str, notes: str = "", name: str = ""
+        self,
+        date_str: str,
+        time: str,
+        apt_type: str,
+        notes: str = "",
+        name: str = "",
+        user_id: int = 0,
     ) -> dict:
-        """Crea una cita y le asigna un índice ordinal para el día."""
-        if not self._valid_time(time):
-            raise ValueError(f"Hora inválida: {time}")
-        if apt_type not in ("médica", "personal", "trabajo", "otra"):
-            raise ValueError(f"Tipo inválido: {apt_type}")
-
-        with get_session() as session:
-            count = session.query(Appointment).filter(Appointment.date == date).count()
-            apt = Appointment(
-                date=date,
-                time=time,
-                name=name,
-                type=apt_type,
-                notes=notes,
-                index=count + 1,
-            )
-            session.add(apt)
-            session.flush()
-            return apt.to_dict()
-
-    def delete_appointment(self, date: str, index: int) -> bool:
-        """Borra una cita por índice ordinal. Devuelve True si se borró."""
-        with get_session() as session:
-            apt = (
-                session.query(Appointment)
-                .filter(and_(Appointment.date == date, Appointment.index == index))
-                .first()
-            )
-            if not apt:
-                return False
-            session.delete(apt)
-            return True
+        # Calcular índice del día para este usuario
+        existing = self.get_appointments(date_str, user_id=user_id)
+        index = len(existing) + 1
+        apt = Appointment(
+            date=date_str, time=time, type=apt_type,
+            notes=notes, name=name, index=index, user_id=user_id,
+        )
+        self.session.add(apt)
+        self.session.commit()
+        self.session.refresh(apt)
+        return apt.to_dict()
 
     def update_appointment(
         self,
-        date: str,
+        date_str: str,
         index: int,
         time: str | None = None,
         name: str | None = None,
         apt_type: str | None = None,
         notes: str | None = None,
+        user_id: int = 0,
     ) -> dict | None:
-        """Edita una cita. Solo actualiza los campos no-None."""
-        with get_session() as session:
-            apt = (
-                session.query(Appointment)
-                .filter(and_(Appointment.date == date, Appointment.index == index))
-                .first()
-            )
-            if not apt:
-                return None
-            if time is not None:
-                if not self._valid_time(time):
-                    raise ValueError(f"Hora inválida: {time}")
-                apt.time = time
-            if name is not None:
-                apt.name = name
-            if apt_type is not None:
-                apt.type = apt_type
-            if notes is not None:
-                apt.notes = notes
-            return apt.to_dict()
+        q = self.session.query(Appointment).filter(
+            Appointment.date == date_str, Appointment.index == index
+        )
+        q = self._filter_user(q, Appointment, user_id)
+        apt = q.first()
+        if not apt:
+            return None
+        if time is not None:
+            apt.time = time
+        if name is not None:
+            apt.name = name
+        if apt_type is not None:
+            apt.type = apt_type
+        if notes is not None:
+            apt.notes = notes
+        self.session.commit()
+        self.session.refresh(apt)
+        return apt.to_dict()
 
-    def get_appointments_range(self, date_from: str, date_to: str) -> list[dict]:
-        """Devuelve citas en un rango de fechas. Útil para /agenda."""
-        with get_session() as session:
-            rows = (
-                session.query(Appointment)
-                .filter(
-                    and_(
-                        Appointment.date >= date_from,
-                        Appointment.date <= date_to,
-                    )
-                )
-                .order_by(Appointment.date, Appointment.time)
-                .all()
-            )
-            return [r.to_dict() for r in rows]
+    def delete_appointment(
+        self, date_str: str, index: int, user_id: int = 0
+    ) -> bool:
+        q = self.session.query(Appointment).filter(
+            Appointment.date == date_str, Appointment.index == index
+        )
+        q = self._filter_user(q, Appointment, user_id)
+        apt = q.first()
+        if not apt:
+            return False
+        self.session.delete(apt)
+        self.session.commit()
+        return True
 
-    def get_upcoming_appointments(self, from_date: str, limit: int = 10) -> list[dict]:
-        """Devuelve las próximas citas desde una fecha. Útil para /proximas."""
-        with get_session() as session:
-            rows = (
-                session.query(Appointment)
-                .filter(Appointment.date >= from_date)
-                .order_by(Appointment.date, Appointment.time)
-                .limit(limit)
-                .all()
-            )
-            return [r.to_dict() for r in rows]
+    # ── Habits ────────────────────────────────────────────────────────────────
 
-    def check_appointment_conflict(self, date: str, time: str) -> dict | None:
-        """Devuelve la cita existente a esa hora, o None si no hay conflicto."""
-        with get_session() as session:
-            apt = (
-                session.query(Appointment)
-                .filter(and_(Appointment.date == date, Appointment.time == time))
-                .first()
-            )
-            return apt.to_dict() if apt else None
+    def get_habits(self, date_str: str, user_id: int = 0) -> dict[str, str]:
+        q = self.session.query(Habit).filter(Habit.date == date_str)
+        q = self._filter_user(q, Habit, user_id)
+        return {h.habit: h.value for h in q.all()}
 
-    # ── Hábitos ────────────────────────────────────────────────
+    def get_habits_range(
+        self, date_from: str, date_to: str, user_id: int = 0
+    ) -> dict[str, dict[str, str]]:
+        q = self.session.query(Habit).filter(
+            Habit.date >= date_from, Habit.date <= date_to
+        )
+        q = self._filter_user(q, Habit, user_id)
+        result: dict[str, dict[str, str]] = {}
+        for h in q.all():
+            result.setdefault(h.date, {})[h.habit] = h.value
+        return result
 
-    def get_habits(self, date: str) -> dict[str, str]:
-        """Devuelve los hábitos del día como dict {nombre: valor}."""
-        with get_session() as session:
-            rows = (
-                session.query(Habit)
-                .filter(Habit.date == date)
-                .order_by(Habit.habit)
-                .all()
-            )
-            return {r.habit: r.value for r in rows}
+    def log_habit(
+        self, date_str: str, habit: str, value: str, user_id: int = 0
+    ) -> dict:
+        # Upsert
+        q = self.session.query(Habit).filter(
+            Habit.date == date_str, Habit.habit == habit
+        )
+        q = self._filter_user(q, Habit, user_id)
+        existing = q.first()
+        if existing:
+            existing.value = value
+            self.session.commit()
+            self.session.refresh(existing)
+            return existing.to_dict()
+        new_habit = Habit(date=date_str, habit=habit, value=value, user_id=user_id)
+        self.session.add(new_habit)
+        self.session.commit()
+        self.session.refresh(new_habit)
+        return new_habit.to_dict()
 
-    def log_habit(self, date: str, habit: str, value: str) -> dict:
-        """Registra o actualiza un hábito. Upsert por (date, habit)."""
-        with get_session() as session:
-            existing = (
-                session.query(Habit)
-                .filter(and_(Habit.date == date, Habit.habit == habit))
-                .first()
-            )
-            if existing:
-                existing.value = value
-                return existing.to_dict()
-            else:
-                h = Habit(date=date, habit=habit, value=value)
-                session.add(h)
-                session.flush()
-                return h.to_dict()
+    def update_habit(
+        self, date_str: str, habit: str, value: str, user_id: int = 0
+    ) -> dict | None:
+        q = self.session.query(Habit).filter(
+            Habit.date == date_str, Habit.habit == habit
+        )
+        q = self._filter_user(q, Habit, user_id)
+        h = q.first()
+        if not h:
+            return None
+        h.value = value
+        self.session.commit()
+        self.session.refresh(h)
+        return h.to_dict()
 
-    def delete_habit(self, date: str, habit: str) -> bool:
-        """Borra un hábito por nombre. Devuelve True si se borró."""
-        with get_session() as session:
-            h = (
-                session.query(Habit)
-                .filter(and_(Habit.date == date, Habit.habit == habit))
-                .first()
-            )
-            if not h:
-                return False
-            session.delete(h)
-            return True
+    def delete_habit(
+        self, date_str: str, habit: str, user_id: int = 0
+    ) -> bool:
+        q = self.session.query(Habit).filter(
+            Habit.date == date_str, Habit.habit == habit
+        )
+        q = self._filter_user(q, Habit, user_id)
+        h = q.first()
+        if not h:
+            return False
+        self.session.delete(h)
+        self.session.commit()
+        return True
 
-    def update_habit(self, date: str, habit: str, value: str) -> dict | None:
-        """Actualiza el valor de un hábito existente."""
-        with get_session() as session:
-            h = (
-                session.query(Habit)
-                .filter(and_(Habit.date == date, Habit.habit == habit))
-                .first()
-            )
-            if not h:
-                return None
-            h.value = value
-            return h.to_dict()
+    # ── HabitConfig ─────────────────────────────────────────────────────────
 
-    def get_habits_range(self, date_from: str, date_to: str) -> dict[str, dict[str, str]]:
-        """Devuelve hábitos en rango de fechas. Útil para /resumen semana."""
-        with get_session() as session:
-            rows = (
-                session.query(Habit)
-                .filter(
-                    and_(
-                        Habit.date >= date_from,
-                        Habit.date <= date_to,
-                    )
-                )
-                .order_by(Habit.date, Habit.habit)
-                .all()
-            )
-            result: dict[str, dict[str, str]] = {}
-            for r in rows:
-                result.setdefault(r.date, {})[r.habit] = r.value
-            return result
+    def get_all_habit_configs(self, user_id: int = 0) -> list[dict]:
+        q = self.session.query(HabitConfig)
+        q = self._filter_user(q, HabitConfig, user_id)
+        return [c.to_dict() for c in q.all()]
 
-    # ── HabitConfig ──────────────────────────────────────────────
-
-    def get_habit_config(self, name: str) -> dict | None:
-        """Devuelve la config de un hábito por nombre, o None si no existe."""
-        with get_session() as session:
-            cfg = session.query(HabitConfig).filter(HabitConfig.name == name).first()
-            return cfg.to_dict() if cfg else None
-
-    def get_all_habit_configs(self) -> list[dict]:
-        """Devuelve la config de todos los hábitos ordenados por nombre."""
-        with get_session() as session:
-            rows = session.query(HabitConfig).order_by(HabitConfig.name).all()
-            return [r.to_dict() for r in rows]
+    def get_habit_config(self, name: str, user_id: int = 0) -> dict | None:
+        q = self.session.query(HabitConfig).filter(HabitConfig.name == name)
+        q = self._filter_user(q, HabitConfig, user_id)
+        c = q.first()
+        return c.to_dict() if c else None
 
     def upsert_habit_config(
         self,
@@ -250,69 +213,64 @@ class SQLiteLifeManager(AbstractLifeManager):
         max_val: float | None = None,
         quick_vals: list[str] | None = None,
         xp_rule: str | None = None,
+        user_id: int = 0,
     ) -> dict:
-        """
-        Crea o actualiza la configuración de un hábito.
-        quick_vals se almacena como string CSV: ["6h","7h"] → "6h,7h"
-        """
-        if habit_type not in ("numeric", "time", "boolean", "text"):
-            raise ValueError(f"Tipo inválido: {habit_type}. Usa: numeric, time, boolean, text")
+        q = self.session.query(HabitConfig).filter(HabitConfig.name == name)
+        q = self._filter_user(q, HabitConfig, user_id)
+        cfg = q.first()
+        if cfg:
+            cfg.habit_type = habit_type
+            cfg.unit = unit
+            cfg.min_val = min_val
+            cfg.max_val = max_val
+            cfg.quick_vals = json.dumps(quick_vals or [])
+            cfg.xp_rule = xp_rule
+        else:
+            cfg = HabitConfig(
+                name=name, habit_type=habit_type, unit=unit,
+                min_val=min_val, max_val=max_val,
+                quick_vals=json.dumps(quick_vals or []),
+                xp_rule=xp_rule, user_id=user_id,
+            )
+            self.session.add(cfg)
+        self.session.commit()
+        self.session.refresh(cfg)
+        return cfg.to_dict()
 
-        quick_str = ",".join(quick_vals) if quick_vals else None
+    def delete_habit_config(self, name: str, user_id: int = 0) -> bool:
+        q = self.session.query(HabitConfig).filter(HabitConfig.name == name)
+        q = self._filter_user(q, HabitConfig, user_id)
+        cfg = q.first()
+        if not cfg:
+            return False
+        self.session.delete(cfg)
+        self.session.commit()
+        return True
 
-        with get_session() as session:
-            cfg = session.query(HabitConfig).filter(HabitConfig.name == name).first()
-            if cfg:
-                cfg.habit_type = habit_type
-                cfg.unit = unit
-                cfg.min_val = min_val
-                cfg.max_val = max_val
-                cfg.quick_vals = quick_str
-                cfg.xp_rule = xp_rule
-            else:
-                cfg = HabitConfig(
-                    name=name,
-                    habit_type=habit_type,
-                    unit=unit,
-                    min_val=min_val,
-                    max_val=max_val,
-                    quick_vals=quick_str,
-                    xp_rule=xp_rule,
-                )
-                session.add(cfg)
-            session.flush()
-            return cfg.to_dict()
+    # ── UserConfig ──────────────────────────────────────────────────────────
 
-    def delete_habit_config(self, name: str) -> bool:
-        """Borra la configuración de un hábito. Devuelve True si se borró."""
-        with get_session() as session:
-            cfg = session.query(HabitConfig).filter(HabitConfig.name == name).first()
-            if not cfg:
-                return False
-            session.delete(cfg)
-            return True
-
-    # ── UserConfig (F12) ─────────────────────────────────────────
-
-    def get_user_config(self, user_id: str) -> dict:
-        """
-        Devuelve la configuración del usuario.
-        Si no existe, la crea con los valores predeterminados (upsert automático).
-        Nunca devuelve None — el usuario siempre tiene configuración.
-        """
-        with get_session() as session:
-            cfg = session.query(UserConfig).filter(UserConfig.user_id == user_id).first()
-            if cfg:
-                return cfg.to_dict()
-            # Primera vez: crear con defaults
-            cfg = UserConfig(user_id=user_id)
-            session.add(cfg)
-            session.flush()
-            return cfg.to_dict()
+    def get_user_config(self, user_id: int = 0) -> dict:
+        cfg = self.session.query(UserConfig).filter(
+            UserConfig.user_id == user_id
+        ).first()
+        if not cfg:
+            # Devolver defaults si no existe
+            return {
+                "user_id": user_id,
+                "daily_summary_enabled": False,
+                "daily_summary_time": "08:00",
+                "notif_enabled": True,
+                "notif_offsets": ["30"],
+                "notif_ask_confirm": False,
+                "evening_log_enabled": False,
+                "evening_log_time": "21:00",
+                "timezone": "Europe/Madrid",
+            }
+        return cfg.to_dict()
 
     def upsert_user_config(
         self,
-        user_id: str,
+        user_id: int = 0,
         daily_summary_enabled: bool | None = None,
         daily_summary_time: str | None = None,
         notif_enabled: bool | None = None,
@@ -322,54 +280,38 @@ class SQLiteLifeManager(AbstractLifeManager):
         evening_log_time: str | None = None,
         timezone: str | None = None,
     ) -> dict:
-        """
-        Actualiza la configuración del usuario. Solo modifica los campos no-None.
-        Si el usuario no tiene fila todavía, la crea con defaults primero.
-        notif_offsets recibe una lista ["60","30","15"] y se almacena como CSV.
-        """
-        with get_session() as session:
-            cfg = session.query(UserConfig).filter(UserConfig.user_id == user_id).first()
-            if not cfg:
-                cfg = UserConfig(user_id=user_id)
-                session.add(cfg)
-                session.flush()
+        cfg = self.session.query(UserConfig).filter(
+            UserConfig.user_id == user_id
+        ).first()
+        if not cfg:
+            cfg = UserConfig(user_id=user_id)
+            self.session.add(cfg)
+        if daily_summary_enabled is not None:
+            cfg.daily_summary_enabled = daily_summary_enabled
+        if daily_summary_time is not None:
+            cfg.daily_summary_time = daily_summary_time
+        if notif_enabled is not None:
+            cfg.notif_enabled = notif_enabled
+        if notif_offsets is not None:
+            cfg.notif_offsets = json.dumps(notif_offsets)
+        if notif_ask_confirm is not None:
+            cfg.notif_ask_confirm = notif_ask_confirm
+        if evening_log_enabled is not None:
+            cfg.evening_log_enabled = evening_log_enabled
+        if evening_log_time is not None:
+            cfg.evening_log_time = evening_log_time
+        if timezone is not None:
+            cfg.timezone = timezone
+        self.session.commit()
+        self.session.refresh(cfg)
+        return cfg.to_dict()
 
-            if daily_summary_enabled is not None:
-                cfg.daily_summary_enabled = daily_summary_enabled
-            if daily_summary_time is not None:
-                cfg.daily_summary_time = daily_summary_time
-            if notif_enabled is not None:
-                cfg.notif_enabled = notif_enabled
-            if notif_offsets is not None:
-                cfg.notif_offsets = ",".join(notif_offsets)
-            if notif_ask_confirm is not None:
-                cfg.notif_ask_confirm = notif_ask_confirm
-            if evening_log_enabled is not None:
-                cfg.evening_log_enabled = evening_log_enabled
-            if evening_log_time is not None:
-                cfg.evening_log_time = evening_log_time
-            if timezone is not None:
-                cfg.timezone = timezone
+    # ── Summary ──────────────────────────────────────────────────────────────
 
-            return cfg.to_dict()
-
-    # ── Resumen ────────────────────────────────────────────────
-
-    def get_summary(self, date: str) -> dict[str, Any]:
-        """Devuelve resumen del día: citas + hábitos."""
+    def get_summary(self, date_str: str, user_id: int = 0) -> dict[str, Any]:
         return {
-            "date": date,
-            "appointments": self.get_appointments(date),
-            "habits": self.get_habits(date),
+            "date": date_str,
+            "appointments": self.get_appointments(date_str, user_id=user_id),
+            "habits": self.get_habits(date_str, user_id=user_id),
+            "user_config": self.get_user_config(user_id=user_id),
         }
-
-    def get_day_summary(self, date: str) -> dict[str, Any]:
-        """Alias de get_summary para cumplir con AbstractLifeManager."""
-        return self.get_summary(date)
-
-    # ── Helpers ────────────────────────────────────────────────
-
-    @staticmethod
-    def _valid_time(time: str) -> bool:
-        import re
-        return bool(re.match(r"^([01]?\d|2[0-3]):[0-5]\d$", time))
