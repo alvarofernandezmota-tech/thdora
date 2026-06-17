@@ -1,4 +1,4 @@
-"""Tools LangGraph para THDORA — wrappean ThdoraApiClient."""
+"""Tools LangGraph para THDORA — v0.20.1."""
 from __future__ import annotations
 import logging
 from langchain_core.tools import tool
@@ -12,7 +12,7 @@ _api = ThdoraApiClient()
 async def crear_cita(user_id: int, nombre: str, fecha: str, hora: str | None = None, tipo: str = "personal") -> str:
     """Crea una nueva cita en la agenda del usuario."""
     try:
-        result = await _api.create_appointment(user_id, nombre, fecha, hora, tipo)
+        await _api.create_appointment(user_id, nombre, fecha, hora, tipo)
         return f"✅ Cita '{nombre}' creada para {fecha}" + (f" a las {hora}." if hora else ".")
     except Exception as exc:
         logger.error("crear_cita error: %s", exc)
@@ -33,18 +33,18 @@ async def consultar_citas(user_id: int, fecha: str) -> str:
         return f"📅 Citas para {fecha}:\n{lineas}"
     except Exception as exc:
         logger.error("consultar_citas error: %s", exc)
-        return f"❌ No pude consultar las citas: {exc}"
+        return f"❌ No pude consultar: {exc}"
 
 
 @tool
 async def borrar_cita(user_id: int, cita_id: int) -> str:
-    """Elimina una cita existente por su ID numérico."""
+    """Elimina una cita por su ID numérico."""
     try:
         await _api.delete_appointment(user_id, cita_id)
-        return f"🗑️ Cita #{cita_id} eliminada correctamente."
+        return f"🗑️ Cita #{cita_id} eliminada."
     except Exception as exc:
         logger.error("borrar_cita error: %s", exc)
-        return f"❌ No pude eliminar la cita: {exc}"
+        return f"❌ No pude eliminar: {exc}"
 
 
 @tool
@@ -55,7 +55,7 @@ async def registrar_habito(user_id: int, habito: str, fecha: str, valor: float |
         return f"💪 Hábito '{habito}' registrado para {fecha}."
     except Exception as exc:
         logger.error("registrar_habito error: %s", exc)
-        return f"❌ No pude registrar el hábito: {exc}"
+        return f"❌ No pude registrar: {exc}"
 
 
 TOOLS = [crear_cita, consultar_citas, borrar_cita, registrar_habito]

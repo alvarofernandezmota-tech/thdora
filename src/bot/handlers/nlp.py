@@ -1,4 +1,4 @@
-"""Handler NLP: texto libre → LangGraph ThdoraAgent (Sprint 5) con fallback a GroqRouter."""
+"""Handler NLP — LangGraph (thread_id=user_id) con fallback a GroqRouter — v0.20.1."""
 from __future__ import annotations
 import logging
 import traceback
@@ -16,7 +16,6 @@ _TRIVIALES = {"hola", "ok", "vale", "gracias", "de nada", "👍", "👌", "si", 
 
 
 def _get_graph():
-    """Importación lazy para no fallar si langgraph no está instalado aún."""
     try:
         from src.bot.agents.thdora_agent import build_thdora_graph
         return build_thdora_graph()
@@ -26,12 +25,15 @@ def _get_graph():
 
 @require_allowed_user
 async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Procesa mensajes de texto libre con LangGraph o fallback a GroqRouter."""
     if not update.message or not update.message.text:
         return
     user_text = update.message.text
     user_id = update.effective_user.id if update.effective_user else 0
     chat_id = update.effective_chat.id if update.effective_chat else 0
+    nombre_usuario = (
+        context.user_data.get("name")
+        or (update.effective_user.first_name if update.effective_user else None)
+    )
 
     text_lower = user_text.strip().lower()
     if text_lower in _TRIVIALES or len(text_lower) < 3:
@@ -41,50 +43,52 @@ async def nlp_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     await update.effective_chat.send_action(ChatAction.TYPING)
     provisional = await update.message.reply_text("⏳ Procesando...")
 
-    # nlp_history para fallback GroqRouter
-    nlp_history = context.user_data.setdefault("nlp_history", [])
-    nombre_usuario = context.user_data.get("name")
-
     graph = _get_graph()
 
     try:
         if graph is not None:
-            # —— Ruta LangGraph ——
+            # —— LangGraph con memoria persistente por usuario ——
+            config = {"configurable": {"thread_id": str(user_id)}}
             inputs = {
                 "messages": [HumanMessage(content=user_text)],
                 "user_id": user_id,
                 "nombre_usuario": nombre_usuario,
                 "context_summary": context.user_data.get("context_summary", ""),
+                "long_term_memory": "",
+                "pending_action": None,
                 "last_appointments": context.user_data.get("last_appointments", []),
                 "last_habits": context.user_data.get("last_habits", []),
             }
-            result = await graph.ainvoke(inputs)
+            result = await graph.ainvoke(inputs, config=config)
             response_text = result["messages"][-1].content
         else:
-            # —— Fallback GroqRouter si langgraph no disponible ——
+            # —— Fallback GroqRouter ——
             from src.bot.llm_factory import get_router
             from src.bot.groq_router import AmbiguityRequest, ToolCallResult
+            nlp_history = context.user_data.setdefault("nlp_history", [])
             router = get_router()
-            result = await router.process(user_text=user_text, user_id=user_id,
-                                          history=nlp_history, nombre_usuario=nombre_usuario)
-            if isinstance(result, (AmbiguityRequest,)):
+            result = await router.process(
+                user_text=user_text, user_id=user_id,
+                history=nlp_history, nombre_usuario=nombre_usuario,
+            )
+            if isinstance(result, AmbiguityRequest):
                 response_text = result.question_to_user
             elif hasattr(result, "message_to_user"):
                 response_text = result.message_to_user
             else:
                 response_text = str(result)
+            nlp_history = context.user_data.setdefault("nlp_history", [])
+            nlp_history.append({"role": "user", "content": user_text})
+            nlp_history.append({"role": "assistant", "content": response_text})
+            if len(nlp_history) > 20:
+                nlp_history[:] = nlp_history[-20:]
 
-        # Actualiza historial
-        nlp_history.append({"role": "user", "content": user_text})
-        nlp_history.append({"role": "assistant", "content": response_text})
-        if len(nlp_history) > 20:
-            nlp_history[:] = nlp_history[-20:]
-
-        await context.bot.edit_message_text(chat_id=chat_id, message_id=provisional.message_id,
-                                            text=response_text)
+        await context.bot.edit_message_text(
+            chat_id=chat_id, message_id=provisional.message_id, text=response_text
+        )
 
     except httpx.TimeoutException:
-        logger.error("TimeoutException NLP user_id=%s: %s", user_id, traceback.format_exc())
+        logger.error("Timeout NLP user_id=%s: %s", user_id, traceback.format_exc())
         await context.bot.edit_message_text(chat_id=chat_id, message_id=provisional.message_id,
             text="⏳ El servicio tardó demasiado. Inténtalo de nuevo.")
     except httpx.ConnectError:
