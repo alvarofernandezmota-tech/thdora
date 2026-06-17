@@ -1,58 +1,61 @@
-# THDORA — docker-compose.yml
-services:
-  api:
-    build: .
-    image: thdora:latest
-    container_name: thdora-api
-    command: /entrypoint-api.sh
-    restart: always
-    ports:
-      - "8001:8000"
-    volumes:
-      - thdora_data:/app/data
-    env_file:
-      - .env
-    environment:
-      THDORA_DB_PATH=/app/data/thdora.db
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/')"]
-      interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+# THDORA v0.21.2 — Stack completo: app + Prometheus + Grafana
+# Arrancar: docker compose up -d
+# Métricas:  http://localhost:9090
+# Grafana:   http://localhost:3000  (admin/admin)
+# API:       http://localhost:8000
 
-  bot:
+services:
+  thdora:
     build: .
-    image: thdora:latest
-    container_name: thdora-bot
-    command: /entrypoint-bot.sh
-    restart: always
-    depends_on:
-      api:
-        condition: service_healthy
-    volumes:
-      - thdora_data:/app/data
+    container_name: thdora
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
     env_file:
       - .env
-    environment:
-      - THDORA_API_URL=http://api:8000
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "python.*bot"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health/live"]
       interval: 30s
-      timeout: 5s
+      timeout: 10s
       retries: 3
       start_period: 15s
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "10m"
-        max-file: "3"
+    depends_on:
+      - prometheus
+
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: prometheus
+    restart: unless-stopped
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.enable-lifecycle"
+
+  grafana:
+    image: grafana/grafana:latest
+    container_name: grafana
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD: admin
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_ANALYTICS_REPORTING_ENABLED: "false"
+    depends_on:
+      - prometheus
 
 volumes:
-  thdora_data:
-    driver: local
+  prometheus_data:
+  grafana_data:
