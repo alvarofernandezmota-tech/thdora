@@ -12,6 +12,7 @@ Uso:
 """
 from __future__ import annotations
 import logging
+import os
 from typing import Any
 from src.agents.config import agent_config
 
@@ -27,6 +28,7 @@ class ThdoraMemoryManager:
     """
 
     def __init__(self) -> None:
+        os.makedirs("data", exist_ok=True)  # garantiza que data/ existe antes de abrir la BD
         from langgraph.checkpoint.sqlite import SqliteSaver
         self.checkpointer = SqliteSaver.from_conn_string(agent_config.memory_db_path)
 

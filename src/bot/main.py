@@ -55,10 +55,19 @@ _PERSISTENCE_PATH = os.path.join("data", "bot_persistence.pkl")
 
 
 async def _check_api() -> None:
+    """Comprueba disponibilidad de la API. No bloqueante: loguea pero no aborta si falla."""
     api = ThdoraApiClient()
-    ok = await api.health()
-    status = "✅" if ok else "⚠️ "
-    logger.info("%s API THDORA en %s", status, api.base_url)
+    for attempt in range(1, 4):  # hasta 3 intentos con backoff
+        try:
+            ok = await api.health()
+            status = "✅" if ok else "⚠️ "
+            logger.info("%s API THDORA en %s", status, api.base_url)
+            return
+        except Exception as exc:
+            logger.warning("⏳ API no disponible (intento %d/3): %s", attempt, exc)
+            if attempt < 3:
+                await asyncio.sleep(2 ** attempt)  # 2s, 4s
+    logger.warning("⚠️  API no disponible tras 3 intentos — el bot arranca igualmente")
 
 
 async def _post_init(application) -> None:
@@ -138,7 +147,7 @@ async def _route_free_text(update, context) -> None:
 
 
 def main() -> None:
-    asyncio.run(_check_api())
+    asyncio.run(_check_api())  # no-bloqueante: 3 reintentos, arranca igual si falla
     app = build_app(settings.TELEGRAM_BOT_TOKEN)
     logger.info("🧠 THDORA bot v0.21.0 arrancando (polling)…")
     app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
