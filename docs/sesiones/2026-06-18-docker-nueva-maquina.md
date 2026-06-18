@@ -4,158 +4,100 @@
 **Fecha:** 18 junio 2026, ~21:00–22:00 CEST
 **Máquina:** `madre` / `varopc` / `~/Projects/thdora`
 **Rama:** `main`
-**Herramienta de apoyo:** Perplexity AI (MCP GitHub directo)
+**Herramienta de apoyo:** Perplexity AI (MCP GitHub directo) + Groq (auditoría preventiva)
 
 ---
 
 ## Objetivo de la sesión
 
 Levantar el stack THDORA completo (bot + API) en una máquina nueva donde
-el repo no estaba clonado previamente. La máquina tenía el clone antiguo
-en `~/dev/thdora` pero el trabajo nuevo se iba a hacer en `~/Projects/thdora`.
+el repo no estaba clonado previamente.
 
 ---
 
-## Cronología de la sesión
+## Bugs resueltos (cronología)
 
-### 21:00 — Estado inicial
-
-El usuario intenta ejecutar `docker compose` y `git` desde `~` (home).
-Resultado: errores inmediatos.
-
-```bash
-# Situación de partida:
-pwd  # /home/varopc  (NO la carpeta del repo)
-docker ps  # sin contenedores corriendo
-```
-
-### 21:05 — Bug 1: ImportError `_invalidate_cache`
+### Bug 1 — `ImportError: cannot import name '_invalidate_cache'`
 
 **Traceback:**
 ```
-File "/app/src/bot/handlers/nlp_disambig.py", line 25
-  from src.bot.handlers.nlp import _invalidate_cache, _build_day_schedule, _time_to_min
+from src.bot.handlers.nlp import _invalidate_cache, _build_day_schedule, _time_to_min
 ImportError: cannot import name '_invalidate_cache'
 ```
-
-**Diagnóstico:**
-- `nlp_disambig.py:25` importa tres funciones de `nlp.py`
-- La imagen Docker en ejecución estaba construida sobre una versión de `nlp.py`
-  que aún no tenía esas funciones
-- Verificado con `grep -R "_invalidate_cache" -n .` que el código sí existía en el repo local
-
-**Solución:**
-```bash
-cd ~/Projects/thdora
-git reset --hard origin/main
-docker compose build bot
-docker compose up -d bot
-```
-
-**Aprendizaje:** `ImportError: cannot import name X` → problema de **código** o imagen desactualizada.
+**Causa:** Imagen Docker construida antes de que `nlp.py` tuviera esas funciones.
+**Fix:** `git reset --hard origin/main` + `docker compose build bot`
+**Capa:** Código interno / imagen desactualizada
 
 ---
 
-### 21:10 — Bug 2: `fatal: not a git repository`
+### Bug 2 — `fatal: not a git repository`
 
-**Síntoma:** `git fetch`, `git reset` fallaban. `docker compose` también.
-
-**Causa:** El repo no estaba clonado en `~/Projects/thdora`.
-El directorio existía pero no tenía `.git`.
-
-**Solución:**
-```bash
-cd ~/Projects
-git clone git@github.com:alvarofernandezmota-tech/thdora.git
-cd thdora
-pwd  # /home/varopc/Projects/thdora
-```
-
-**Aprendizaje:** Siempre verificar con `pwd` que estás en la carpeta correcta antes de cualquier
-operación `git` o `docker compose`. Si `ls -a` no muestra `.git`, no es el repo.
+**Causa:** Ejecutar `git` y `docker compose` desde `~` en vez de `~/Projects/thdora`.
+**Fix:** `cd ~/Projects/thdora` antes de cualquier comando.
+**Capa:** Entorno / directorio incorrecto
 
 ---
 
-### 21:20 — Bug 3: `.env not found`
+### Bug 3 — `.env not found`
 
-**Mensaje de error:**
-```
-env file /home/varopc/Projects/thdora/.env not found:
-stat /home/varopc/Projects/thdora/.env: no such file or directory
-```
-
-**Causa:** `docker-compose.yml` tiene `env_file: .env`.
-Docker busca `.env` en la carpeta desde donde se ejecuta `docker compose`.
-El clone nuevo no tenía `.env` (nunca va al repo por `.gitignore`).
-
-**Solución:** Copiar el `.env` del clone anterior:
-```bash
-cp ~/dev/thdora/.env ~/Projects/thdora/.env
-# El .env ya tiene todos los tokens: TELEGRAM_BOT_TOKEN, GROQ_API_KEY, etc.
-# No hay que reconfigurarlo
-```
-
-**Aprendizaje:** Cada clone nuevo necesita su propio `.env`.
-Por eso existe `.env.example` — es la plantilla para no tener que adivinar las variables.
-`find ~ -maxdepth 4 -name ".env"` es útil para localizar un `.env` existente.
+**Causa:** El `.env` no se copia al hacer `git clone` (está en `.gitignore`).
+**Fix:** `cp ~/dev/thdora/.env ~/Projects/thdora/.env`
+**Capa:** Docker / configuración de entorno
 
 ---
 
-### 21:30 — Bug 4: `ModuleNotFoundError: langgraph.checkpoint.sqlite`
+### Bug 4 — `ModuleNotFoundError: langgraph.checkpoint.sqlite`
 
-**Traceback completo:**
-```
-File "/app/src/bot/main.py", line 38
-  from src.bot.handlers.stats import stats_handler
-File "/app/src/bot/handlers/stats.py", line 5
-  from src.agents.metrics import MetricsCollector
-File "/app/src/agents/__init__.py", line 11
-  from .core.graph import build_thdora_graph
-File "/app/src/agents/core/graph.py", line 15
-  from src.agents.core.node import _tools, agent_node
-File "/app/src/agents/core/node.py", line 15
-  from src.agents.memory.manager import memory_manager
-File "/app/src/agents/memory/__init__.py", line 2
-  from .manager import memory_manager
-File "/app/src/agents/memory/manager.py", line 72
-  memory_manager = ThdoraMemoryManager()
-File "/app/src/agents/memory/manager.py", line 30
-  from langgraph.checkpoint.sqlite import SqliteSaver
-ModuleNotFoundError: No module named 'langgraph.checkpoint.sqlite'
-```
-
-**Diagnóstico:**
-```bash
-grep -n "langgraph" requirements.txt  # no aparece
-grep -n "langgraph" pyproject.toml    # 16:langgraph>=0.2.0
-```
-
-En alguna versión de LangGraph, `checkpoint.sqlite` se separó al paquete
-independiente `langgraph-checkpoint-sqlite`. El repo solo tenía `langgraph>=0.2.0`.
-
-**Solución:** Fix aplicado directamente en GitHub por Perplexity AI (commit `bdf82f0`):
-- `requirements.txt`: añadido `langgraph-checkpoint-sqlite>=2.0.0`
-- `pyproject.toml`: añadido `langgraph-checkpoint-sqlite>=2.0.0` + deps LangGraph completas
-
-Después en la máquina:
-```bash
-git pull origin main
-docker compose build bot
-docker compose up -d bot
-```
-
-**Aprendizaje:** `ModuleNotFoundError: No module named X` → problema de **dependencias**.
-Buscar en `requirements.txt` / `pyproject.toml`. Nunca en el código fuente.
+**Causa:** `langgraph>=0.2.0` ya no incluye el checkpointer SQLite — paquete separado.
+**Fix:** Añadido `langgraph-checkpoint-sqlite>=2.0.0` en `requirements.txt` y `pyproject.toml`.
+**Commits:** `bdf82f0`
+**Capa:** Dependencias
 
 ---
 
-### 21:45 — Trabajo desde móvil (batería agotada)
+### Bug 5 — `data/` no existe al instanciar `SqliteSaver` (preventivo)
 
-El ordenador se quedó sin batería. Desde el móvil se:
-- Generó el prompt completo para IA externa (Claude/Groq) con todos los archivos del repo
-- La IA externa generó los contenidos corregidos de `requirements.txt`, `pyproject.toml`,
-  `.env.example`, sección README y entrada de diario
-- Perplexity AI aplicó todos los cambios directamente en GitHub vía MCP
+**Archivo:** `src/agents/memory/manager.py:30`
+**Causa:** `SqliteSaver.from_conn_string("data/thdora_memory.db")` falla si `data/` no existe
+en el contenedor en el momento del import (antes de que `main.py` haga su propio `os.makedirs`).
+**Fix:** Añadido `os.makedirs("data", exist_ok=True)` al inicio de `ThdoraMemoryManager.__init__`.
+**Commit:** `6f2caaf`
+**Capa:** Código / orden de inicialización
+
+---
+
+### Bug 6 — `_check_api()` bloqueante si API no está lista (preventivo)
+
+**Archivo:** `src/bot/main.py:141`
+**Causa:** `asyncio.run(_check_api())` se ejecuta antes de `build_app()`. Si la API
+tarda en levantar (race condition en Docker Compose), el bot abortá el arranque.
+**Fix:** `_check_api()` ahora tiene 3 reintentos con backoff exponencial (2s, 4s)
+y loguea un warning si falla, pero **nunca aborta el arranque**.
+**Commit:** `6f2caaf`
+**Capa:** Resiliencia / infraestructura Docker
+
+---
+
+### Bug 7 — `GITHUB_TOKEN` obligatorio causa `ValidationError` (preventivo)
+
+**Archivo:** `src/config.py:40`
+**Causa:** `GITHUB_TOKEN: str = Field(min_length=1)` — pydantic-settings lanza
+`ValidationError` al arrancar si la variable no está en `.env` o está vacía.
+El comando `/diario` necesita el token, pero el **resto del bot es independiente**.
+**Fix:** Cambiado a `GITHUB_TOKEN: str = ""` (valor por defecto vacío, opcional).
+Si está vacío, solo falla `/diario`, no el arranque completo.
+**Commit:** *(este commit)*
+**Capa:** Configuración / validación Pydantic
+
+---
+
+### Bug 8 — `MetricsCollector` — estado
+
+**Archivo:** `src/agents/metrics.py`
+**Evaluación:** `MetricsCollector` no tiene estado a nivel módulo — solo define la clase.
+El singleton `_metrics = MetricsCollector()` está en `stats.py` pero no ejecuta
+código bloqueante al instanciarse. **No es un riesgo real de arranque.**
+**Acción:** Ninguna. Documentado como falsa alarma.
 
 ---
 
@@ -163,9 +105,11 @@ El ordenador se quedó sin batería. Desde el móvil se:
 
 | SHA | Descripción |
 |-----|-------------|
-| `bdf82f0` | fix: añadir langgraph-checkpoint-sqlite en requirements y pyproject |
-| `445ce0d` | docs: diario técnico 18 jun 2026 + entrada CHANGELOG v0.21.3 |
-| *(este commit)* | docs: sesión completa + DIARIO + setup guide |
+| `bdf82f0` | fix: langgraph-checkpoint-sqlite en requirements y pyproject |
+| `445ce0d` | docs: diario técnico 18 jun + CHANGELOG v0.21.3 |
+| `fddd55b` | docs: sesión completa + DIARIO + setup guide |
+| `6f2caaf` | fix: manager.py os.makedirs + main.py _check_api no-bloqueante |
+| *(este)* | fix: GITHUB_TOKEN opcional + docs actualizados |
 
 ---
 
@@ -175,24 +119,25 @@ El ordenador se quedó sin batería. Desde el móvil se:
 |-------|------|--------------|---------------|
 | `ImportError: cannot import name X` | Código interno | El `.py` que define `X` | Actualizar código o rebuild imagen |
 | `ModuleNotFoundError: No module named X` | Dependencias | `requirements.txt` / `pyproject.toml` | Añadir paquete + rebuild |
+| `ValidationError` en Pydantic | Configuración | `src/config.py` + `.env` | Añadir variable o hacerla opcional |
 | `fatal: not a git repository` | Entorno | `pwd` — ¿estás en la carpeta? | `cd` correcto o `git clone` |
 | `env file ... not found` | Docker | ¿existe `.env` en la carpeta? | `cp .env.example .env` |
 | `no configuration file provided` | Docker | ¿existe `docker-compose.yml`? | `cd` a la carpeta del repo |
+| `attempt to write a readonly database` | Docker / permisos | UID mismatch en `./data` | `sudo chown -R 1000:1000 ./data` |
 
 ---
 
 ## Estado al cerrar la sesión
 
-- ✅ Código en `main` correcto y actualizado
-- ✅ Dependencias `langgraph-checkpoint-sqlite` añadidas
-- ✅ Documentación completa subida al repo
-- ⏳ **Pendiente (cuando cargue el ordenador):**
+- ✅ 4 bugs reales resueltos + 3 preventivos aplicados
+- ✅ 1 falsa alarma descartada (MetricsCollector)
+- ✅ Toda la documentación actualizada en el repo
+- ⏳ **Pendiente cuando cargue el ordenador:**
 
 ```bash
 cd ~/Projects/thdora
-git pull origin main          # trae todos los fixes y docs
-cp ~/dev/thdora/.env .env     # si no lo has copiado ya
-docker compose build bot      # instala langgraph-checkpoint-sqlite
+git pull origin main
+docker compose build bot
 docker compose up -d bot
-docker compose logs -f bot    # verificar que arranca sin errores
+docker compose logs -f bot
 ```

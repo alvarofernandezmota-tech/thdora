@@ -37,7 +37,8 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = "INFO"
 
     # GitHub Contents API — yggdrasil-dew
-    GITHUB_TOKEN: str = Field(min_length=1)
+    # Opcional: si no está configurado, /diario no funciona pero el bot arranca
+    GITHUB_TOKEN: str = ""
     GITHUB_OWNER: str = "alvarofernandezmota-tech"
     GITHUB_REPO: str = "yggdrasil-dew"
 
