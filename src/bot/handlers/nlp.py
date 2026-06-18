@@ -44,13 +44,22 @@ _REGEX_RULES: list[tuple[re.Pattern, str]] = [
 _TRIVIALES: frozenset[str] = frozenset({"👍", "👌", "❤️", "🙏", "😀", "😄"})
 
 
-# ── Utilidades de horario visual (usadas por citas.py) ────────────────────────
+# ── Utilidades de horario visual (usadas por citas.py + nlp_disambig.py) ──────
+
+def _time_to_min(time_str: str) -> int:
+    """Convierte 'HH:MM' en minutos desde medianoche.
+
+    Si el formato es inválido, devuelve 0 para no romper el flujo.
+    """
+    try:
+        h, m = time_str.split(":")
+        return int(h) * 60 + int(m)
+    except Exception:
+        return 0
+
 
 def _end_time(time_str: str, duration_minutes: int = 60) -> str:
-    """
-    Calcula la hora de fin sumando duration_minutes a time_str (HH:MM).
-    Devuelve la hora en formato HH:MM. Si falla el parse, devuelve '?'.
-    """
+    """Calcula la hora de fin sumando duration_minutes a time_str (HH:MM)."""
     try:
         dt = datetime.strptime(time_str, "%H:%M")
         dt_end = dt + timedelta(minutes=duration_minutes)
@@ -65,21 +74,7 @@ def _build_day_schedule(
     highlight_time: str | None = None,
     duration: int = 60,
 ) -> str:
-    """
-    Construye un horario visual del día en texto.
-
-    Muestra las citas del día en orden cronológico. Si highlight_time
-    está presente, marca ese slot con ⚠️ (conflicto).
-
-    Args:
-        apts:           Lista de citas del día (dicts con 'time' y 'name'/'type').
-        date_str:       Fecha en formato YYYY-MM-DD (solo para título).
-        highlight_time: Hora HH:MM a marcar como conflicto (⚠️).
-        duration:       Duración en minutos para calcular fin.
-
-    Returns:
-        Bloque de texto Markdown con el horario visual del día.
-    """
+    """Construye un horario visual del día en texto."""
     if not apts:
         return "📅 _Ningún otro evento este día_"
 
@@ -98,6 +93,16 @@ def _build_day_schedule(
         lines.append(f"  ⚠️ {highlight_time}–{h_end} — _(solicitado — conflicto)_")
 
     return "\n".join(lines)
+
+
+def _invalidate_cache(user_data: dict) -> None:
+    """Limpia caches NLP relacionadas con citas en user_data.
+
+    Usado por nlp_disambig cuando borra/edita una cita para forzar recálculo.
+    """
+    for key in ["nlp_history", "nlp_pending_changes"]:
+        if key in user_data:
+            user_data.pop(key, None)
 
 
 # ───────────────────────────────────────────────────────────────────────────────
