@@ -9,15 +9,66 @@
 
 | Componente | Rama | Estado | Último cambio |
 |---|---|---|---|
-| Bot Telegram (THDORA v1) | `main` | ✅ Producción 24/7 | — |
+| Bot Telegram (THDORA v1) | `main` | ✅ Producción 24/7 | 18 jun 2026 |
 | Agent Platform v2 scaffold | `feature/agent-platform-v2` | 🔨 En desarrollo | 2026-06-15 |
+
+---
+
+## 2026-06-18 — Troubleshooting arranque en máquina nueva + fix langgraph
+
+**Rama:** `main`
+**Tipo:** `fix` + `docs`
+**Estado:** ⏳ Pendiente rebuild Docker en máquina local
+
+### Qué se hizo
+- Resueltos 4 bugs encadenados al clonar y levantar el stack en máquina nueva (`madre`)
+- Fix de dependencia: `langgraph-checkpoint-sqlite>=2.0.0` añadido a `requirements.txt` y `pyproject.toml`
+- Documentación completa en `docs/sesiones/2026-06-18-docker-nueva-maquina.md`
+- Creada guía `docs/setup/nueva-maquina.md` para futuros arranques
+- Entrada `v0.21.3` en `CHANGELOG.md`
+
+### Bugs resueltos (en orden)
+1. `ImportError: cannot import name '_invalidate_cache'` → imagen Docker desactualizada, fix: rebuild
+2. `fatal: not a git repository` → ejecutar comandos fuera de la carpeta del repo
+3. `.env not found` → el `.env` no se copia al hacer clone nuevo
+4. `ModuleNotFoundError: langgraph.checkpoint.sqlite` → paquete separado no estaba en deps
+
+### Comandos para retomar
+```bash
+cd ~/Projects/thdora
+git pull origin main
+docker compose build bot
+docker compose up -d bot
+docker compose logs -f bot
+```
+
+### Próximos pasos
+- [ ] Rebuild Docker en máquina y verificar que bot arranca sin errores
+- [ ] Smoke test completo del agente LangGraph con memoria persistente
+- [ ] Verificar `/health/live` y Prometheus
+
+---
+
+## 2026-06-17 — Deploy stack completo dockerizado
+
+**Rama:** `main`
+**Tipo:** `feat` + `fix`
+**Estado:** ✅ Activo
+
+### Qué se hizo
+- Stack completo (API + Bot + Prometheus + Grafana) levantado en Docker Compose
+- Resueltos 6 bugs de infraestructura encadenados
+- Creado `scripts/deploy.sh` reproducible
+
+### Ver detalle
+Ver `CHANGELOG.md` — entrada `v0.21.2`
 
 ---
 
 ## 2026-06-15 — Scaffold Agent Platform v2
 
-**Rama:** `feature/agent-platform-v2`  
-**Tipo:** `feat`  
+**Rama:** `feature/agent-platform-v2`
+**Tipo:** `feat`
 **Estado:** 🔨 Scaffold creado, pendiente de arrancar y probar
 
 ### Qué se hizo
@@ -56,8 +107,8 @@ uvicorn main:app --reload
 
 ## 2026-06-15 — Documentación maestra creada
 
-**Rama:** `main`  
-**Tipo:** `docs`  
+**Rama:** `main`
+**Tipo:** `docs`
 **Estado:** ✅ Activo
 
 ### Qué se hizo
@@ -75,7 +126,7 @@ Este sistema garantiza que en cualquier momento se puede saber exactamente:
 
 ---
 
-<!-- PLANTILLA para nuevas entradas —————————————————————————
+<!-- PLANTILLA para nuevas entradas —————————————————————————————
 
 ## YYYY-MM-DD — Título del cambio
 
@@ -91,4 +142,4 @@ Este sistema garantiza que en cualquier momento se puede saber exactamente:
 
 ### Próximos pasos
 
-————————————————————————————————————————————————————————————— -->
+————————————————————————————————————————————————————————— -->
