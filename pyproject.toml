@@ -32,6 +32,11 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "dateparser>=1.2.0",
     "sqlalchemy>=2.0.0",
+    "langgraph>=0.2.0",
+    "langgraph-checkpoint-sqlite>=2.0.0",
+    "langchain-core>=0.3.0",
+    "langchain-groq>=0.2.0",
+    "langchain-community>=0.3.0",
 ]
 
 [project.optional-dependencies]
@@ -71,7 +76,6 @@ include = ["src*"]
 # ── Entorno de desarrollo ──────────────────────────────────────────────
 # Ubuntu 22.04 WSL2 — Python 3.10
 # Activar venv  : source .venv/bin/activate
-# Instalar deps : pip install sqlalchemy fastapi uvicorn pydantic \
-#                 "python-telegram-bot>=21.0" httpx python-dotenv dateparser
+# Instalar deps : pip install -e ".[dev]"
 # Arrancar API  : make run-api
 # Arrancar bot  : make run-bot
