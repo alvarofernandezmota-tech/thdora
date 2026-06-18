@@ -14,12 +14,27 @@ from src.agents.config import agent_config
 from src.agents.core.state import ThdoraState
 from src.agents.memory.manager import memory_manager
 from src.agents.prompts.base import get_system_prompt
-from src.agents.tools.registry import get_all_tools
 from src.config import settings
 
 logger = logging.getLogger(__name__)
 
-_tools = get_all_tools()
+# _tools se construye lazy (primera llamada a _get_llm_with_tools)
+# para no ejecutar get_all_tools() al importar el módulo, evitando
+# fallos si alguna tool tiene dependencias opcionales no instaladas.
+_tools_cache = None
+
+
+def _get_tools():
+    """Devuelve la lista de tools, construyéndola solo una vez (lazy)."""
+    global _tools_cache
+    if _tools_cache is None:
+        from src.agents.tools.registry import get_all_tools
+        try:
+            _tools_cache = get_all_tools()
+        except Exception as exc:
+            logger.warning("⚠️ get_all_tools() falló, usando lista vacía: %s", exc)
+            _tools_cache = []
+    return _tools_cache
 
 
 def _get_llm_with_tools() -> ChatGroq:
@@ -30,7 +45,7 @@ def _get_llm_with_tools() -> ChatGroq:
         max_tokens=agent_config.max_tokens,
         api_key=settings.GROQ_API_KEY,
     )
-    return llm.bind_tools(_tools)
+    return llm.bind_tools(_get_tools())
 
 
 async def agent_node(state: ThdoraState) -> dict:

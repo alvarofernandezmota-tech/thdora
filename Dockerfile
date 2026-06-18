@@ -12,23 +12,31 @@
 #   • .env (pasado como env_file en docker-compose)
 # ──────────────────────────────────────────────────────────────────────────
 
-# ─ Stage 1: dependencias ─────────────────────────────────────────────────────
+# ─ Stage 1: dependencias ────────────────────────────────────────────────────
 FROM python:3.12-slim AS builder
 
 WORKDIR /build
 
-# Instalar dependencias del sistema necesarias para compilar (SQLite, etc.)
+# Dependencias de sistema para compilar + ffmpeg para voice_handler
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     libsqlite3-dev \
+    ffmpeg \
+    curl \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 
-# ─ Stage 2: imagen final ───────────────────────────────────────────────────────
+# ─ Stage 2: imagen final ─────────────────────────────────────────────────────
 FROM python:3.12-slim
+
+# ffmpeg y curl necesarios en runtime (voice_handler + healthchecks)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
 
 # Usuario no-root con UID/GID 1000 para que coincida con el usuario del host
 # y tenga permisos de escritura en el bind mount ./data

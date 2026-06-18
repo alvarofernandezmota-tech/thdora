@@ -7,15 +7,16 @@ todos los fallos posibles sin necesidad de levantar Docker.
 
 Uso (desde la carpeta raiz del repo):
     python scripts/smoke_test.py
+    # o dentro del contenedor:
+    docker compose run --rm bot python scripts/smoke_test.py
 
 Requiere:
-    pip install -r requirements.txt (o estar dentro del contenedor)
+    pip install -r requirements.txt
     .env con TELEGRAM_BOT_TOKEN y GROQ_API_KEY rellenos
 """
 import sys
 import os
 
-# Asegura que src/ es importable desde la raiz
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 PASS = "✅"
@@ -24,14 +25,18 @@ WARN = "⚠️ "
 results = []
 
 
-def check(name, fn):
+def check(name, fn, warn_only=False):
     try:
         fn()
         print(f"{PASS} {name}")
         results.append((name, True, None))
     except Exception as exc:
-        print(f"{FAIL} {name}\n     → {type(exc).__name__}: {exc}")
-        results.append((name, False, exc))
+        if warn_only:
+            print(f"{WARN}  {name} (no bloqueante)\n     → {type(exc).__name__}: {exc}")
+            results.append((name, True, exc))  # no cuenta como fallo
+        else:
+            print(f"{FAIL} {name}\n     → {type(exc).__name__}: {exc}")
+            results.append((name, False, exc))
 
 
 # ------------------------------------------------------------------ #
@@ -48,11 +53,13 @@ def test_data_dir():
 def test_dotenv_vars():
     from dotenv import dotenv_values
     env = dotenv_values(".env")
-    missing = []
-    for key in ["TELEGRAM_BOT_TOKEN", "GROQ_API_KEY"]:
-        if not env.get(key):
-            missing.append(key)
+    missing = [k for k in ["TELEGRAM_BOT_TOKEN", "GROQ_API_KEY"] if not env.get(k)]
     assert not missing, f"Variables obligatorias sin valor: {missing}"
+
+def test_ffmpeg_available():
+    import subprocess
+    r = subprocess.run(["ffmpeg", "-version"], capture_output=True)
+    assert r.returncode == 0, "ffmpeg no está instalado (necesario para voice_handler)"
 
 # ------------------------------------------------------------------ #
 # 2. IMPORTS CLAVE
@@ -103,14 +110,23 @@ def test_sqlite_saver_init():
     os.makedirs("data", exist_ok=True)
     saver = SqliteSaver.from_conn_string("data/smoke_test.db")
     assert saver is not None
-    # limpieza
     try:
         os.remove("data/smoke_test.db")
     except Exception:
         pass
 
 # ------------------------------------------------------------------ #
-# 5. GRAFO LANGGRAPH
+# 5. TOOLS (lazy — no debe petar al importar)
+# ------------------------------------------------------------------ #
+
+def test_get_all_tools():
+    from src.agents.tools.registry import get_all_tools
+    tools = get_all_tools()
+    assert isinstance(tools, list), "get_all_tools() no devuelvió una lista"
+    print(f"        ({len(tools)} tools registradas: {[t.name for t in tools]})", end="")
+
+# ------------------------------------------------------------------ #
+# 6. GRAFO LANGGRAPH
 # ------------------------------------------------------------------ #
 
 def test_memory_manager_init():
@@ -123,11 +139,11 @@ def test_build_thdora_graph():
     assert graph is not None
 
 # ------------------------------------------------------------------ #
-# 6. GROQ API (llamada real)
+# 7. GROQ API (llamada real — no bloqueante si falla por red/rate-limit)
 # ------------------------------------------------------------------ #
 
 def test_groq_api_call():
-    """Llama a Groq con un mensaje minimo para verificar token y conectividad."""
+    """Llamada real a Groq. Marca WARN si falla por red o rate-limit, no FAIL."""
     from src.config import settings
     from langchain_groq import ChatGroq
     llm = ChatGroq(
@@ -139,7 +155,7 @@ def test_groq_api_call():
     assert result.content, "Groq devolvio respuesta vacia"
 
 # ------------------------------------------------------------------ #
-# 7. HANDLERS (solo import, sin ejecutar)
+# 8. HANDLERS (solo import)
 # ------------------------------------------------------------------ #
 
 def test_import_handler_nlp():
@@ -162,12 +178,13 @@ def test_import_handler_voice():
 # ------------------------------------------------------------------ #
 
 if __name__ == "__main__":
-    print("\n🧠 THDORA Smoke Test\n" + "=" * 40)
+    print("\n🧠 THDORA Smoke Test\n" + "=" * 45)
 
     print("\n[📦 Entorno]")
     check("Archivo .env existe", test_env_file)
     check("Carpeta data/ existe o se crea", test_data_dir)
     check("Variables obligatorias en .env", test_dotenv_vars)
+    check("ffmpeg instalado", test_ffmpeg_available)
 
     print("\n[🐍 Imports clave]")
     check("import langgraph", test_import_langgraph)
@@ -185,12 +202,15 @@ if __name__ == "__main__":
     check("DB SQLite inicializa", test_db_init)
     check("SqliteSaver.from_conn_string() funciona", test_sqlite_saver_init)
 
+    print("\n[🔧 Tools registry]")
+    check("get_all_tools() carga sin errores", test_get_all_tools)
+
     print("\n[🧠 LangGraph]")
     check("ThdoraMemoryManager inicializa", test_memory_manager_init)
     check("build_thdora_graph() compila", test_build_thdora_graph)
 
     print("\n[🌐 Groq API — llamada real]")
-    check("Groq responde correctamente", test_groq_api_call)
+    check("Groq responde correctamente", test_groq_api_call, warn_only=True)
 
     print("\n[🤖 Handlers (import)]")
     check("handler nlp", test_import_handler_nlp)
@@ -199,16 +219,16 @@ if __name__ == "__main__":
     check("handler weather", test_import_handler_weather)
     check("handler voice", test_import_handler_voice)
 
-    # Resumen
+    # Resumen final
     total = len(results)
     passed = sum(1 for _, ok, _ in results if ok)
     failed = total - passed
 
-    print("\n" + "=" * 40)
+    print("\n" + "=" * 45)
     print(f"Resultado: {passed}/{total} OK  |  {failed} FALLIDO(S)")
 
     if failed:
-        print("\nFallos:")
+        print("\nFallos bloqueantes:")
         for name, ok, exc in results:
             if not ok:
                 print(f"  {FAIL} {name}: {type(exc).__name__}: {exc}")
