@@ -4,6 +4,107 @@
 
 ---
 
+## [v0.21.3] — 18 junio 2026 (noche)
+
+### 🐛 Fix — Arranque en máquina nueva: 4 bugs encadenados resueltos
+
+#### Resumen de sesión
+Sesión de troubleshooting al clonar el repo en una máquina nueva (`madre` / `~/Projects/thdora`)
+y levantar el stack con Docker. Se resolvieron 4 bugs encadenados hasta conseguir
+que el bot arrancara correctamente. Sin cambios en lógica de negocio.
+
+---
+
+#### Bug 1 — `ImportError: cannot import name '_invalidate_cache'`
+
+**Síntoma:**
+```
+ImportError: cannot import name '_invalidate_cache' from 'src.bot.handlers.nlp'
+```
+
+**Causa raíz:** El contenedor corría una imagen desactualizada donde `nlp.py`
+no tenía aún las funciones `_invalidate_cache`, `_time_to_min`, `_build_day_schedule`
+que `nlp_disambig.py` esperaba.
+
+**Fix:** `git reset --hard origin/main` + `docker compose build bot` desde la
+carpeta correcta del repo.
+
+---
+
+#### Bug 2 — `fatal: not a git repository` + `no configuration file provided`
+
+**Síntoma:** Todos los comandos `git` y `docker compose` fallaban desde `~`.
+
+**Causa raíz:** El repo no estaba clonado en esa máquina. El directorio de trabajo
+era `~` (home), no la carpeta del proyecto.
+
+**Fix:**
+```bash
+cd ~/Projects
+git clone git@github.com:alvarofernandezmota-tech/thdora.git
+cd thdora
+```
+
+Regla: siempre ejecutar `git` y `docker compose` desde `~/Projects/thdora`.
+
+---
+
+#### Bug 3 — `.env not found`
+
+**Síntoma:**
+```
+env file /home/varopc/Projects/thdora/.env not found
+```
+
+**Causa raíz:** El `.env` existía en el clone anterior (`~/dev/thdora`) pero no
+en el nuevo clone (`~/Projects/thdora`). Docker busca `.env` en la misma carpeta
+donde se ejecuta `docker compose`.
+
+**Fix:**
+```bash
+cp ~/dev/thdora/.env ~/Projects/thdora/.env
+```
+
+---
+
+#### Bug 4 — `ModuleNotFoundError: No module named 'langgraph.checkpoint.sqlite'`
+
+**Síntoma:**
+```
+ModuleNotFoundError: No module named 'langgraph.checkpoint.sqlite'
+```
+
+**Causa raíz:** `langgraph>=0.2.0` ya no incluye el checkpointer SQLite en el
+paquete principal. Desde cierta versión se separó al paquete independiente
+`langgraph-checkpoint-sqlite`.
+
+**Fix:** Añadido `langgraph-checkpoint-sqlite>=2.0.0` en `requirements.txt` y
+`pyproject.toml`. Rebuild de imagen Docker.
+
+---
+
+### 📦 Archivos de esta sesión
+
+| Archivo | Cambio |
+|---|---|
+| `requirements.txt` | ✨ `langgraph-checkpoint-sqlite>=2.0.0` |
+| `pyproject.toml` | ✨ `langgraph-checkpoint-sqlite>=2.0.0` + deps LangGraph en `dependencies` |
+| `docs/diario-2026-06-18.md` | 📝 Diario técnico detallado de la sesión |
+| `CHANGELOG.md` | 📝 Esta entrada |
+
+### ⚠️ Nota para arranques en máquina nueva
+
+Siempre seguir estos pasos en orden:
+```bash
+git clone git@github.com:alvarofernandezmota-tech/thdora.git ~/Projects/thdora
+cd ~/Projects/thdora
+cp /ruta/anterior/.env .env          # o crear desde .env.example
+docker compose up -d --build
+docker compose logs -f bot
+```
+
+---
+
 ## [v0.21.2] — 17 junio 2026 (noche)
 
 ### 🚀 Deploy — Stack completo dockerizado: API + Bot + Prometheus + Grafana
@@ -293,4 +394,4 @@ v0.16.1 y v0.16.2 ahora tienen cobertura de test unitario.
 
 ---
 
-_Última actualización: 17 junio 2026 — 23:19 CEST_
+_Última actualización: 18 junio 2026 — 21:49 CEST_
