@@ -7,10 +7,14 @@ El docstring de cada tool es usado por el LLM para decidir cuándo usarla.
 from __future__ import annotations
 import logging
 from langchain_core.tools import tool
-from src.bot.api_client import ThdoraApiClient
 
 logger = logging.getLogger(__name__)
-_api = ThdoraApiClient()
+
+
+def _get_api():
+    """ThdoraApiClient lazy — se instancia solo cuando se ejecuta la tool."""
+    from src.bot.api_client import ThdoraApiClient
+    return ThdoraApiClient()
 
 
 @tool
@@ -32,7 +36,7 @@ async def crear_cita(
         tipo: Tipo de cita: 'personal', 'medico', 'trabajo', etc.
     """
     try:
-        await _api.create_appointment(user_id, nombre, fecha, hora, tipo)
+        await _get_api().create_appointment(user_id, nombre, fecha, hora, tipo)
         msg = f"✅ Cita '{nombre}' creada para {fecha}"
         return msg + (f" a las {hora}." if hora else ".")
     except Exception as exc:
@@ -50,7 +54,7 @@ async def consultar_citas(user_id: int, fecha: str) -> str:
         fecha: Fecha en formato YYYY-MM-DD.
     """
     try:
-        citas = await _api.get_appointments(user_id, fecha)
+        citas = await _get_api().get_appointments(user_id, fecha)
         if not citas:
             return f"📅 No tienes citas para {fecha}."
         lineas = "\n".join(
@@ -73,7 +77,7 @@ async def borrar_cita(user_id: int, cita_id: int) -> str:
         cita_id: ID numérico de la cita a eliminar.
     """
     try:
-        await _api.delete_appointment(user_id, cita_id)
+        await _get_api().delete_appointment(user_id, cita_id)
         return f"🗑️ Cita #{cita_id} eliminada correctamente."
     except Exception as exc:
         logger.error("borrar_cita user_id=%s cita_id=%s: %s", user_id, cita_id, exc)

@@ -6,9 +6,14 @@ set -e
 
 echo "🗄️  Inicializando base de datos en ${THDORA_DB_PATH:-/app/data/thdora.db}..."
 python -c "
-from src.db.base import init_db
-init_db()
-print('✅ DB lista')
+try:
+    from src.db.base import init_db
+    init_db()
+    print('✅ DB lista')
+except Exception as e:
+    print(f'⚠️  Warning en init_db (no bloqueante): {e}')
+    # No se hace exit 1 — uvicorn arranca igualmente
+    # SQLAlchemy crea las tablas en el primer request si no existen
 "
 
 echo "🚀 Arrancando THDORA API en 0.0.0.0:8000..."

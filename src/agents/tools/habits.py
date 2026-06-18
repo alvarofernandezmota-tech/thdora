@@ -4,10 +4,14 @@ Tools de hábitos para el agente THDORA.
 from __future__ import annotations
 import logging
 from langchain_core.tools import tool
-from src.bot.api_client import ThdoraApiClient
 
 logger = logging.getLogger(__name__)
-_api = ThdoraApiClient()
+
+
+def _get_api():
+    """ThdoraApiClient lazy — se instancia solo cuando se ejecuta la tool."""
+    from src.bot.api_client import ThdoraApiClient
+    return ThdoraApiClient()
 
 
 @tool
@@ -27,7 +31,7 @@ async def registrar_habito(
         valor: Valor numérico opcional (ej. minutos de ejercicio).
     """
     try:
-        await _api.log_habit(user_id, habito, fecha, valor)
+        await _get_api().log_habit(user_id, habito, fecha, valor)
         return f"💪 Hábito '{habito}' registrado para {fecha}."
     except Exception as exc:
         logger.error("registrar_habito user_id=%s: %s", user_id, exc)
