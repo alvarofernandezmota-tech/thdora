@@ -1,70 +1,51 @@
-.PHONY: install dev test lint format clean run-api run-bot \
-        docker-build docker-up docker-down docker-logs docker-db docker-shell-api
+.PHONY: up down logs smoke rebuild shell-bot shell-api ps pull
 
-install:
-	pip install -e .
+## Arrancar todos los servicios (rebuild si hay cambios)
+up:
+	docker compose up -d --build
 
-dev:
-	pip install -e ".[dev]"
-
-test:
-	pytest tests/ -v
-
-test-cov:
-	pytest tests/ --cov=src --cov-report=html
-
-test-bot:
-	pytest tests/unit/bot/ tests/bot/ -v
-
-lint:
-	flake8 src/ tests/
-	mypy src/
-
-format:
-	black src/ tests/
-
-clean:
-	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type f -name '*.pyc' -delete
-	rm -rf .pytest_cache htmlcov .mypy_cache
-
-# ─ LOCAL ────────────────────────────────────────────────────────────
-run-api:
-	uvicorn src.api.main:app --reload --port 8000
-
-run-bot:
-	python -m src.bot.main
-
-run-demo:
-	python src/core/demo.py
-
-# ─ DOCKER ───────────────────────────────────────────────────────────
-docker-build:
-	docker compose build
-
-docker-up:
-	docker compose up -d
-
-docker-down:
+## Parar todos los servicios
+down:
 	docker compose down
 
-docker-logs:
-	docker compose logs -f
-
-docker-logs-api:
-	docker compose logs -f api
-
-docker-logs-bot:
+## Ver logs del bot en tiempo real
+logs:
 	docker compose logs -f bot
 
-docker-db:
-	docker compose exec api sqlite3 /app/data/thdora.db
+## Ver logs de la API en tiempo real
+logs-api:
+	docker compose logs -f thdora
 
-docker-shell-api:
-	docker compose exec api sh
+## Ver estado de los contenedores
+ps:
+	docker compose ps
 
-docker-restart:
-	docker compose restart
+## Ejecutar smoke test antes de arrancar
+smoke:
+	docker compose run --rm bot python scripts/smoke_test.py
 
-docker-rebuild:
-	docker compose down && docker compose build --no-cache && docker compose up -d
+## Rebuild limpio sin cache
+rebuild:
+	docker compose build --no-cache
+
+## Rebuild limpio + arrancar
+fresh:
+	docker compose down
+	docker compose build --no-cache
+	docker compose up -d
+
+## Entrar al contenedor del bot
+shell-bot:
+	docker compose exec bot bash
+
+## Entrar al contenedor de la API
+shell-api:
+	docker compose exec thdora bash
+
+## Actualizar código y reiniciar
+pull:
+	git pull origin main
+	docker compose restart bot
+
+## Secuencia completa de arranque desde cero
+start-fresh: pull smoke fresh logs
