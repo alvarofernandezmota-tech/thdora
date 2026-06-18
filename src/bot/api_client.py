@@ -1,4 +1,4 @@
-"""Cliente HTTP asíncrono para la API FastAPI de THDORA — v4 con singleton y user_id obligatorio."""
+"""Cliente HTTP asíncrono para la API FastAPI de THDORA — v5 con lazy base_url."""
 from __future__ import annotations
 
 import logging
@@ -6,12 +6,15 @@ from typing import Any
 
 import httpx
 
-from src.config import settings
-
 logger = logging.getLogger(__name__)
 
-_API_BASE = settings.THDORA_API_URL.rstrip("/")
 _TIMEOUT = httpx.Timeout(connect=10.0, read=30.0, write=10.0, pool=5.0)
+
+
+def _get_api_base() -> str:
+    """Lee THDORA_API_URL lazy (solo cuando se instancia el cliente)."""
+    from src.config import settings
+    return settings.THDORA_API_URL.rstrip("/")
 
 
 class ApiError(Exception):
@@ -47,7 +50,7 @@ class ThdoraApiClient:
         if cls._instance is None:
             cls._instance = cls()
             cls._client = httpx.AsyncClient(
-                base_url=_API_BASE,
+                base_url=_get_api_base(),  # lazy: se lee al crear la instancia
                 timeout=_TIMEOUT,
                 limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             )
@@ -70,7 +73,7 @@ class ThdoraApiClient:
         _raise_for_status(resp)
         return resp
 
-    # ── Health ───────────────────────────────────────────────────────────────
+    # ── Health ────────────────────────────────────────────────────────────────────
     async def health(self) -> bool:
         try:
             resp = await self._client.get("/")
@@ -78,7 +81,7 @@ class ThdoraApiClient:
         except Exception:
             return False
 
-    # ── Appointments ────────────────────────────────────────────────────
+    # ── Appointments ───────────────────────────────────────────────────────────
     async def get_appointments(self, fecha: str, user_id: int) -> list[dict]:
         resp = await self._request("GET", f"/appointments/{fecha}", user_id)
         return resp.json()
@@ -128,7 +131,7 @@ class ThdoraApiClient:
         )
         return resp.status_code == 204
 
-    # ── Habits ────────────────────────────────────────────────────────────────
+    # ── Habits ───────────────────────────────────────────────────────────────────
     async def get_habits(self, fecha: str, user_id: int) -> list[dict]:
         resp = await self._request("GET", f"/habits/{fecha}", user_id)
         return resp.json()
@@ -180,7 +183,7 @@ class ThdoraApiClient:
         )
         return resp.status_code == 204
 
-    # ── Habit Config ────────────────────────────────────────────────────────
+    # ── Habit Config ───────────────────────────────────────────────────────────────
     async def get_habit_configs(self, user_id: int) -> list[dict]:
         resp = await self._request("GET", "/habit-config/", user_id)
         return resp.json()
@@ -202,7 +205,7 @@ class ThdoraApiClient:
         resp = await self._request("DELETE", f"/habit-config/{name}", user_id)
         return resp.status_code == 204
 
-    # ── User Config ────────────────────────────────────────────────────────
+    # ── User Config ───────────────────────────────────────────────────────────────
     async def get_user_config(self, user_id: int) -> dict:
         resp = await self._request("GET", f"/user_config/{user_id}", user_id)
         return resp.json()
@@ -213,7 +216,7 @@ class ThdoraApiClient:
         )
         return resp.json()
 
-    # ── Summary ──────────────────────────────────────────────────────────────
+    # ── Summary ──────────────────────────────────────────────────────────────────
     async def get_summary(self, fecha: str, user_id: int) -> dict:
         resp = await self._request("GET", f"/summary/{fecha}", user_id)
         return resp.json()
@@ -222,7 +225,7 @@ class ThdoraApiClient:
         resp = await self._request("GET", f"/summary/week/{fecha}", user_id)
         return resp.json()
 
-    # ── Conversations ───────────────────────────────────────────────────────
+    # ── Conversations ───────────────────────────────────────────────────────────────
     async def save_message(
         self,
         role: str,

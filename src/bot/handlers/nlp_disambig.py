@@ -20,12 +20,22 @@ from datetime import date
 from telegram import Update
 from telegram.ext import ContextTypes
 
-from src.bot.api_client import ThdoraApiClient
 from src.bot.keyboards import _kb_start
 from src.bot.handlers.nlp import _invalidate_cache, _build_day_schedule, _time_to_min
 
 logger = logging.getLogger(__name__)
-api    = ThdoraApiClient()
+
+# ThdoraApiClient lazy — se instancia solo en la primera llamada al handler
+_api = None
+
+
+def _get_api():
+    global _api
+    if _api is None:
+        from src.bot.api_client import ThdoraApiClient
+        _api = ThdoraApiClient()
+    return _api
+
 
 _DEFAULT_DURATION_MIN = 60
 
@@ -58,8 +68,9 @@ async def cb_nlp_disambig(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     today = date.today().isoformat()
+    api = _get_api()
 
-    # ── borrar_cita ────────────────────────────────────────────────────
+    # ── borrar_cita ──────────────────────────────────────────────────────────────
     if action == "borrar_cita":
         try:
             ok = await api.delete_appointment(date_str=cita_date, index=cita_index)
@@ -85,7 +96,7 @@ async def cb_nlp_disambig(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
         return
 
-    # ── editar_cita ────────────────────────────────────────────────────
+    # ── editar_cita ──────────────────────────────────────────────────────────────
     if action == "editar_cita":
         pending = context.user_data.pop("nlp_pending_changes", {})
         new_time  = pending.get("new_time")  or None
@@ -93,7 +104,6 @@ async def cb_nlp_disambig(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         new_type  = pending.get("new_type")  or None
         new_notes = pending.get("new_notes") or None
 
-        # Si la hora nueva es 00:00 o None, pedir al usuario que la diga
         if new_time == "00:00" or (not new_time and not new_name and not new_type and not new_notes):
             try:
                 citas_del_dia = await api.get_appointments(cita_date)

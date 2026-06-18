@@ -14,6 +14,7 @@ Uso::
         session.commit()
 """
 
+import logging
 import os
 from contextlib import contextmanager
 from pathlib import Path
@@ -21,16 +22,27 @@ from pathlib import Path
 from sqlalchemy import create_engine
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
+logger = logging.getLogger(__name__)
+
 # URL de la base de datos — SQLite local por defecto
 _DEFAULT_DB = Path(__file__).resolve().parents[2] / "data" / "thdora.db"
 DB_URL = os.environ.get("THDORA_DB_URL", f"sqlite:///{_DEFAULT_DB}")
 
-# Crear directorio data/ si no existe
-_DEFAULT_DB.parent.mkdir(parents=True, exist_ok=True)
+# Crear directorio data/ si no existe — con fallback si hay problemas de permisos
+try:
+    _DEFAULT_DB.parent.mkdir(parents=True, exist_ok=True)
+except PermissionError as _exc:
+    logger.warning(
+        "⚠️  No se pudo crear data/ (%s). "
+        "Verifica permisos del bind mount (chown -R 1000:1000 ./data).",
+        _exc,
+    )
+except Exception as _exc:
+    logger.warning("⚠️  Error inesperado creando data/: %s", _exc)
 
 engine = create_engine(
     DB_URL,
-    connect_args={"check_same_thread": False},  # necesario para SQLite con async
+    connect_args={"check_same_thread": False},
     echo=False,
 )
 
