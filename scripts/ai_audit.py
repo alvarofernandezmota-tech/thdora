@@ -1,233 +1,201 @@
 #!/usr/bin/env python3
 """
-scripts/ai_audit.py
-Auditóría automática de THDORA usando Mistral AI.
+scripts/ai_audit.py — Auditoría unificada Claude / Grok / xAI
 
-Lee el código real del repo, lo envía a Mistral y genera un reporte
-de bugs de runtime, mismatches API y tests pytest urgentes.
+Lee el código real del repo, lo envía a la IA configurada
+y genera un reporte de bugs de runtime, mismatches API
+y tests pytest urgentes.
 
 Uso:
-    MISTRAL_API_KEY=xxx python scripts/ai_audit.py
-    # o con .env cargado:
-    python scripts/ai_audit.py
+    ANTHROPIC_API_KEY=xxx python scripts/ai_audit.py
+    GROK_API_KEY=xxx     python scripts/ai_audit.py
+    XAI_API_KEY=xxx      python scripts/ai_audit.py
 
 El reporte se guarda en: audit_report.md
 """
 import os
 import sys
+import json
+from pathlib import Path
+from datetime import datetime
 import urllib.request
 import urllib.error
-import json
-from datetime import datetime
-from pathlib import Path
 
-# Intentar cargar .env si existe
 try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
-    pass  # python-dotenv no instalado, continuar con variables de entorno
+    pass
 
-API_KEY = os.getenv("MISTRAL_API_KEY", "")
-if not API_KEY:
-    print("\n\u274c Falta MISTRAL_API_KEY")
-    print("   Uso: MISTRAL_API_KEY=tu_clave python scripts/ai_audit.py")
-    print("   O a\u00f1ade MISTRAL_API_KEY=tu_clave al archivo .env")
-    sys.exit(1)
-
-BASE = "https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main"
+BASE_URL = "https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main"
 
 FILES_TO_AUDIT = [
-    # Bot principal
     "src/bot/main.py",
-    # Handlers
     "src/bot/handlers/nlp.py",
     "src/bot/handlers/nlp_disambig.py",
     "src/bot/handlers/stats.py",
     "src/bot/handlers/voice.py",
     "src/bot/handlers/diario.py",
     "src/bot/handlers/weather.py",
-    # Agente
     "src/agents/core/node.py",
     "src/agents/core/graph.py",
     "src/agents/tools/registry.py",
     "src/agents/tools/appointments.py",
     "src/agents/tools/habits.py",
     "src/agents/memory/manager.py",
-    # API
     "src/api/main.py",
     "src/bot/api_client.py",
-    # Config
     "src/config.py",
     "src/agents/config.py",
-    # DB
     "src/db/base.py",
-    # Smoke test
     "scripts/smoke_test.py",
 ]
 
-PASS = "\u2705"
-FAIL = "\u274c"
-WARN = "\u26a0\ufe0f "
 
-
-def fetch(path: str) -> str:
-    url = f"{BASE}/{path}"
+def fetch_file(path: str) -> str:
     try:
+        url = f"{BASE_URL}/{path}"
         req = urllib.request.Request(url, headers={"User-Agent": "thdora-audit/1.0"})
         with urllib.request.urlopen(req, timeout=15) as r:
-            content = r.read().decode()
-            return content
+            content = r.read().decode("utf-8")
+            snippet = content[:2800]
+            if len(content) > 2800:
+                snippet += f"\n... [truncado {len(content)} chars]"
+            return f"### {path}\n```python\n{snippet}\n```"
     except urllib.error.HTTPError as e:
-        if e.code == 404:
-            return f"[ARCHIVO NO ENCONTRADO: {path}]"
-        return f"[HTTP ERROR {e.code} leyendo {path}]"
+        return f"### {path}\n[HTTP {e.code} — archivo no encontrado]"
     except Exception as e:
-        return f"[ERROR leyendo {path}: {e}]"
+        return f"### {path}\n[ERROR: {e}]"
 
 
-def ask_mistral(prompt: str, model: str = "mistral-large-latest") -> str:
+def build_prompt(code_blocks: list) -> str:
+    code = "\n\n".join(code_blocks)
+    return f"""Eres un QA Engineer senior especializado en Python, FastAPI, LangGraph, python-telegram-bot v21 y Docker.
+
+Proyecto: THDORA (Bot Telegram personal con FastAPI + SQLite + LangGraph + Groq).
+
+Tareas obligatorias:
+
+1. BUGS DE RUNTIME — Detecta problemas que solo aparecen al ejecutar (no al importar):
+   - KeyError, AttributeError, TypeError con datos reales
+   - Mismatches entre ThdoraApiClient y endpoints de la API (rutas, params, tipos)
+   - Edge cases sin manejar: None, lista vacía, timeout, user_id 0
+   - Race conditions o estado compartido problemático
+
+2. FLUJO SIMULADO — Simula este flujo completo:
+   Usuario: "mañana tengo dentista a las 10"
+   → nlp_handler detecta intención
+   → llama a api_client.create_appointment(...)
+   → API guarda en SQLite
+   → responde al usuario
+   Para cada paso: ✅ OK / ⚠️ RIESGO / ❌ FALLO con causa exacta.
+
+3. 5 TESTS PYTEST — Genera tests críticos completos con pytest + mocks.
+   Usa AsyncMock para async, patch para dependencias externas.
+   Código completo y ejecutable.
+
+FORMATO DE RESPUESTA:
+- PROBLEMA #N — [CRÍTICO / MEDIO / BAJO]
+- Archivo: src/xxx.py  línea: XX
+- Causa: descripción exacta
+- Fix: código listo para copiar
+- Tabla final: # | Severidad | Archivo | Causa | Fix en 1 línea
+
+Solo problemas REALES vistos en el código. Si algo está bien, di OK.
+
+CÓDIGO A ANALIZAR:
+{code}
+""".strip()
+
+
+def ask_claude(prompt: str) -> str:
+    try:
+        from anthropic import Anthropic
+        client = Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        response = client.messages.create(
+            model=os.getenv("ANTHROPIC_MODEL", "claude-sonnet-4-5"),
+            max_tokens=4096,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        return "".join(b.text for b in response.content if hasattr(b, "text"))
+    except ImportError:
+        raise RuntimeError("Instala anthropic: pip install anthropic")
+    except Exception as e:
+        raise RuntimeError(f"Error Claude: {e}")
+
+
+def ask_grok(prompt: str) -> str:
+    api_key = os.getenv("GROK_API_KEY") or os.getenv("XAI_API_KEY", "")
     payload = json.dumps({
-        "model": model,
+        "model": os.getenv("GROK_MODEL", "grok-2-1212"),
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.1,
         "max_tokens": 4096,
     }).encode()
-
     req = urllib.request.Request(
-        "https://api.mistral.ai/v1/chat/completions",
+        os.getenv("GROK_API_URL", "https://api.x.ai/v1/chat/completions"),
         data=payload,
         headers={
-            "Authorization": f"Bearer {API_KEY}",
+            "Authorization": f"Bearer {api_key}",
             "Content-Type": "application/json",
         },
+        method="POST",
     )
     try:
         with urllib.request.urlopen(req, timeout=90) as r:
             data = json.loads(r.read())
             return data["choices"][0]["message"]["content"]
     except urllib.error.HTTPError as e:
-        body = e.read().decode()[:500]
-        raise RuntimeError(f"Mistral API error {e.code}: {body}")
+        raise RuntimeError(f"Error Grok {e.code}: {e.read().decode()[:300]}")
 
 
-def build_prompt(code_sections: list[str]) -> str:
-    all_code = "\n\n".join(code_sections)
-    return f"""Eres un experto QA engineer especializado en Python, FastAPI, LangGraph y bots Telegram.
-Proyecto: THDORA \u2014 bot Telegram personal con FastAPI + SQLite + LangGraph + Groq.
+def main():
+    print(f"\n🧠 THDORA AI Audit — {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print("=" * 55)
 
-Analiza el c\u00f3digo que te paso y ejecuta estas 3 fases:
-
-\u2550\u2550\u2550\u2550 FASE 1 \u2014 BUGS DE RUNTIME (no de import) \u2550\u2550\u2550\u2550
-Detecta bugs que solo aparecen al ejecutar, no al importar:
-- KeyError, AttributeError, TypeError en datos reales
-- Mismatches entre lo que ThdoraApiClient llama y lo que la API expone
-  (rutas, par\u00e1metros, tipos de respuesta)
-- Casos edge sin manejar: None, lista vac\u00eda, timeout, user_id 0
-- Condiciones de carrera o estado compartido problem\u00e1tico
-
-\u2550\u2550\u2550\u2550 FASE 2 \u2014 FLUJO SIMULADO \u2550\u2550\u2550\u2550
-Simula mentalmente este flujo completo:
-  Usuario escribe \"ma\u00f1ana tengo dentista a las 10\"
-  \u2192 nlp_handler detecta intenci\u00f3n \"crear_cita\"
-  \u2192 llama a api_client.create_appointment(...)
-  \u2192 API guarda en SQLite
-  \u2192 responde al usuario
-
-Para cada paso: \u2705 OK / \u26a0\ufe0f RIESGO / \u274c FALLO con causa exacta.
-
-\u2550\u2550\u2550\u2550 FASE 3 \u2014 TESTS PYTEST URGENTES \u2550\u2550\u2550\u2550
-Genera los 5 tests m\u00e1s cr\u00edticos, completos y ejecutables con pytest.
-Usa unittest.mock para evitar llamadas reales a Groq/Telegram/SQLite.
-Formato exacto:
-```python
-# tests/unit/test_nombre.py
-import pytest
-from unittest.mock import AsyncMock, patch, MagicMock
-# ... c\u00f3digo completo ejecutable
-```
-
-\u2550\u2550\u2550\u2550 FORMATO DE RESPUESTA \u2550\u2550\u2550\u2550
-
-FASE 1 \u2014 Para cada problema real:
-PROBLEMA #N \u2014 [CR\u00cdTICO / MEDIO / BAJO]
-Archivo: src/xxx.py  l\u00ednea: XX
-Causa: descripci\u00f3n exacta
-Fix: c\u00f3digo listo para aplicar
-
-FASE 2 \u2014 Paso a paso con \u2705/\u26a0\ufe0f/\u274c
-
-FASE 3 \u2014 C\u00f3digo pytest completo
-
-Tabla final priorizada: # | Severidad | Archivo | Causa | Fix en 1 l\u00ednea
-
-Solo problemas REALES vistos en el c\u00f3digo. Si algo est\u00e1 bien, di OK y pasa al siguiente.
-
-\u2550\u2550\u2550\u2550 C\u00d3DIGO A ANALIZAR \u2550\u2550\u2550\u2550
-
-{all_code}
-"""
-
-
-if __name__ == "__main__":
-    print("\n\U0001f9e0 THDORA AI Audit \u2014 Mistral Large")
-    print("=" * 50)
-    print(f"Fecha: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
-    print(f"Archivos a auditar: {len(FILES_TO_AUDIT)}\n")
-
-    # 1. Leer archivos del repo
-    print("\U0001f4e6 Leyendo archivos del repo...")
-    code_sections = []
-    errors = []
+    print("\n📥 Leyendo archivos del repo...")
+    code_blocks = []
     for path in FILES_TO_AUDIT:
-        content = fetch(path)
-        if content.startswith("[ERROR") or content.startswith("[ARCHIVO") or content.startswith("[HTTP"):
-            print(f"  {WARN} {path} \u2192 {content[:60]}")
-            errors.append(path)
-        else:
-            # Limitar a 2500 chars por archivo para no superar el contexto
-            snippet = content[:2500]
-            if len(content) > 2500:
-                snippet += f"\n... [truncado a 2500/{len(content)} chars]"
-            code_sections.append(f"### {path}\n```python\n{snippet}\n```")
-            print(f"  {PASS} {path} ({len(content)} chars)")
+        block = fetch_file(path)
+        status = "✅" if "ERROR" not in block and "HTTP" not in block else "⚠️ "
+        print(f"  {status} {path}")
+        code_blocks.append(block)
 
-    if errors:
-        print(f"\n{WARN} {len(errors)} archivos no encontrados \u2014 continuar de todas formas")
+    prompt = build_prompt(code_blocks)
+    print(f"\n📝 Prompt: {len(prompt)} chars — {len(code_blocks)} archivos")
 
-    if not code_sections:
-        print(f"\n{FAIL} No se pudo leer ning\u00fan archivo. Revisa la conexi\u00f3n.")
+    # Elegir IA disponible
+    if os.getenv("ANTHROPIC_API_KEY"):
+        ia_name = "Claude"
+        print("\n🤖 Usando Claude (Anthropic)...")
+        result = ask_claude(prompt)
+    elif os.getenv("GROK_API_KEY") or os.getenv("XAI_API_KEY"):
+        ia_name = "Grok/xAI"
+        print("\n🤖 Usando Grok (xAI)...")
+        result = ask_grok(prompt)
+    else:
+        print("\n❌ Define ANTHROPIC_API_KEY o GROK_API_KEY en .env")
+        print("   Ejemplo: ANTHROPIC_API_KEY=sk-ant-xxx python scripts/ai_audit.py")
         sys.exit(1)
 
-    # 2. Construir prompt
-    prompt = build_prompt(code_sections)
-    print(f"\n\U0001f4dd Prompt generado: {len(prompt)} chars")
-
-    # 3. Llamar a Mistral
-    print("\n\U0001f916 Consultando Mistral AI (puede tardar 20-40s)...\n")
-    try:
-        result = ask_mistral(prompt)
-    except RuntimeError as e:
-        print(f"{FAIL} Error de API: {e}")
-        sys.exit(1)
-
-    # 4. Mostrar resultado
-    print("\n" + "=" * 50)
+    print("\n" + "=" * 55)
     print(result)
-    print("=" * 50)
+    print("=" * 55)
 
-    # 5. Guardar reporte
-    report_path = Path("audit_report.md")
-    report_content = f"""# THDORA AI Audit Report
-_Generado: {datetime.now().strftime('%Y-%m-%d %H:%M')} por Mistral Large_
+    report = f"""# THDORA AI Audit Report
+_Generado: {datetime.now().strftime('%Y-%m-%d %H:%M')} por {ia_name}_
 
 ---
 
 {result}
 
 ---
-_Archivos analizados: {len(code_sections)}/{len(FILES_TO_AUDIT)}_
+_Archivos analizados: {len(code_blocks)} — Modelo: {ia_name}_
 """
-    report_path.write_text(report_content, encoding="utf-8")
-    print(f"\n{PASS} Reporte guardado en {report_path.resolve()}")
-    print("\nPr\u00f3ximo paso: revisa audit_report.md y p\u00e1sale los fixes a Perplexity para aplicarlos al repo.\n")
+    Path("audit_report.md").write_text(report, encoding="utf-8")
+    print(f"\n✅ Reporte guardado en audit_report.md")
+    print("   Siguiente paso: pegar el contenido en Perplexity para aplicar fixes al repo.\n")
+
+
+if __name__ == "__main__":
+    main()
