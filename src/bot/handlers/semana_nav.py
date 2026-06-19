@@ -8,7 +8,7 @@ from datetime import date, timedelta
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from src.bot.api_client import ApiClient
+from src.bot.api_client import ThdoraApiClient
 
 logger = logging.getLogger(__name__)
 
@@ -47,7 +47,7 @@ async def show_week_view(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     monday, sunday = get_week_range(offset)
 
     uid = update.effective_user.id if update.effective_user else 0
-    api = ApiClient()
+    api = ThdoraApiClient()
     citas: list[dict] = await api.get_appointments_range(
         fecha_inicio=monday.isoformat(), fecha_fin=sunday.isoformat(), user_id=uid
     )

@@ -8,7 +8,7 @@ from datetime import date, datetime, time, timedelta
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import ContextTypes
 
-from src.bot.api_client import ApiClient
+from src.bot.api_client import ThdoraApiClient
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +61,7 @@ async def show_available_slots(update: Update, context: ContextTypes.DEFAULT_TYP
     hora_actual: str = context.user_data.get("cita_hora_actual", "??:??")
     fecha_destino: str = context.user_data.get("fecha_destino", date.today().isoformat())
 
-    api = ApiClient()
+    api = ThdoraApiClient()
     citas_destino: list[dict] = await api.get_appointments(fecha=fecha_destino, user_id=uid)
 
     raw_slots = calculate_free_slots(citas_destino, fecha_destino)
