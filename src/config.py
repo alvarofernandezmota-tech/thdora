@@ -1,4 +1,6 @@
 """Configuración centralizada de THDORA usando pydantic-settings."""
+from functools import lru_cache
+
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -46,4 +48,36 @@ class Settings(BaseSettings):
     OWM_API_KEY: str = ""
 
 
-settings = Settings()
+@lru_cache(maxsize=1)
+def get_settings() -> Settings:
+    """Devuelve la instancia singleton de Settings.
+
+    Uso correcto (lazy, testeable):
+        from src.config import get_settings
+        settings = get_settings()
+
+    En tests, invalida la caché con:
+        get_settings.cache_clear()
+    """
+    return Settings()
+
+
+# Alias de compatibilidad — NO instancia al importar
+# Usar get_settings() en código nuevo
+def _get_settings_compat() -> Settings:
+    return get_settings()
+
+
+# DEPRECADO: acceso directo. Migrar a get_settings()
+# Mantenido solo para no romper imports existentes durante la migración
+class _LazySettings:
+    """Proxy lazy que no instancia Settings hasta el primer acceso."""
+    _instance: Settings | None = None
+
+    def __getattr__(self, name: str):
+        if self._instance is None:
+            self._instance = get_settings()
+        return getattr(self._instance, name)
+
+
+settings = _LazySettings()

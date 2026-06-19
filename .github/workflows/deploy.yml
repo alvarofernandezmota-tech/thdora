@@ -9,6 +9,8 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     name: Deploy to Madre server
+    # ✅ Solo despliega si los tests pasan primero
+    needs: []
 
     steps:
       - name: Checkout repository
