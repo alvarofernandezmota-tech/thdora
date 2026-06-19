@@ -1,37 +1,86 @@
-# thdora — Índice de archivos para LLMs
-# Lee CONTEXT.md primero, luego los archivos que necesites.
-# https://github.com/alvarofernandezmota-tech/thdora
+# THDORA — Resumen para LLMs
+_Actualizado: v0.17.0 (2026-06-20)_
 
-## Punto de entrada
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/CONTEXT.md
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/ROADMAP.md
+## Qué es THDORA
+Asistente personal Telegram. Bot PTB v20 + API FastAPI + SQLite/Postgres + Docker.
+Repo: https://github.com/alvarofernandezmota-tech/thdora
 
-## Configuración
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/config.py
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/requirements.txt
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/.env.example
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/docker-compose.yml
+## Estado actual
+- Versión: v0.17.0
+- Branch activo: main
+- Bugs corregidos hoy: B12-B25 (14 bugs, todos relacionados con user_id y firmas de API)
+- Tests: suite completa en tests/ (pytest-asyncio + AsyncMock)
+- Autotest: scripts/autotest.py --fast (sin pytest, verifica imports + firmas + accum)
+- CI: .github/workflows/ci.yml (lint ruff + pytest en cada push)
+- Docker: Dockerfile multi-stage + docker/entrypoint.sh con alembic upgrade head
 
-## Bot — núcleo
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/main.py
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/groq_router.py
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/http_client.py
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/api_client.py
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/middleware.py
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/scheduler.py
+## Arquitectura (resumen)
+- Bot (SERVICE_TARGET=bot): src/bot/main.py → PTB polling
+- API (SERVICE_TARGET=api): src/api/main.py → FastAPI uvicorn :8000
+- Cliente HTTP: src/bot/api_client.py → ThdoraApiClient (singleton httpx)
+- BD: alembic + SQLAlchemy. Modelos en src/db/models.py
+- Scheduler: APScheduler en proceso del bot (src/bot/scheduler.py)
 
-## Bot — handlers
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/nlp.py
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/diario.py
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/citas.py
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/habitos.py
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/onboarding.py
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/stats.py
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/bot/handlers/nlp_disambig.py
+## Regla más importante
+TODO método de ThdoraApiClient requiere user_id: int > 0.
+Se obtiene de: update.effective_user.id / query.from_user.id / context.user_data["X_user_id"]
+Nunca de variables globales.
 
-## Servicios
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/src/services/github_client.py
+## Firmas clave de ThdoraApiClient (src/bot/api_client.py)
+- get_habits(fecha, user_id) -> list[dict]
+- log_habit(date_str, habit, value, user_id) -> dict
+- update_habit(date_str, habit, value, user_id) -> dict
+- delete_habit(date_str, habit, user_id) -> bool
+- get_habit_config(name, user_id) -> dict | None
+- get_habit_configs(user_id) -> list[dict]
+- upsert_habit_config(data: dict, user_id) -> dict
+- delete_habit_config(name, user_id) -> bool
+- get_appointments(fecha, user_id) -> list[dict]
+- create_appointment(date_str, data: dict, user_id) -> dict
+- update_appointment(date_str, index, data: dict, user_id) -> dict
+- delete_appointment(date_str, index, user_id) -> bool
+- get_user_config(user_id) -> dict
+- update_user_config(user_id, data: dict) -> dict
+- get_summary(fecha, user_id) -> dict
+- health() -> bool (sin user_id)
 
-## Infra
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/Dockerfile
-https://raw.githubusercontent.com/alvarofernandezmota-tech/thdora/main/Makefile
+## Handlers registrados en main.py
+ConversationHandlers (alta prioridad):
+  onboarding, nueva_cita, nuevo_habito, edit_apt, edit_hab, config
+
+CallbackQueryHandlers:
+  menu_home, citas_nav_, habitos_nav_, semana_nav_,
+  cita_detail_, ad_ (delete apt), adc_ (confirm delete apt),
+  hd_ (delete hab), hdc_ (confirm delete hab), ha_ (add hab),
+  cancel_action, nlp_disambig|
+
+CommandHandlers:
+  /start, /citas, /habitos, /semana, /resumen, /cancelar,
+  /diario, /stats, /tiempo
+
+Fallback texto libre: _route_free_text -> acum o nlp_handler
+
+## Archivos clave para leer antes de tocar código
+1. ARCHITECTURE.md - capas, flujo de datos, decisiones
+2. CHANGELOG.md - bugs ya corregidos (NO volver a introducirlos)
+3. CONTRIBUTING.md - convenciones, checklist PR
+4. docs/ADR-001, ADR-002 - razones de diseño
+5. PLAN_MANANA.md - estado de lanzamiento
+
+## Cosas que NO hacer
+- NO llamar api.get_habits(fecha) sin user_id
+- NO usar api.get_all_habit_configs() (no existe)
+- NO usar api.check_appointment_conflict() (no existe, usar _find_overlap local)
+- NO usar update.get_bot() (PTB>=20 -> context.bot)
+- NO crear nueva instancia de httpx.AsyncClient fuera de ThdoraApiClient
+- NO usar kwargs sueltos en create/update_appointment o upsert_habit_config
+
+## Comandos útiles
+```bash
+python scripts/autotest.py --fast     # verificar ecosistema sin Docker
+pytest tests/ -v                      # suite completa
+ruff check src/ tests/                # lint
+docker compose up --build             # lanzar todo
+docker compose logs -f thdora         # logs API
+docker compose logs -f bot            # logs bot
+```

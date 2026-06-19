@@ -1,0 +1,44 @@
+name: Docker Smoke Test
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  docker-smoke:
+    name: Build + Health Check
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create .env for smoke test
+        run: |
+          cat > .env <<EOF
+          TELEGRAM_TOKEN=0:dummy_token_for_tests
+          THDORA_API_URL=http://thdora:8000
+          SECRET_KEY=test_secret_key_32_chars_minimum!
+          DATABASE_URL=sqlite:///./data/thdora.db
+          ALLOWED_USER_ID=123456789
+          EOF
+
+      - name: Build Docker image
+        run: docker compose build thdora
+
+      - name: Start API service
+        run: |
+          docker compose up -d thdora
+          sleep 15  # dar tiempo al entrypoint + alembic
+
+      - name: Health check
+        run: |
+          docker compose exec thdora curl -f http://localhost:8000/health/live \
+            || (docker compose logs thdora && exit 1)
+
+      - name: Show logs on failure
+        if: failure()
+        run: docker compose logs --tail=50
+
+      - name: Cleanup
+        if: always()
+        run: docker compose down -v
