@@ -13,6 +13,7 @@ Uso:
 from __future__ import annotations
 import logging
 import os
+import sqlite3
 from typing import Any
 from src.agents.config import agent_config
 
@@ -28,9 +29,15 @@ class ThdoraMemoryManager:
     """
 
     def __init__(self) -> None:
-        os.makedirs("data", exist_ok=True)  # garantiza que data/ existe antes de abrir la BD
+        os.makedirs("data", exist_ok=True)
         from langgraph.checkpoint.sqlite import SqliteSaver
-        self.checkpointer = SqliteSaver.from_conn_string(agent_config.memory_db_path)
+        # SqliteSaver.from_conn_string() es un @contextmanager en
+        # langgraph-checkpoint-sqlite>=2.0.0 — no puede usarse como constructor
+        # directo (cierra la conexión al salir del bloque `with`). Como el
+        # checkpointer debe vivir todo el ciclo de vida del proceso del bot,
+        # abrimos la conexión sqlite3 manualmente y la pasamos directamente.
+        conn = sqlite3.connect(agent_config.memory_db_path, check_same_thread=False)
+        self.checkpointer = SqliteSaver(conn)
 
     def get_memory(self, user_id: int) -> dict[str, Any]:
         """

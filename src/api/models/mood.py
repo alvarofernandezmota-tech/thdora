@@ -2,48 +2,35 @@ import json
 from datetime import datetime, timedelta
 from sqlalchemy import Column, Integer, Text, DateTime, Index
 from sqlalchemy.orm import Session
-from src.api.deps import Base
+from src.db.base import Base
 
 
 class MoodEntry(Base):
     __tablename__ = "mood_entries"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, nullable=False)
+    user_id = Column(Integer, nullable=False, index=True)
     score = Column(Integer, nullable=False)
-    keywords = Column(Text, nullable=False, default="[]")
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    notes = Column(Text, default="")
+    tags = Column(Text, default="[]")
+    timestamp = Column(DateTime, default=datetime.utcnow)
 
     __table_args__ = (
-        Index("ix_mood_user_timestamp", "user_id", "timestamp"),
+        Index("ix_mood_user_ts", "user_id", "timestamp"),
     )
 
-    @property
-    def keywords_list(self) -> list[str]:
-        return json.loads(self.keywords)
-
     @classmethod
-    def get_weekly_average(cls, db: Session, user_id: int) -> float | None:
-        since = datetime.utcnow() - timedelta(days=7)
-        rows = (
+    def get_recent(cls, db: Session, user_id: int, days: int = 30):
+        since = datetime.utcnow() - timedelta(days=days)
+        return (
             db.query(cls)
             .filter(cls.user_id == user_id, cls.timestamp >= since)
+            .order_by(cls.timestamp.desc())
             .all()
         )
-        if not rows:
-            return None
-        return round(sum(r.score for r in rows) / len(rows), 2)
 
-    @classmethod
-    def save(
-        cls, db: Session, user_id: int, score: int, keywords: list[str]
-    ) -> "MoodEntry":
-        entry = cls(
-            user_id=user_id,
-            score=score,
-            keywords=json.dumps(keywords, ensure_ascii=False),
-        )
-        db.add(entry)
-        db.commit()
-        db.refresh(entry)
-        return entry
+    def get_tags(self) -> list:
+        try:
+            return json.loads(self.tags)
+        except Exception:
+            return []
