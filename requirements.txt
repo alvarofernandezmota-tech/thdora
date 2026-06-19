@@ -1,10 +1,12 @@
-# THDORA v0.22.0 — dependencias de producción
+# THDORA v0.22.1 — dependencias de producción
 
 # ── Telegram ───────────────────────────────────────
 python-telegram-bot[job-queue]>=21.0
 
 # ── API ───────────────────────────────────────────
-fastapi>=0.111.0
+# Fijado <0.137 por bug de compatibilidad con prometheus-fastapi-instrumentator
+# https://github.com/trallnag/prometheus-fastapi-instrumentator/issues/XXX
+fastapi>=0.111.0,<0.137.0
 uvicorn[standard]>=0.29.0
 httpx>=0.27.0
 
