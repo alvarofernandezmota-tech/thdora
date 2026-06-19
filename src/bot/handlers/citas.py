@@ -12,51 +12,16 @@ Flujo /nueva con franjas:
     NUEVA_TYPE       → tipo [médica / personal / trabajo / otra]
     NUEVA_NOTES      → notas o /skip
 
-Detalle del estado NUEVA_CONFLICT (v0.15.1):
-    Cuando la API detecta solapamiento (check_appointment_conflict devuelve
-    la cita existente), el bot muestra:
-      1. Nombre y rango completo de la cita que bloquea: Dentista (17:00–18:00)
-      2. Horario visual del día mediante _build_day_schedule (importado de nlp.py)
-         con el slot solicitado marcado como ⚠️.
-    El usuario puede entonces elegir cambiar hora o crear de todas formas.
-
-Flujo editar cita (build_edit_apt_handler):
-    Entrada: callback ae_{date_str}_{index}
-    EDIT_APT_FIELD   → el usuario elige qué campo editar (botones)
-    EDIT_APT_TIME    → nueva hora (HH:MM) — comprueba conflicto igual que /nueva
-    EDIT_APT_NOMBRE  → nuevo nombre
-    EDIT_APT_TYPE    → nuevo tipo (botones)
-    EDIT_APT_NOTES   → nuevas notas
-    Guarda y vuelve al día.
-
-Comprobación de solapamiento (v0.15.1):
-    Tanto /nueva como editar hora usan la misma función _check_and_show_conflict.
-    Esta función llama a api.check_appointment_conflict (que a su vez usa
-    _find_overlap en appointments.py con duración real de 60 min) y, si hay
-    conflicto, monta el mensaje con nombre + rango + horario visual del día.
-
-Scheduler (F12):
-    Al crear una cita  → schedule_apt_reminders()
-    Al borrar una cita → cancel_apt_reminders()
-    Al editar la hora  → cancel + re-schedule
-
-Nota sobre callback_data con fechas:
-    Los prefijos ae_, ad_, adc_ usan el patrón {prefix}{date_str}_{index}.
-    La fecha contiene guiones (2026-04-13), así que NO usar split('_', 2).
-    Se extrae con: data[len(prefix):] y luego rsplit('_', 1).
-
-Cambios v0.16 (2026-04-23):
-    - cb_apt_delete: muestra nombre + hora de la cita antes de pedir confirmación
-      (UX: el usuario sabe exactamente qué va a borrar — tarea 1.3)
-
-Fixes v0.16.1 (2026-04-27):
-    - B1: franja_labels corregido 🏆→🌆 para consistencia con _kb_franjas()
-    - B6: hora_ver_cuartos ahora usa la hora ya seleccionada si existe
+Fixes v0.17 (2026-06-20):
+    - B12-B16: todas las llamadas a api.* corregidas con user_id obligatorio
+               y firmas correctas según ThdoraApiClient v5
+    - B16: check_appointment_conflict no existe en api_client → detección
+           de solapamiento implementada localmente con get_appointments
 """
 
 import re
 import logging
-from datetime import date
+from datetime import date, datetime
 from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
@@ -83,7 +48,7 @@ logger = logging.getLogger(__name__)
 api    = ThdoraApiClient()
 
 _RE_TIME = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)$")
-_DEFAULT_DURATION = 60  # minutos, igual que en appointments.py
+_DEFAULT_DURATION = 60  # minutos
 
 # ── Estados ConversationHandler /nueva ───────────────────────────────
 (
@@ -103,20 +68,34 @@ EDIT_APT_FIELD, EDIT_APT_TIME, EDIT_APT_NOMBRE, EDIT_APT_TYPE, EDIT_APT_NOTES = 
 
 
 def _parse_apt_callback(prefix: str, data: str):
-    """
-    Extrae (date_str, index) de un callback_data con formato:
-        {prefix}{date_str}_{index}
-    Ejemplo: 'ae_2026-04-13_0' con prefix='ae_' → ('2026-04-13', 0)
-
-    NO usar split('_', 2) porque la fecha contiene guiones.
-    """
     rest = data[len(prefix):]
     date_str, idx_str = rest.rsplit("_", 1)
     return date_str, int(idx_str)
 
 
+def _find_overlap(apts: list, time_str: str, duration: int = 60) -> Optional[dict]:
+    """Detecta solapamiento local: devuelve la cita que solapa con time_str o None."""
+    try:
+        h, m = map(int, time_str.split(":"))
+        new_start = h * 60 + m
+        new_end   = new_start + duration
+    except Exception:
+        return None
+    for apt in apts:
+        t = apt.get("time", "")
+        try:
+            ah, am = map(int, t.split(":"))
+            apt_start = ah * 60 + am
+            apt_end   = apt_start + duration
+            if new_start < apt_end and new_end > apt_start:
+                return apt
+        except Exception:
+            continue
+    return None
+
+
 # ═══════════════════════════════════════════════════════════════════════
-# HELPER DE CONFLICTO (v0.15.1)
+# HELPER DE CONFLICTO (v0.17 — detección local, sin endpoint externo)
 # ═══════════════════════════════════════════════════════════════════════
 
 async def _check_and_show_conflict(
@@ -124,35 +103,23 @@ async def _check_and_show_conflict(
     context: ContextTypes.DEFAULT_TYPE,
     date_str: str,
     time_str: str,
+    user_id: int,
     is_message: bool = False,
 ) -> Optional[int]:
-    """
-    Comprueba solapamiento llamando a la API y, si lo hay, muestra:
-      - Nombre y rango de la cita existente (ej: Dentista 17:00–18:00)
-      - Horario visual del día con el slot solicitado marcado como ⚠️
-
-    Devuelve NUEVA_CONFLICT si hay conflicto, None si no.
-    Usado tanto en /nueva como en editar hora para mantener consistencia.
-
-    Diseño de degradación elegante:
-      Si la API falla, devuelve None y el flujo continúa sin bloquear al usuario.
-    """
     try:
-        conflict = await api.check_appointment_conflict(date_str, time_str)
+        apts = await api.get_appointments(date_str, user_id)
     except Exception:
         return None
 
+    conflict = _find_overlap(apts, time_str, _DEFAULT_DURATION)
     if not conflict:
         return None
 
-    # Nombre de la cita que bloquea el slot
-    nc       = conflict.get("name") or conflict.get("type", "cita")
-    ct       = conflict.get("time", "?")
-    ct_end   = _end_time(ct, _DEFAULT_DURATION)
+    nc     = conflict.get("name") or conflict.get("type", "cita")
+    ct     = conflict.get("time", "?")
+    ct_end = _end_time(ct, _DEFAULT_DURATION)
 
-    # Horario visual del día con el slot solicitado marcado como ⚠️
     try:
-        apts  = await api.get_appointments(date_str)
         sched = _build_day_schedule(apts, date_str, highlight_time=time_str, duration=_DEFAULT_DURATION)
         sched_block = f"\n\n{sched}"
     except Exception:
@@ -175,29 +142,16 @@ async def _check_and_show_conflict(
 # ═══════════════════════════════════════════════════════════════════════
 
 async def cmd_citas(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Handler del comando /citas. Muestra las citas de una fecha (hoy por defecto).
-
-    Acepta un argumento opcional: /citas mañana, /citas 2026-05-01, etc.
-    Limpia el contexto acumulativo antes de mostrar la vista.
-    """
     from src.bot.utils.accum import _clean_acum_context
     _clean_acum_context(context)
+    user_id  = update.effective_user.id
     date_str = _parse_date_arg(context.args[0] if context.args else None)
-    await _show_citas(update.message, date_str)
+    await _show_citas(update.message, date_str, user_id)
 
 
-async def _show_citas(msg, date_str: str) -> None:
-    """Muestra la lista de citas de date_str con botones de detalle, editar y borrar.
-
-    Si no hay citas muestra un mensaje vacío con teclado de navegación.
-    Cada cita se muestra con sus botones inline: detalle ⏰, editar ✏️, borrar 🗑️.
-
-    Args:
-        msg:      Objeto message de Telegram donde enviar la respuesta.
-        date_str: Fecha en formato YYYY-MM-DD.
-    """
+async def _show_citas(msg, date_str: str, user_id: int) -> None:
     try:
-        apts = await api.get_appointments(date_str)
+        apts = await api.get_appointments(date_str, user_id)
     except ApiError:
         await msg.reply_text("⚠️ Error al conectar con la API.")
         return
@@ -234,27 +188,20 @@ async def _show_citas(msg, date_str: str) -> None:
 
 
 async def cb_citas_nav(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Callback para navegar entre días en la vista de citas.
-
-    Responde al patrón citas_nav_{date_str} de los botones de navegación.
-    """
-    query = update.callback_query
+    query    = update.callback_query
     await query.answer()
+    user_id  = query.from_user.id
     date_str = query.data.replace("citas_nav_", "")
-    await _show_citas(query.message, date_str)
+    await _show_citas(query.message, date_str, user_id)
 
 
 async def cb_cita_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Callback para ver el detalle completo de una cita concreta.
-
-    Muestra todos los campos: fecha, hora, nombre, tipo y notas.
-    Patrón: cita_detail_{date_str}_{index}.
-    """
-    query = update.callback_query
+    query    = update.callback_query
     await query.answer()
+    user_id  = query.from_user.id
     date_str, idx = _parse_apt_callback("cita_detail_", query.data)
     try:
-        apts = await api.get_appointments(date_str)
+        apts = await api.get_appointments(date_str, user_id)
     except ApiError:
         await query.message.reply_text("⚠️ Error al obtener la cita.")
         return
@@ -286,18 +233,16 @@ async def cb_cita_detail(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 # ═══════════════════════════════════════════════════════════════════════
 
 async def cb_apt_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """
-    Primer paso del borrado: muestra nombre + hora de la cita y pide confirmación.
-    """
-    query = update.callback_query
+    query    = update.callback_query
     await query.answer()
+    user_id  = query.from_user.id
     date_str, idx = _parse_apt_callback("ad_", query.data)
 
     nombre = "cita"
     hora   = "?"
     tipo   = ""
     try:
-        apts = await api.get_appointments(date_str)
+        apts = await api.get_appointments(date_str, user_id)
         apt  = next((a for a in apts if a.get("index") == idx), None)
         if apt:
             nombre = apt.get("name", "") or apt.get("type", "cita")
@@ -316,19 +261,14 @@ async def cb_apt_delete(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 async def cb_apt_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
-    """Confirma y ejecuta el borrado de la cita. Cancela sus reminders programados.
-
-    Patrón: adc_{date_str}_{apt_id}. Si la cita ya no existe responde con mensaje
-    informativo en lugar de error.
-    """
-    query = update.callback_query
+    query    = update.callback_query
     await query.answer()
+    user_id  = query.from_user.id
     date_str, apt_id = _parse_apt_callback("adc_", query.data)
-    user_id = str(query.from_user.id)
     try:
-        ok  = await api.delete_appointment(date_str, apt_id)
+        ok = await api.delete_appointment(date_str, apt_id, user_id)
         if ok:
-            cancel_apt_reminders(user_id, apt_id)
+            cancel_apt_reminders(str(user_id), apt_id)
         txt = "🗑️ Cita eliminada\\." if ok else "⚠️ Cita no encontrada \\(ya borrada\\)\\."
         await query.edit_message_text(
             txt, parse_mode="Markdown",
@@ -343,7 +283,6 @@ async def cb_apt_delete_confirm(update: Update, context: ContextTypes.DEFAULT_TY
 # ═══════════════════════════════════════════════════════════════════════
 
 async def nueva_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Entry point de /nueva invocado por comando. Pide la fecha como primer paso."""
     context.user_data.clear()
     await update.message.reply_text(
         "📅 *Nueva cita — paso 1/6*\n\n¿Para qué fecha?\n`hoy`, `mañana`, `27/03`…",
@@ -353,15 +292,11 @@ async def nueva_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int
 
 
 async def nueva_start_desde_boton(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Entry point de /nueva desde botón quick_nueva_{fecha}. Salta el paso de fecha."""
     query = update.callback_query
     await query.answer()
     context.user_data.clear()
     data = query.data
-    if data.startswith("quick_nueva_"):
-        fecha = data.replace("quick_nueva_", "")
-    else:
-        fecha = str(date.today())
+    fecha = data.replace("quick_nueva_", "") if data.startswith("quick_nueva_") else str(date.today())
     context.user_data["nueva_date"] = fecha
     await query.message.reply_text(
         f"📅 *Nueva cita para {_date_short(fecha)}*\n\n"
@@ -373,10 +308,6 @@ async def nueva_start_desde_boton(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def nueva_recv_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe la fecha libre del usuario y avanza al paso de franja horaria.
-
-    Si la fecha no se puede parsear, pide que la repita.
-    """
     date_str = _parse_date_flex(update.message.text.strip())
     if not date_str:
         await update.message.reply_text(
@@ -395,10 +326,6 @@ async def nueva_recv_date(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def nueva_recv_franja(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe la franja elegida (Mañana/Tarde/Noche/Exacta) y muestra las horas disponibles.
-
-    Si el usuario elige ✏️ Exacta, salta directamente al estado NUEVA_TIME.
-    """
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -410,7 +337,6 @@ async def nueva_recv_franja(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         return NUEVA_TIME
     franja_key = data.replace("franja_", "")
     context.user_data["nueva_franja"] = franja_key
-    # FIX B1: emoji corregido 🏆 → 🌆 para consistencia con _kb_franjas()
     franja_labels = {"manana": "🌅 Mañana", "tarde": "🌆 Tarde", "noche": "🌙 Noche"}
     label = franja_labels.get(franja_key, "")
     await query.edit_message_text(
@@ -423,11 +349,6 @@ async def nueva_recv_franja(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def nueva_recv_hora_punto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe la hora en punto seleccionada y avanza a elegir cuartos o a hora exacta.
-
-    Opciones de callback: hora_punto_{H}, hora_ver_cuartos, hora_exacta.
-    FIX B6: hora_ver_cuartos usa la hora ya seleccionada si existe en user_data.
-    """
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -438,7 +359,6 @@ async def nueva_recv_hora_punto(update: Update, context: ContextTypes.DEFAULT_TY
         return NUEVA_TIME
     if data == "hora_ver_cuartos":
         franja = context.user_data.get("nueva_franja", "manana")
-        # FIX B6: usar la hora ya seleccionada si existe; si no, inicio de franja
         _franja_inicio = {"manana": 6, "tarde": 14, "noche": 22}
         hora_inicio = context.user_data.get("nueva_hora_temp") or _franja_inicio.get(franja, 6)
         context.user_data["nueva_hora_temp"] = hora_inicio
@@ -459,10 +379,6 @@ async def nueva_recv_hora_punto(update: Update, context: ContextTypes.DEFAULT_TY
 
 
 async def nueva_recv_hora_cuarto(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe el cuarto de hora elegido (hora_cuarto_{HH:MM}) y avanza.
-
-    Si el usuario pulsa hora_exacta, va a NUEVA_TIME para escribir manualmente.
-    """
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -476,10 +392,6 @@ async def nueva_recv_hora_cuarto(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def nueva_recv_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe la hora escrita manualmente (HH:MM) y avanza al paso siguiente.
-
-    Valida el formato con _RE_TIME. Si no es válido pide corrección.
-    """
     text = update.message.text.strip()
     if not _RE_TIME.match(text):
         await update.message.reply_text(
@@ -491,24 +403,13 @@ async def nueva_recv_time(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def _after_time_selected(obj, context, time_str: str, is_message: bool = False) -> int:
-    """Lógica común tras seleccionar hora: comprueba conflicto y avanza a NUEVA_NOMBRE.
-
-    Guarda la hora en user_data, llama a _check_and_show_conflict y si no hay
-    conflicto muestra el mensaje de paso 3/5 (nombre de la cita).
-
-    Args:
-        obj:        Update o CallbackQuery desde el que responder.
-        context:    ContextTypes.DEFAULT_TYPE de PTB.
-        time_str:   Hora en formato HH:MM ya validada.
-        is_message: True si obj.message existe (texto), False si es callback.
-
-    Returns:
-        NUEVA_CONFLICT si hay solapamiento, NUEVA_NOMBRE si no.
-    """
     context.user_data["nueva_time"] = time_str
     date_str = context.user_data.get("nueva_date", str(date.today()))
+    user_id  = context.user_data.get("nueva_user_id", 0)
 
-    result = await _check_and_show_conflict(obj, context, date_str, time_str, is_message=is_message)
+    result = await _check_and_show_conflict(
+        obj, context, date_str, time_str, user_id, is_message=is_message
+    )
     if result is not None:
         return result
 
@@ -521,11 +422,6 @@ async def _after_time_selected(obj, context, time_str: str, is_message: bool = F
 
 
 async def nueva_conflict_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Respuesta del usuario ante un aviso de conflicto de hora.
-
-    aptconf_ok → confirma la hora y avanza a NUEVA_NOMBRE.
-    Cualquier otra opción → vuelve a NUEVA_FRANJA para elegir otra hora.
-    """
     query = update.callback_query
     await query.answer()
     if query.data == "aptconf_ok":
@@ -542,7 +438,6 @@ async def nueva_conflict_response(update: Update, context: ContextTypes.DEFAULT_
 
 
 async def nueva_recv_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe el nombre de la cita y avanza al paso de elección de tipo."""
     nombre = update.message.text.strip()
     if not nombre:
         await update.message.reply_text("❌ El nombre no puede estar vacío\\.", parse_mode="Markdown")
@@ -557,7 +452,6 @@ async def nueva_recv_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def nueva_recv_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe el tipo de cita elegido (botón tipo_{value}) y avanza al paso de notas."""
     query = update.callback_query
     await query.answer()
     apt_type = query.data.replace("tipo_", "")
@@ -570,42 +464,27 @@ async def nueva_recv_type(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 async def nueva_recv_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe las notas del usuario y guarda la cita vía _save_appointment."""
     return await _save_appointment(update, context, update.message.text.strip())
 
 
 async def nueva_skip_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Handler de /skip: guarda la cita sin notas."""
     return await _save_appointment(update, context, "")
 
 
 async def _save_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE, notes: str) -> int:
-    """Llama a la API para crear la cita, programa sus reminders y confirma al usuario.
-
-    Recoge los datos de user_data (fecha, hora, nombre, tipo), llama a
-    api.create_appointment y, si tiene éxito, llama a schedule_apt_reminders
-    con la configuración del usuario. Limpia user_data al finalizar.
-
-    Args:
-        update: Update de PTB.
-        context: ContextTypes.DEFAULT_TYPE.
-        notes:  Notas de la cita (puede ser cadena vacía).
-
-    Returns:
-        ConversationHandler.END siempre.
-    """
+    user_id = update.effective_user.id
     d  = context.user_data.get("nueva_date", str(date.today()))
     t  = context.user_data.get("nueva_time", "")
     nm = context.user_data.get("nueva_nombre", "")
     tp = context.user_data.get("nueva_type", "otra")
     try:
-        result  = await api.create_appointment(d, t, nm, tp, notes)
-        user_id = str(update.effective_user.id)
+        data   = {"time": t, "name": nm, "type": tp, "notes": notes}
+        result = await api.create_appointment(d, data, user_id)
         try:
             cfg = await api.get_user_config(user_id)
             if "date" not in result:
                 result["date"] = result.get("date_str", d)
-            schedule_apt_reminders(update.get_bot(), user_id, result, cfg)
+            schedule_apt_reminders(context.bot, str(user_id), result, cfg)
         except Exception as sched_err:
             logger.warning("No se pudo programar reminder: %s", sched_err)
         await update.message.reply_text(
@@ -630,7 +509,6 @@ async def _save_appointment(update: Update, context: ContextTypes.DEFAULT_TYPE, 
 # ═══════════════════════════════════════════════════════════════════════
 
 def _kb_edit_apt_fields(date_str: str, idx: int) -> InlineKeyboardMarkup:
-    """Teclado para elegir qué campo de la cita editar."""
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("⏰ Hora",    callback_data=f"aedit_time_{date_str}_{idx}")],
         [InlineKeyboardButton("📝 Nombre",  callback_data=f"aedit_name_{date_str}_{idx}")],
@@ -641,18 +519,15 @@ def _kb_edit_apt_fields(date_str: str, idx: int) -> InlineKeyboardMarkup:
 
 
 async def cb_apt_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Entrada al flujo de edición: muestra el resumen de la cita y el menú de campos.
-
-    Patrón: ae_{date_str}_{index}. Guarda la cita actual en user_data para
-    mostrar los valores existentes al editar.
-    """
-    query = update.callback_query
+    query    = update.callback_query
     await query.answer()
+    user_id  = query.from_user.id
     date_str, idx = _parse_apt_callback("ae_", query.data)
-    context.user_data["edit_apt_date"]  = date_str
-    context.user_data["edit_apt_index"] = idx
+    context.user_data["edit_apt_date"]    = date_str
+    context.user_data["edit_apt_index"]   = idx
+    context.user_data["edit_apt_user_id"] = user_id
     try:
-        apts = await api.get_appointments(date_str)
+        apts = await api.get_appointments(date_str, user_id)
         apt  = next((a for a in apts if a.get("index") == idx), None)
     except ApiError:
         apt = None
@@ -675,10 +550,9 @@ async def cb_apt_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def cb_apt_edit_field_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """El usuario eligió qué campo editar."""
     query = update.callback_query
     await query.answer()
-    data  = query.data  # aedit_{field}_{date_str}_{idx}
+    data  = query.data
     rest  = data[len("aedit_"):]
     field, rest2 = rest.split("_", 1)
     date_str, idx = rest2.rsplit("_", 1)
@@ -710,10 +584,6 @@ async def cb_apt_edit_field_chosen(update: Update, context: ContextTypes.DEFAULT
 
 
 async def cb_apt_edit_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe la nueva hora (HH:MM), comprueba conflicto y ejecuta la actualización.
-
-    Si hay conflicto, guarda edit_conflict_pending y vuelve a NUEVA_CONFLICT.
-    """
     text = update.message.text.strip()
     if not _RE_TIME.match(text):
         await update.message.reply_text(
@@ -723,10 +593,11 @@ async def cb_apt_edit_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return EDIT_APT_TIME
 
     date_str = context.user_data.get("edit_apt_date", "")
+    user_id  = context.user_data.get("edit_apt_user_id", update.effective_user.id)
     context.user_data["edit_apt_time"] = text
 
     result = await _check_and_show_conflict(
-        update, context, date_str, text, is_message=True
+        update, context, date_str, text, user_id, is_message=True
     )
     if result is not None:
         context.user_data["edit_conflict_pending"] = True
@@ -736,18 +607,11 @@ async def cb_apt_edit_time(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def cb_apt_edit_conflict_response(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Respuesta al conflicto durante la edición de hora.
-
-    aptconf_ok → confirma la nueva hora y ejecuta la actualización.
-    Cualquier otra opción → pide que escriba otra hora.
-    """
     query = update.callback_query
     await query.answer()
     context.user_data.pop("edit_conflict_pending", None)
-
     if query.data == "aptconf_ok":
         return await _do_update_apt_from_query(query, context)
-
     await query.edit_message_text(
         "⏰ *Nueva hora* \\(HH:MM, 24h\\):", parse_mode="Markdown"
     )
@@ -755,13 +619,11 @@ async def cb_apt_edit_conflict_response(update: Update, context: ContextTypes.DE
 
 
 async def cb_apt_edit_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe el nuevo nombre del mensaje y actualiza la cita."""
     context.user_data["edit_apt_nombre"] = update.message.text.strip()
     return await _do_update_apt(update, context)
 
 
 async def cb_apt_edit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe el nuevo tipo desde el botón (etipo_{value}) y actualiza la cita."""
     query = update.callback_query
     await query.answer()
     context.user_data["edit_apt_type"] = query.data.replace("etipo_", "")
@@ -769,35 +631,35 @@ async def cb_apt_edit_type(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 
 async def cb_apt_edit_notes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Recibe las nuevas notas del mensaje y actualiza la cita."""
     context.user_data["edit_apt_notes"] = update.message.text.strip()
     return await _do_update_apt(update, context)
 
 
 async def _do_update_apt(update: Update, context) -> int:
-    """Guarda el campo editado y vuelve al día."""
     date_str = context.user_data.get("edit_apt_date", "")
     index    = context.user_data.get("edit_apt_index", 0)
-    user_id  = str(update.effective_user.id)
+    user_id  = context.user_data.get("edit_apt_user_id", update.effective_user.id)
+    data = {
+        k: v for k, v in {
+            "time":  context.user_data.get("edit_apt_time"),
+            "name":  context.user_data.get("edit_apt_nombre"),
+            "type":  context.user_data.get("edit_apt_type"),
+            "notes": context.user_data.get("edit_apt_notes"),
+        }.items() if v is not None
+    }
     try:
-        result = await api.update_appointment(
-            date_str, index,
-            time=context.user_data.get("edit_apt_time"),
-            name=context.user_data.get("edit_apt_nombre"),
-            apt_type=context.user_data.get("edit_apt_type"),
-            notes=context.user_data.get("edit_apt_notes"),
-        )
+        result = await api.update_appointment(date_str, index, data, user_id)
         if context.user_data.get("edit_apt_time") and result:
             try:
-                cancel_apt_reminders(user_id, index)
+                cancel_apt_reminders(str(user_id), index)
                 cfg = await api.get_user_config(user_id)
                 if "date" not in result:
                     result["date"] = result.get("date_str", date_str)
-                schedule_apt_reminders(update.get_bot(), user_id, result, cfg)
+                schedule_apt_reminders(context.bot, str(user_id), result, cfg)
             except Exception as sched_err:
                 logger.warning("No se pudo reprogramar reminder: %s", sched_err)
         await update.message.reply_text(
-            f"✅ *Cita actualizada\\.*",
+            "✅ *Cita actualizada\\.*",
             parse_mode="Markdown",
             reply_markup=_kb_back(date_str, "citas"),
         )
@@ -811,19 +673,21 @@ async def _do_update_apt(update: Update, context) -> int:
 
 
 async def _do_update_apt_from_query(query, context) -> int:
-    """Versión de _do_update_apt para cuando la respuesta viene de un CallbackQuery."""
     date_str = context.user_data.get("edit_apt_date", "")
     index    = context.user_data.get("edit_apt_index", 0)
+    user_id  = context.user_data.get("edit_apt_user_id", query.from_user.id)
+    data = {
+        k: v for k, v in {
+            "time":  context.user_data.get("edit_apt_time"),
+            "name":  context.user_data.get("edit_apt_nombre"),
+            "type":  context.user_data.get("edit_apt_type"),
+            "notes": context.user_data.get("edit_apt_notes"),
+        }.items() if v is not None
+    }
     try:
-        await api.update_appointment(
-            date_str, index,
-            time=context.user_data.get("edit_apt_time"),
-            name=context.user_data.get("edit_apt_nombre"),
-            apt_type=context.user_data.get("edit_apt_type"),
-            notes=context.user_data.get("edit_apt_notes"),
-        )
+        await api.update_appointment(date_str, index, data, user_id)
         await query.edit_message_text(
-            f"✅ *Cita actualizada\\.*",
+            "✅ *Cita actualizada\\.*",
             parse_mode="Markdown",
             reply_markup=_kb_back(date_str, "citas"),
         )
@@ -840,7 +704,6 @@ async def _do_update_apt_from_query(query, context) -> int:
 # ═══════════════════════════════════════════════════════════════════════
 
 def build_nueva_handler() -> ConversationHandler:
-    """Construye y devuelve el ConversationHandler completo para /nueva."""
     return ConversationHandler(
         entry_points=[
             CommandHandler("nueva", nueva_start),
@@ -866,7 +729,6 @@ def build_nueva_handler() -> ConversationHandler:
 
 
 def build_edit_apt_handler() -> ConversationHandler:
-    """Construye y devuelve el ConversationHandler completo para editar cita."""
     return ConversationHandler(
         entry_points=[CallbackQueryHandler(cb_apt_edit_start, pattern=r"^ae_")],
         states={
@@ -885,7 +747,6 @@ def build_edit_apt_handler() -> ConversationHandler:
 
 
 async def _cmd_cancelar_inline(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Fallback: cancela la conversación activa y muestra botón de menú."""
     context.user_data.clear()
     await update.message.reply_text(
         "❌ Operación cancelada\\.",
