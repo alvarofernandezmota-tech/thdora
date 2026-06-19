@@ -3,11 +3,11 @@ Handlers de hábitos: /habitos, /habito, borrar, editar, sumar.
 
 Fixes v0.17 (2026-06-20):
     - B17-B21: todas las llamadas a api.* corregidas con user_id obligatorio
+    - cb_hab_edit_field, _do_edit_habit, factories completos
 """
 
 import logging
 from datetime import date
-from typing import Optional
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import (
@@ -76,7 +76,9 @@ async def _show_habitos(msg, date_str: str, user_id: int) -> None:
         parse_mode="Markdown",
         reply_markup=nav,
     )
-    items = habits.items() if isinstance(habits, dict) else [(h.get("habit", ""), h.get("value", "")) for h in habits]
+    items = habits.items() if isinstance(habits, dict) else [
+        (h.get("habit", ""), h.get("value", "")) for h in habits
+    ]
     for h, v in items:
         await msg.reply_text(
             f"• *{h}*: `{v}`",
@@ -144,7 +146,9 @@ async def cb_hab_add_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         return
     try:
         habits      = await api.get_habits(date_str, user_id)
-        existing    = habits.get(habit) if isinstance(habits, dict) else next((h.get("value") for h in habits if h.get("habit") == habit), None)
+        existing    = habits.get(habit) if isinstance(habits, dict) else next(
+            (h.get("value") for h in habits if h.get("habit") == habit), None
+        )
         final_value = _accumulate_value(existing, new_input)
         await api.log_habit(date_str, habit, final_value, user_id)
         op = "acumulado" if new_input.startswith("+") else "actualizado"
@@ -169,9 +173,8 @@ async def habito_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> in
     context.user_data.clear()
     context.user_data["habito_date"]    = str(date.today())
     context.user_data["habito_user_id"] = update.effective_user.id
-    fecha_label = _date_short(str(date.today()))
     await update.message.reply_text(
-        f"📊 *Nuevo hábito para {fecha_label}*\n\n✏️ *Paso 1/2* — ¿Cómo se llama el hábito?",
+        f"📊 *Nuevo hábito para {_date_short(str(date.today()))}*\n\n✏️ *Paso 1/2* — ¿Cómo se llama el hábito?",
         parse_mode="Markdown",
     )
     return HABITO_NOMBRE
@@ -185,9 +188,8 @@ async def habito_start_desde_boton(update: Update, context: ContextTypes.DEFAULT
     fecha = data.replace("quick_habito_", "") if data.startswith("quick_habito_") else str(date.today())
     context.user_data["habito_date"]    = fecha
     context.user_data["habito_user_id"] = query.from_user.id
-    fecha_label = _date_short(fecha)
     await query.message.reply_text(
-        f"📊 *Nuevo hábito para {fecha_label}*\n\n✏️ *Paso 1/2* — ¿Cómo se llama el hábito?",
+        f"📊 *Nuevo hábito para {_date_short(fecha)}*\n\n✏️ *Paso 1/2* — ¿Cómo se llama el hábito?",
         parse_mode="Markdown",
     )
     return HABITO_NOMBRE
@@ -249,7 +251,9 @@ async def _save_habito(msg, context, new_input: str) -> int:
     user_id  = context.user_data.get("habito_user_id", 0)
     try:
         habits   = await api.get_habits(date_str, user_id)
-        existing = habits.get(nombre) if isinstance(habits, dict) else next((h.get("value") for h in habits if h.get("habit") == nombre), None)
+        existing = habits.get(nombre) if isinstance(habits, dict) else next(
+            (h.get("value") for h in habits if h.get("habit") == nombre), None
+        )
         if existing and not new_input.startswith("+"):
             context.user_data["habito_new_val"]      = new_input
             context.user_data["habito_existing_val"] = existing
@@ -331,7 +335,9 @@ async def cb_hab_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     context.user_data["edit_hab_user_id"] = user_id
     try:
         habits = await api.get_habits(date_str, user_id)
-        valor  = habits.get(habit, "—") if isinstance(habits, dict) else next((h.get("value", "—") for h in habits if h.get("habit") == habit), "—")
+        valor  = habits.get(habit, "—") if isinstance(habits, dict) else next(
+            (h.get("value", "—") for h in habits if h.get("habit") == habit), "—"
+        )
     except ApiError:
         valor = "—"
     await query.edit_message_text(
@@ -345,4 +351,147 @@ async def cb_hab_edit_start(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 
 async def cb_hab_edit_field(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    query = update
+    """El usuario elige qué campo editar: nombre o valor."""
+    query = update.callback_query
+    await query.answer()
+    data  = query.data  # hedit_name_{date}_{habit} o hedit_val_{date}_{habit}
+
+    if data.startswith("hedit_name_"):
+        rest     = data[len("hedit_name_"):]
+        date_str = rest[:10]
+        habit    = rest[11:]
+        context.user_data["edit_hab_date"]   = date_str
+        context.user_data["edit_hab_nombre"] = habit
+        await query.edit_message_text(
+            f"📝 *Nuevo nombre para '{habit}'*:\n\nEscribe el nuevo nombre:",
+            parse_mode="Markdown",
+        )
+        return EDIT_HAB_NOMBRE
+
+    if data.startswith("hedit_val_"):
+        rest     = data[len("hedit_val_"):]
+        date_str = rest[:10]
+        habit    = rest[11:]
+        context.user_data["edit_hab_date"]   = date_str
+        context.user_data["edit_hab_nombre"] = habit
+        await query.edit_message_text(
+            f"📊 *Nuevo valor para '{habit}'*:\n\nEscribe el nuevo valor:",
+            parse_mode="Markdown",
+        )
+        return EDIT_HAB_VALUE
+
+    return ConversationHandler.END
+
+
+async def cb_hab_edit_nombre(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe el nuevo nombre y lo aplica renombrando: borra el viejo + crea el nuevo."""
+    nuevo_nombre = update.message.text.strip()
+    if not nuevo_nombre:
+        await update.message.reply_text("❌ El nombre no puede estar vacío\\.", parse_mode="Markdown")
+        return EDIT_HAB_NOMBRE
+    return await _do_edit_habit(update, context, new_nombre=nuevo_nombre)
+
+
+async def cb_hab_edit_value(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Recibe el nuevo valor y actualiza el hábito."""
+    nuevo_valor = update.message.text.strip()
+    if not nuevo_valor:
+        await update.message.reply_text("❌ El valor no puede estar vacío\\.", parse_mode="Markdown")
+        return EDIT_HAB_VALUE
+    return await _do_edit_habit(update, context, new_value=nuevo_valor)
+
+
+async def _do_edit_habit(
+    update: Update, context, new_nombre: str = None, new_value: str = None
+) -> int:
+    """Aplica la edición del hábito vía API con user_id correcto."""
+    date_str      = context.user_data.get("edit_hab_date", "")
+    nombre_orig   = context.user_data.get("edit_hab_nombre", "")
+    user_id       = context.user_data.get("edit_hab_user_id", update.effective_user.id)
+    try:
+        if new_nombre and new_nombre != nombre_orig:
+            # Renombrar: leer valor actual, borrar, recrear con nuevo nombre
+            habits   = await api.get_habits(date_str, user_id)
+            valor    = habits.get(nombre_orig) if isinstance(habits, dict) else next(
+                (h.get("value") for h in habits if h.get("habit") == nombre_orig), ""
+            )
+            await api.delete_habit(date_str, nombre_orig, user_id)
+            await api.log_habit(date_str, new_nombre, valor or "", user_id)
+            msg_txt = f"✅ Hábito renombrado: *{nombre_orig}* → *{new_nombre}*"
+        else:
+            # Solo actualizar valor
+            valor = new_value or ""
+            await api.update_habit(date_str, nombre_orig, valor, user_id)
+            msg_txt = f"✅ *{nombre_orig}* actualizado a `{valor}`"
+        await update.message.reply_text(
+            msg_txt,
+            parse_mode="Markdown",
+            reply_markup=_kb_back(date_str, "habitos"),
+        )
+    except ApiError:
+        await update.message.reply_text(
+            "⚠️ No pude conectar con la API\\. Asegúrate: `make run-api`",
+            parse_mode="Markdown",
+        )
+    context.user_data.clear()
+    return ConversationHandler.END
+
+
+# ════════════════════════════════════════════════════════════════════════
+# FACTORIES
+# ════════════════════════════════════════════════════════════════════════
+
+def build_habito_handler() -> ConversationHandler:
+    """ConversationHandler para /habito — registrar un nuevo hábito."""
+    return ConversationHandler(
+        entry_points=[
+            CommandHandler("habito", habito_start),
+            CallbackQueryHandler(habito_start_desde_boton, pattern=r"^quick_habito"),
+        ],
+        states={
+            HABITO_NOMBRE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, habito_recv_nombre_text),
+            ],
+            HABITO_VALUE: [
+                CallbackQueryHandler(habito_recv_value_inline, pattern=r"^hval_"),
+                MessageHandler(filters.TEXT & ~filters.COMMAND, habito_recv_value_text),
+            ],
+            HABITO_CONFLICT: [
+                CallbackQueryHandler(habito_conflict_response, pattern=r"^hconf_"),
+            ],
+        },
+        fallbacks=[CommandHandler("cancelar", _cmd_cancelar_hab)],
+        name="nuevo_habito", persistent=False, per_message=False,
+    )
+
+
+def build_edit_hab_handler() -> ConversationHandler:
+    """ConversationHandler para editar hábito existente."""
+    return ConversationHandler(
+        entry_points=[CallbackQueryHandler(cb_hab_edit_start, pattern=r"^he_")],
+        states={
+            EDIT_HAB_FIELD: [
+                CallbackQueryHandler(cb_hab_edit_field, pattern=r"^hedit_"),
+            ],
+            EDIT_HAB_NOMBRE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, cb_hab_edit_nombre),
+            ],
+            EDIT_HAB_VALUE: [
+                MessageHandler(filters.TEXT & ~filters.COMMAND, cb_hab_edit_value),
+            ],
+        },
+        fallbacks=[CommandHandler("cancelar", _cmd_cancelar_hab)],
+        name="editar_habito", persistent=False, per_message=False,
+    )
+
+
+async def _cmd_cancelar_hab(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.clear()
+    await update.message.reply_text(
+        "❌ Operación cancelada\\.",
+        parse_mode="Markdown",
+        reply_markup=InlineKeyboardMarkup([[
+            InlineKeyboardButton("🏠 Menú", callback_data="menu_home")
+        ]]),
+    )
+    return ConversationHandler.END

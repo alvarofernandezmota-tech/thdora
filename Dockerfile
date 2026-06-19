@@ -1,71 +1,64 @@
-# ──────────────────────────────────────────────────────────────────────────
-# THDORA — Dockerfile
-# Imagen única usada tanto por el servicio `api` como por `bot`.
-# El punto de entrada se elige en docker-compose.yml mediante `command`.
-#
-# Build:
-#   docker build -t thdora .
-#
-# La imagen NO incluye:
-#   • tests/ ni docs/ (excluidos en .dockerignore)
-#   • data/ (montada como volumen externo)
-#   • .env (pasado como env_file en docker-compose)
-# ──────────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────────
+# THDORA — Dockerfile multi-stage
+# Stage 1: builder (instala deps)
+# Stage 2: runtime (imagen final mínima)
+# ──────────────────────────────────────────────────────────────────
 
-# ─ Stage 1: dependencias ────────────────────────────────────────────────────
+# ─ Stage 1: builder ──────────────────────────────────────────────
 FROM python:3.12-slim AS builder
-
-WORKDIR /build
-
-# Dependencias de sistema para compilar + ffmpeg para voice_handler
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc \
-    libsqlite3-dev \
-    ffmpeg \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
-
-
-# ─ Stage 2: imagen final ─────────────────────────────────────────────────────
-FROM python:3.12-slim
-
-# ffmpeg y curl necesarios en runtime (voice_handler + healthchecks)
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ffmpeg \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
-
-# Usuario no-root con UID/GID 1000 para que coincida con el usuario del host
-# y tenga permisos de escritura en el bind mount ./data
-RUN groupadd -g 1000 thdora && useradd -u 1000 -g thdora -s /sbin/nologin thdora
 
 WORKDIR /app
 
-# Copiar deps compiladas del stage builder
+# Instalar dependencias de sistema necesarias para compilar
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc \
+    libpq-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements.txt .
+RUN pip install --upgrade pip && \
+    pip install --prefix=/install --no-cache-dir -r requirements.txt
+
+# ─ Stage 2: runtime ──────────────────────────────────────────────
+FROM python:3.12-slim AS runtime
+
+WORKDIR /app
+
+# Runtime deps mínimas
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    libpq5 \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copiar dependencias instaladas del builder
 COPY --from=builder /install /usr/local
 
 # Copiar código fuente
-COPY src/ ./src/
-COPY pyproject.toml .
+COPY . .
 
-# Carpeta de datos (será montada como volumen — se crea para permisos)
-RUN mkdir -p /app/data /app/logs && chown -R thdora:thdora /app
-
-# Copiar entrypoints
-COPY docker/entrypoint-api.sh /entrypoint-api.sh
-COPY docker/entrypoint-bot.sh /entrypoint-bot.sh
-RUN chmod +x /entrypoint-api.sh /entrypoint-bot.sh
-
+# Usuario no-root por seguridad
+RUN useradd -m -u 1000 thdora && chown -R thdora:thdora /app
 USER thdora
 
-# Variables de entorno por defecto (sobreescribibles en docker-compose)
+# Variables de entorno por defecto (sobreescribibles via .env / docker-compose)
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONPATH=/app \
-    THDORA_API_URL=http://api:8000 \
-    THDORA_DB_PATH=/app/data/thdora.db
+    PYTHONPATH=/app
 
-EXPOSE 8000
+# Healthcheck para el servicio API (usado por docker-compose depends_on)
+HEALTHCHECK --interval=15s --timeout=5s --start-period=30s --retries=3 \
+    CMD curl -f http://localhost:8000/health/live || exit 1
+
+# ──────────────────────────────────────────────────────────────────
+# ENTRYPOINT diferenciado por TARGET (api o bot)
+# Se selecciona en docker-compose.yml via variable CMD o command:
+#   api:  alembic upgrade head && uvicorn ...
+#   bot:  python -m src.bot.main
+# ──────────────────────────────────────────────────────────────────
+ARG SERVICE_TARGET=api
+ENV SERVICE_TARGET=${SERVICE_TARGET}
+
+COPY docker/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]
