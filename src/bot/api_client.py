@@ -40,20 +40,33 @@ def _validate_user_id(user_id: int) -> None:
 
 
 class ThdoraApiClient:
-    """Cliente HTTP asíncrono para la API de THDORA con singleton pattern."""
+    """Cliente HTTP asíncrono para la API de THDORA con singleton pattern.
+
+    Soporta dos formas de uso, ambas comparten la misma conexión httpx
+    (almacenada a nivel de clase) para no abrir un socket por instancia:
+
+        api = ThdoraApiClient()              # uso directo (constructor normal)
+        api = await ThdoraApiClient.get_instance()  # uso explícito del singleton
+    """
 
     _instance: ThdoraApiClient | None = None
     _client: httpx.AsyncClient | None = None
 
     @classmethod
-    async def get_instance(cls) -> ThdoraApiClient:
-        if cls._instance is None:
-            cls._instance = cls()
+    def _ensure_client(cls) -> None:
+        """Crea el httpx.AsyncClient compartido si aún no existe (lazy, idempotente)."""
+        if cls._client is None:
             cls._client = httpx.AsyncClient(
-                base_url=_get_api_base(),  # lazy: se lee al crear la instancia
+                base_url=_get_api_base(),
                 timeout=_TIMEOUT,
                 limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
             )
+
+    @classmethod
+    async def get_instance(cls) -> ThdoraApiClient:
+        if cls._instance is None:
+            cls._instance = cls()
+        cls._ensure_client()
         return cls._instance
 
     @classmethod
@@ -67,6 +80,7 @@ class ThdoraApiClient:
         self, method: str, endpoint: str, user_id: int, **kwargs: Any
     ) -> httpx.Response:
         _validate_user_id(user_id)
+        type(self)._ensure_client()  # garantiza _client aunque se use constructor directo
         params = kwargs.pop("params", {})
         params["user_id"] = user_id
         resp = await self._client.request(method, endpoint, params=params, **kwargs)
@@ -75,6 +89,7 @@ class ThdoraApiClient:
 
     # ── Health ────────────────────────────────────────────────────────────────────
     async def health(self) -> bool:
+        type(self)._ensure_client()
         try:
             resp = await self._client.get("/")
             return resp.status_code == 200
