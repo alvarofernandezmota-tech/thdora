@@ -14,7 +14,7 @@ from alembic import op
 import sqlalchemy as sa
 
 revision = "sprint5_user_id"
-down_revision = None  # ⚠️ AJUSTAR con: alembic history
+down_revision = "001_add_user_id"  # ⚠️ AJUSTAR con: alembic history
 branch_labels = None
 depends_on = None
 
