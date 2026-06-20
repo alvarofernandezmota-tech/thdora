@@ -57,16 +57,16 @@ _PERSISTENCE_PATH = os.path.join("data", "bot_persistence.pkl")
 async def _check_api() -> None:
     """Comprueba disponibilidad de la API. No bloqueante: loguea pero no aborta si falla."""
     api = ThdoraApiClient()
-    for attempt in range(1, 4):  # hasta 3 intentos con backoff
+    for attempt in range(1, 4):
         try:
             ok = await api.health()
             status = "✅" if ok else "⚠️ "
-            logger.info("%s API THDORA en %s", status, api.base_url)
+            logger.info("%s API THDORA lista", status)
             return
         except Exception as exc:
             logger.warning("⏳ API no disponible (intento %d/3): %s", attempt, exc)
             if attempt < 3:
-                await asyncio.sleep(2 ** attempt)  # 2s, 4s
+                await asyncio.sleep(2 ** attempt)
     logger.warning("⚠️  API no disponible tras 3 intentos — el bot arranca igualmente")
 
 
@@ -79,7 +79,7 @@ async def _post_init(application) -> None:
     try:
         from src.agents import build_thdora_graph
         from src.agents.scheduler_tasks import setup_memory_scheduler
-        build_thdora_graph()  # pre-compila y cachea
+        build_thdora_graph()
         setup_memory_scheduler(scheduler)
         logger.info("🧠 LangGraph ThdoraAgent + memoria persistente + scheduler listos")
     except ImportError as exc:
@@ -122,7 +122,8 @@ def build_app(token: str):
     app.add_handler(CallbackQueryHandler(cb_cancel_action,      pattern=r"^cancel_action$"))
     app.add_handler(CallbackQueryHandler(cb_nlp_disambig,       pattern=r"^nlp_disambig|"))
 
-    app.add_handler(voice_handler)
+    # voice_handler es una funcion async, no un BaseHandler — hay que envolverla
+    app.add_handler(MessageHandler(filters.VOICE, voice_handler))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _route_free_text))
 
     app.add_handler(CommandHandler("start",    cmd_start))
@@ -147,7 +148,7 @@ async def _route_free_text(update, context) -> None:
 
 
 def main() -> None:
-    asyncio.run(_check_api())  # no-bloqueante: 3 reintentos, arranca igual si falla
+    asyncio.run(_check_api())
     app = build_app(settings.TELEGRAM_BOT_TOKEN)
     logger.info("🧠 THDORA bot v0.21.0 arrancando (polling)…")
     app.run_polling(drop_pending_updates=True, allowed_updates=["message", "callback_query"])
