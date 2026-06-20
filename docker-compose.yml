@@ -1,22 +1,33 @@
-# THDORA v0.21.2 — Stack completo: api + bot + Prometheus + Grafana
-# Arrancar: docker compose up -d
-# API:       http://localhost:8000
-# Métricas:  http://localhost:9090
-# Grafana:   http://localhost:3000  (admin/admin)
+# THDORA v0.17.0 — Stack completo: api + bot + Prometheus + Grafana
+#
+# Comandos útiles:
+#   docker compose up -d              # arrancar todo
+#   docker compose up -d thdora bot   # solo api + bot
+#   docker compose logs -f thdora     # logs API
+#   docker compose logs -f bot        # logs Bot
+#   docker compose down -v            # parar y limpiar volúmenes
+#
+# Accesos:
+#   API:       http://localhost:8000
+#   API docs:  http://localhost:8000/docs
+#   Métricas:  http://localhost:9090
+#   Grafana:   http://localhost:3000  (admin/admin)
 
 services:
 
-  # ── API ──────────────────────────────────────────────────────────────────────────
+  # ── API FastAPI ──────────────────────────────────────────────────────────────
   thdora:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: thdora
     restart: unless-stopped
-    command: ["/entrypoint-api.sh"]
-    user: "1000:1000"
-    ports:
-      - "8000:8000"
+    environment:
+      SERVICE_TARGET: api
     env_file:
       - .env
+    ports:
+      - "8000:8000"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
@@ -35,31 +46,35 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 20s
-    depends_on:
-      - prometheus
+      start_period: 30s
+    # NO depende de prometheus para no bloquear el arranque
+    networks:
+      - thdora-net
 
-  # ── Bot ──────────────────────────────────────────────────────────────────────────
+  # ── Bot Telegram PTB ─────────────────────────────────────────────────────────
   bot:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: thdora-bot
     restart: unless-stopped
-    command: ["/entrypoint-bot.sh"]
-    user: "1000:1000"
+    environment:
+      SERVICE_TARGET: bot
+      THDORA_API_URL: "http://thdora:8000"
     env_file:
       - .env
-    environment:
-      THDORA_API_URL: "http://thdora:8000"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
     depends_on:
       thdora:
         condition: service_healthy
+    networks:
+      - thdora-net
 
-  # ── Prometheus ─────────────────────────────────────────────────────────────────
+  # ── Prometheus ───────────────────────────────────────────────────────────────
   prometheus:
-    image: prom/prometheus:latest
+    image: prom/prometheus:v2.51.2
     container_name: prometheus
     restart: unless-stopped
     ports:
@@ -72,10 +87,12 @@ services:
       - "--storage.tsdb.path=/prometheus"
       - "--storage.tsdb.retention.time=30d"
       - "--web.enable-lifecycle"
+    networks:
+      - thdora-net
 
-  # ── Grafana ────────────────────────────────────────────────────────────────────
+  # ── Grafana ──────────────────────────────────────────────────────────────────
   grafana:
-    image: grafana/grafana:latest
+    image: grafana/grafana:10.4.2
     container_name: grafana
     restart: unless-stopped
     ports:
@@ -89,7 +106,13 @@ services:
       GF_ANALYTICS_REPORTING_ENABLED: "false"
     depends_on:
       - prometheus
+    networks:
+      - thdora-net
 
 volumes:
   prometheus_data:
   grafana_data:
+
+networks:
+  thdora-net:
+    driver: bridge

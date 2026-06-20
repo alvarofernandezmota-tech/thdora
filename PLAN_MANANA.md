@@ -1,113 +1,117 @@
-# 📋 PLAN DE LANZAMIENTO — THDORA v0.17
-_Actualizado: 2026-06-20 01:20 CEST_
+# 🚀 THDORA — Plan de Deploy (Servidor Madre)
+_Actualizado: 2026-06-20 — v0.17.0 listo en main_
 
-## Estado actual del código
+## ⚡ Estado actual
+- **main**: v0.17.0 completo — todos los bugs B12-B25 corregidos
+- **Tests**: suite completa en `tests/` (pytest-asyncio + AsyncMock)
+- **CI**: GitHub Actions configurado (lint + tests en cada push)
+- **Docker**: stack corregido — `docker-compose.yml` + `Dockerfile` + `entrypoint.sh`
 
-✅ Todos los bugs B12-B25 corregidos y subidos a `main`  
-✅ `habitos.py` completo (ya no truncado)  
-✅ `citas.py` con `_find_overlap()` local (sin dependencia de endpoint inexistente)  
-✅ `config.py` con todas las firmas de API correctas  
-✅ `Dockerfile` multi-stage con entrypoint diferenciado  
-✅ `docker/entrypoint.sh` con `alembic upgrade head` antes de uvicorn  
-✅ `CHANGELOG.md` actualizado a v0.17  
+---
 
-## Pasos para lanzar mañana
+## 🔧 Checklist de deploy en Servidor Madre
 
-### 0. Pre-requisitos (5 min)
-
+### 1. Antes de arrancar (una sola vez)
 ```bash
-# Clonar o hacer pull de main
+# En el servidor, en el directorio del proyecto
 git pull origin main
 
-# Crear .env desde el ejemplo
+# Verificar que .env existe y tiene todas las variables
 cp .env.example .env
+# Editar con los valores reales:
+#   TELEGRAM_TOKEN=...
+#   GROQ_API_KEY=...
+#   SECRET_KEY=...
+#   DATABASE_URL=sqlite:///./data/thdora.db
+#   ALLOWED_USER_ID=tu_telegram_id
+#   THDORA_API_URL=http://thdora:8000  (Docker interno)
 ```
 
-Editar `.env` y rellenar:
-```
-TELEGRAM_TOKEN=tu_token_del_botfather
-DATABASE_URL=sqlite:///./data/thdora.db
-OPENAI_API_KEY=sk-...          # opcional para MVP
-ALLOWED_USER_ID=tu_telegram_id  # /me en @userinfobot
-SECRET_KEY=cualquier_string_aleatorio_32chars
-```
-
-### 1. Build y arranque (3 min)
-
+### 2. Verificar ecosistema antes de construir
 ```bash
-docker compose up --build
+python scripts/autotest.py --fast
 ```
+Debe mostrar `✅` en todos los checks.
 
-Esperar a ver en logs:
-- `✅ Migraciones aplicadas` (servicio thdora/api)
-- `🌐 Arrancando FastAPI...`
-- Bot log: `Bot iniciado. Esperando mensajes...`
-
-### 2. Verificación rápida (2 min)
-
-En Telegram con tu bot:
-```
-/start          → debe responder con menú
-/habito         → flujo 2 pasos, registra un hábito
-/habitos        → lista hábitos de hoy
-/nueva          → flujo cita completo (6 pasos)
-/citas          → lista citas de hoy
-/config         → menú configuración
-```
-
-### 3. Si algo falla
-
+### 3. Construir y arrancar
 ```bash
-# Ver logs en tiempo real
+# Construir imágenes frescas
+docker compose build --no-cache
+
+# Arrancar todo
+docker compose up -d
+
+# Verificar que los servicios están healthy
+docker compose ps
+```
+
+Esperar ~30s a que la API pase a `healthy`. El bot NO arranca hasta que la API esté healthy.
+
+### 4. Verificar logs
+```bash
+# Logs API (debe mostrar alembic + uvicorn OK)
 docker compose logs -f thdora
-docker compose logs -f bot
 
-# Reiniciar solo el bot (sin reconstruir)
+# Logs Bot (debe mostrar PTB polling OK)
+docker compose logs -f bot
+```
+
+### 5. Smoke test manual
+- Abrir Telegram → enviar `/start` al bot
+- Enviar `/citas` → debe mostrar citas del día
+- Enviar `/habitos` → debe mostrar hábitos
+- Enviar texto libre → debe responder vía NLP
+
+---
+
+## 🔐 Secrets necesarios en GitHub Actions
+Para que el CI funcione completamente:
+- `TELEGRAM_TOKEN` — token del bot
+- `GROQ_API_KEY` — API key de Groq
+- `SECRET_KEY` — clave secreta de la app
+- `ALLOWED_USER_ID` — tu Telegram ID
+
+Añadirlos en: `GitHub repo → Settings → Secrets and variables → Actions`
+
+---
+
+## 📋 Flujo de servicios Docker
+```
+prometheus (independiente)
+    ↓
+grafana (depends_on: prometheus)
+
+thdora/API (independiente, healthcheck en /health/live)
+    ↓ [espera: service_healthy]
+bot (arranca solo cuando API está healthy)
+```
+
+## ⚠️ Notas importantes
+- `SERVICE_TARGET=api` en el servicio `thdora`
+- `SERVICE_TARGET=bot` en el servicio `bot`
+- `THDORA_API_URL=http://thdora:8000` en el bot (red interna Docker)
+- El bot **nunca** accede a la BD directamente, solo vía HTTP a la API
+- `alembic upgrade head` se ejecuta automáticamente al arrancar la API
+- Si hay error en alembic, la API no arranca y el bot espera → fácil de detectar en logs
+
+---
+
+## 🐛 Si algo falla
+```bash
+# Ver todos los logs
+docker compose logs
+
+# Reiniciar solo la API
+docker compose restart thdora
+
+# Reiniciar solo el bot
 docker compose restart bot
 
-# Acceder a la BD directamente
-docker compose exec thdora sqlite3 /app/data/thdora.db ".tables"
+# Parar todo y limpiar
+docker compose down
+
+# Reconstruir desde cero
+docker compose down -v
+docker compose build --no-cache
+docker compose up -d
 ```
-
-### 4. Errores conocidos posibles
-
-| Error | Causa | Solución |
-|-------|-------|----------|
-| `TELEGRAM_TOKEN env var missing` | .env no creado | `cp .env.example .env` |
-| `No module named src` | PYTHONPATH mal | Ya en Dockerfile: `ENV PYTHONPATH=/app` |
-| `alembic: command not found` | imagen vieja | `docker compose build --no-cache` |
-| `sqlite3.OperationalError: no such table` | migración no corrió | Ver logs del entrypoint |
-| `Conflict: terminated by other getUpdates` | bot ya corriendo | Parar otro proceso del bot |
-
-## Roadmap post-lanzamiento (features 1 a 1)
-
-### Semana 1 — Estabilidad
-- [ ] Tests unitarios para `ThdoraApiClient` (mocks de httpx)
-- [ ] Tests de integración para los 3 ConversationHandlers principales
-- [ ] CI con GitHub Actions: lint + tests en cada PR
-
-### Semana 2 — UX
-- [ ] Comando `/hoy` — resumen del día (citas + hábitos) en un solo mensaje
-- [ ] Comando `/semana` — vista semanal
-- [ ] Menú principal mejorado con botones rápidos
-
-### Semana 3 — Notifications
-- [ ] Scheduler: reminder de citas X minutos antes
-- [ ] Resumen diario automático a la hora configurada
-- [ ] Evening log automático
-
-### Semana 4 — Inteligencia
-- [ ] NLP: registrar hábito en lenguaje natural (`"dormi 8 horas"`)
-- [ ] `/ia` o `/chat` — integrar OpenAI para consultas sobre tus datos
-
-## Nota para Claude / LLM siguiente sesión
-
-Leer en orden antes de tocar código:
-1. `CONTEXT.md` — arquitectura general y decisiones de diseño
-2. `CHANGELOG.md` — estado real del código y bugs ya corregidos
-3. `llms.txt` — resumen compacto para LLMs
-4. Este `PLAN_MANANA.md` — estado del lanzamiento
-
-Versón actual: **v0.17.0**  
-Branch activo: **main**  
-Próxima tarea: tests + comando `/hoy`

@@ -1,24 +1,42 @@
 #!/bin/sh
-# THDORA entrypoint — selecciona arranque según SERVICE_TARGET
-# Usado por docker-compose: SERVICE_TARGET=api | bot
+# ============================================================
+# THDORA — Entrypoint unificado
+# Selecciona el servicio a arrancar via SERVICE_TARGET env var:
+#   SERVICE_TARGET=api  → alembic upgrade head + uvicorn
+#   SERVICE_TARGET=bot  → python -m src.bot.main
+# Uso en docker-compose:
+#   environment:
+#     SERVICE_TARGET: api   # o bot
+# ============================================================
 set -e
 
-echo "🚀 Iniciando THDORA — TARGET: ${SERVICE_TARGET}"
+# Crear directorios necesarios si no existen
+mkdir -p /app/data /app/logs
 
-if [ "${SERVICE_TARGET}" = "api" ]; then
-    echo "🗃️ Ejecutando migraciones Alembic..."
+echo "[entrypoint] SERVICE_TARGET=${SERVICE_TARGET:-api}"
+
+case "${SERVICE_TARGET:-api}" in
+
+  api)
+    echo "[entrypoint] Ejecutando migraciones Alembic..."
     alembic upgrade head
-    echo "✅ Migraciones aplicadas"
-    echo "🌐 Arrancando FastAPI..."
+    echo "[entrypoint] Migraciones OK. Arrancando API (uvicorn)..."
     exec uvicorn src.api.main:app \
-        --host 0.0.0.0 \
-        --port 8000 \
-        --workers 1 \
-        --log-level info
-elif [ "${SERVICE_TARGET}" = "bot" ]; then
-    echo "🤖 Arrancando bot Telegram..."
+      --host 0.0.0.0 \
+      --port 8000 \
+      --workers 1 \
+      --log-level info \
+      --access-log
+    ;;
+
+  bot)
+    echo "[entrypoint] Arrancando Bot (Telegram PTB)..."
     exec python -m src.bot.main
-else
-    echo "❌ SERVICE_TARGET desconocido: ${SERVICE_TARGET}"
+    ;;
+
+  *)
+    echo "[entrypoint] ERROR: SERVICE_TARGET='${SERVICE_TARGET}' no reconocido."
+    echo "[entrypoint] Valores válidos: api | bot"
     exit 1
-fi
+    ;;
+esac
