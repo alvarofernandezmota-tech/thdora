@@ -2,7 +2,7 @@
 # ============================================================
 # THDORA — Entrypoint unificado
 # Selecciona el servicio a arrancar via SERVICE_TARGET env var:
-#   SERVICE_TARGET=api  → alembic upgrade head + uvicorn
+#   SERVICE_TARGET=api  → alembic stamp heads && alembic upgrade heads + uvicorn
 #   SERVICE_TARGET=bot  → python -m src.bot.main
 # Uso en docker-compose:
 #   environment:
@@ -19,7 +19,7 @@ case "${SERVICE_TARGET:-api}" in
 
   api)
     echo "[entrypoint] Ejecutando migraciones Alembic..."
-    alembic upgrade head
+    alembic stamp heads && alembic upgrade heads
     echo "[entrypoint] Migraciones OK. Arrancando API (uvicorn)..."
     exec uvicorn src.api.main:app \
       --host 0.0.0.0 \
