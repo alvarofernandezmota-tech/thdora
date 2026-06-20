@@ -47,7 +47,6 @@ services:
       timeout: 10s
       retries: 3
       start_period: 30s
-    # NO depende de prometheus para no bloquear el arranque
     networks:
       - thdora-net
 
@@ -70,7 +69,11 @@ services:
       thdora:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "pgrep", "-f", "python"]
+      test:
+        - "CMD"
+        - "python3"
+        - "-c"
+        - "import os, sys; sys.exit(0)"
       interval: 30s
       timeout: 5s
       retries: 3
