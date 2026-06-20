@@ -1,18 +1,21 @@
-# Configuración Prometheus para THDORA
-# Scraping cada 15s desde la app (endpoint /metrics)
+# Prometheus config para THDORA
+# Documentación: https://prometheus.io/docs/prometheus/latest/configuration/
 
 global:
   scrape_interval: 15s
   evaluation_interval: 15s
+  external_labels:
+    monitor: 'thdora'
 
 scrape_configs:
-  - job_name: thdora
+  # Prometheus se monitorea a sí mismo
+  - job_name: 'prometheus'
     static_configs:
-      - targets:
-          - thdora:8000
-    metrics_path: /metrics
+      - targets: ['localhost:9090']
 
-  - job_name: prometheus
+  # API FastAPI de THDORA
+  - job_name: 'thdora-api'
     static_configs:
-      - targets:
-          - localhost:9090
+      - targets: ['thdora:8000']
+    metrics_path: '/metrics'
+    scrape_interval: 30s
