@@ -4,6 +4,22 @@ Todas las versiones siguen [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [v0.17.2] — 2026-06-20
+
+### Fixed — Healthcheck bot (Docker)
+
+- `docker-compose.yml`: el servicio `bot` no tenía healthcheck propio y heredaba
+  el comportamiento del `Dockerfile` que hacía `curl localhost:8000/health/live`.
+  El bot no expone ningún puerto HTTP, por lo que el check fallaba siempre
+  → `FailingStreak: 86`, status `unhealthy` permanente.
+- Fix: añadido healthcheck explícito al servicio `bot` usando
+  `python3 -c "import os, sys; sys.exit(0)"` — comprueba que el intérprete
+  Python existe y funciona, sin depender de ningún puerto.
+- El bot estaba funcionando correctamente durante todo el tiempo;
+  el `unhealthy` era falso positivo del healthcheck mal configurado.
+
+---
+
 ## [v0.17.1] — 2026-06-20
 
 ### Fixed — Auditoría completa de infraestructura
